@@ -1,0 +1,98 @@
+import { cn } from "@/lib/utils"
+import type { EstadoProyecto, EstadoDocumento, Macroregion } from "@/lib/data"
+
+interface StatusBadgeProps {
+  estado: EstadoProyecto | EstadoDocumento | string
+  className?: string
+}
+
+export function StatusBadge({ estado, className }: StatusBadgeProps) {
+  const getStatusStyles = () => {
+    switch (estado) {
+      case "Activo":
+      case "Publicado":
+      case "Completada":
+      case "Completado":
+        return "bg-[#2E7D32]/10 text-[#2E7D32] border-[#2E7D32]/20"
+      case "En riesgo":
+      case "En revisión":
+      case "En progreso":
+        return "bg-[#F57C00]/10 text-[#F57C00] border-[#F57C00]/20"
+      case "Vencido":
+      case "Vencida":
+      case "Suspendido":
+        return "bg-[#C8102E]/10 text-[#C8102E] border-[#C8102E]/20"
+      case "Cerrado":
+      case "Inactivo":
+        return "bg-[#5C5C5C]/10 text-[#5C5C5C] border-[#5C5C5C]/20"
+      case "Borrador":
+      case "Pendiente":
+      case "Pendientes":
+        return "bg-[#0277BD]/10 text-[#0277BD] border-[#0277BD]/20"
+      default:
+        return "bg-[#5C5C5C]/10 text-[#5C5C5C] border-[#5C5C5C]/20"
+    }
+  }
+
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium",
+        getStatusStyles(),
+        className
+      )}
+    >
+      {estado}
+    </span>
+  )
+}
+
+interface MacroregionBadgeProps {
+  macroregion: Macroregion
+  className?: string
+}
+
+export function MacroregionBadge({ macroregion, className }: MacroregionBadgeProps) {
+  const getStyles = () => {
+    switch (macroregion) {
+      case "Norte":
+        return "bg-[#C8102E]/10 text-[#C8102E] border-[#C8102E]/20"
+      case "Centro":
+        return "bg-[#C9A42B]/10 text-[#C9A42B] border-[#C9A42B]/20"
+      case "Sur":
+        return "bg-[#424242]/10 text-[#424242] border-[#424242]/20"
+      default:
+        return "bg-[#5C5C5C]/10 text-[#5C5C5C] border-[#5C5C5C]/20"
+    }
+  }
+
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium",
+        getStyles(),
+        className
+      )}
+    >
+      {macroregion}
+    </span>
+  )
+}
+
+interface TypeBadgeProps {
+  tipo: string
+  className?: string
+}
+
+export function TypeBadge({ tipo, className }: TypeBadgeProps) {
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center rounded-full border border-[#E0E0E0] bg-[#F7F7F7] px-2.5 py-0.5 text-xs font-medium text-[#5C5C5C]",
+        className
+      )}
+    >
+      {tipo}
+    </span>
+  )
+}
