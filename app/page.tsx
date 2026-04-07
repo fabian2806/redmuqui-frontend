@@ -66,8 +66,10 @@ export default function DashboardPage() {
     .slice(0, 4)
 
   const [formattedDate, setFormattedDate] = useState<string>("")
+  const [mounted, setMounted] = useState(false)
 
   useEffect(() => {
+    setMounted(true)
     const today = new Date()
     setFormattedDate(
       today.toLocaleDateString("es-PE", {
@@ -78,6 +80,12 @@ export default function DashboardPage() {
       })
     )
   }, [])
+
+  // Helper function to format date safely
+  const formatDate = (dateString: string) => {
+    if (!mounted) return ""
+    return new Date(dateString).toLocaleDateString("es-PE")
+  }
 
   return (
     <AppLayout>
@@ -238,7 +246,7 @@ export default function DashboardPage() {
                     <StatusBadge estado={doc.estado} />
                   </div>
                   <p className="mt-1 text-xs text-[#5C5C5C]">
-                    {new Date(doc.fechaElaboracion).toLocaleDateString("es-PE")}
+                    {formatDate(doc.fechaElaboracion)}
                   </p>
                 </div>
               </div>
