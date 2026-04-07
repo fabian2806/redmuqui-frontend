@@ -20,6 +20,7 @@ import {
   ChevronRight
 } from "lucide-react"
 import Link from "next/link"
+import { useState, useEffect } from "react"
 import {
   BarChart,
   Bar,
@@ -64,13 +65,19 @@ export default function DashboardPage() {
     .sort((a, b) => new Date(b.fechaElaboracion).getTime() - new Date(a.fechaElaboracion).getTime())
     .slice(0, 4)
 
-  const today = new Date()
-  const formattedDate = today.toLocaleDateString("es-PE", {
-    weekday: "long",
-    year: "numeric",
-    month: "long",
-    day: "numeric"
-  })
+  const [formattedDate, setFormattedDate] = useState<string>("")
+
+  useEffect(() => {
+    const today = new Date()
+    setFormattedDate(
+      today.toLocaleDateString("es-PE", {
+        weekday: "long",
+        year: "numeric",
+        month: "long",
+        day: "numeric"
+      })
+    )
+  }, [])
 
   return (
     <AppLayout>
