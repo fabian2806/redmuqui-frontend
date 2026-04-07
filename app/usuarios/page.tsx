@@ -17,7 +17,7 @@ import {
   DropdownMenuSeparator, 
   DropdownMenuTrigger 
 } from "@/components/ui/dropdown-menu"
-import { usuarios, organizaciones } from "@/lib/data"
+import { usuarios, institucionesMiembro } from "@/lib/data"
 import { 
   Search, 
   Plus, 
@@ -217,7 +217,6 @@ export default function UsuariosPage() {
               </TableHeader>
               <TableBody>
                 {usuariosFiltrados.map((usuario) => {
-                  const organizacion = organizaciones.find(o => o.id === usuario.organizacionId)
                   return (
                     <TableRow key={usuario.id}>
                       <TableCell>
@@ -241,7 +240,7 @@ export default function UsuariosPage() {
                       <TableCell>
                         <div className="flex items-center gap-2">
                           <Building2 className="h-4 w-4 text-muted-foreground" />
-                          <span className="text-sm">{organizacion?.nombre || "-"}</span>
+                          <span className="text-sm">{usuario.institucion || "-"}</span>
                         </div>
                       </TableCell>
                       <TableCell>
