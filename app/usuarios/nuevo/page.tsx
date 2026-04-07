@@ -9,7 +9,7 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Separator } from "@/components/ui/separator"
-import { organizaciones } from "@/lib/data"
+import { institucionesMiembro } from "@/lib/data"
 import { 
   ArrowLeft, 
   Save,
@@ -34,7 +34,7 @@ export default function NuevoUsuarioPage() {
     password: "",
     confirmPassword: "",
     rol: "",
-    organizacionId: "",
+    institucion: "",
     estado: "activo",
     permisos: {
       ver_proyectos: true,
@@ -219,17 +219,17 @@ export default function NuevoUsuarioPage() {
                   <div className="space-y-2">
                     <Label htmlFor="organizacion">Organización *</Label>
                     <Select 
-                      value={formData.organizacionId} 
-                      onValueChange={(value) => setFormData({ ...formData, organizacionId: value })}
+                      value={formData.institucion} 
+                      onValueChange={(value) => setFormData({ ...formData, institucion: value })}
                     >
                       <SelectTrigger>
                         <Building2 className="mr-2 h-4 w-4 text-muted-foreground" />
                         <SelectValue placeholder="Seleccionar organización" />
                       </SelectTrigger>
                       <SelectContent>
-                        {organizaciones.map((org) => (
-                          <SelectItem key={org.id} value={org.id}>
-                            {org.nombre}
+                        {institucionesMiembro.map((institucion) => (
+                          <SelectItem key={institucion} value={institucion}>
+                            {institucion}
                           </SelectItem>
                         ))}
                       </SelectContent>
