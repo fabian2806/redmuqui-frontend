@@ -24,6 +24,7 @@ export interface Proyecto {
   estado: EstadoProyecto
   institucionesMiembro: string[]
   presupuesto?: number
+  fuentesDonantes?: { nombre: string; contratoUrl: string }[]
 }
 
 export interface Actividad {
@@ -35,6 +36,16 @@ export interface Actividad {
   fechaFin: string
   estado: "Completada" | "En progreso" | "Pendiente" | "Vencida"
   avance: number
+  subactividades?: {
+    id: string
+    nombre: string
+    responsable: string
+    presupuesto?: number
+    hombresInvolucrados?: number
+    mujeresInvolucradas?: number
+    archivosEvidencia?: { id: string; nombre: string; url: string }[]
+    cofinanciadoPor?: { actividadId: string; monto: number }[]
+  }[]
 }
 
 export interface Hito {
@@ -141,7 +152,11 @@ export const proyectos: Proyecto[] = [
     avance: 45,
     estado: "Activo",
     institucionesMiembro: ["Fedepaz", "APRODEH"],
-    presupuesto: 62000
+    presupuesto: 62000,
+    fuentesDonantes: [
+      { nombre: "Unión Europea", contratoUrl: "#" },
+      { nombre: "Oxfam", contratoUrl: "#" }
+    ]
   },
   {
     id: "3",
@@ -255,10 +270,15 @@ export const proyectos: Proyecto[] = [
 
 // Actividades mock
 export const actividades: Actividad[] = [
-  { id: "1", proyectoId: "1", nombre: "Capacitación en monitoreo de agua", responsable: "Ana Huanca", fechaInicio: "2024-02-01", fechaFin: "2024-03-15", estado: "Completada", avance: 100 },
+  { id: "1", proyectoId: "1", nombre: "Capacitación en monitoreo de agua", responsable: "Ana Huanca", fechaInicio: "2024-02-01", fechaFin: "2024-03-15", estado: "Completada", avance: 100, subactividades: [
+    { id: "sub1", nombre: "Taller introductorio Cajamarca", responsable: "Pedro Mendoza", presupuesto: 1500, hombresInvolucrados: 15, mujeresInvolucradas: 20, archivosEvidencia: [{ id: "f1", nombre: "lista_asistencia_caja.pdf", url: "#" }] },
+    { id: "sub2", nombre: "Taller práctico Celendín", responsable: "Ana Huanca", presupuesto: 3500, cofinanciadoPor: [{ actividadId: "6", monto: 2500 }] }
+  ] },
   { id: "2", proyectoId: "1", nombre: "Toma de muestras - primera fase", responsable: "Pedro Mendoza", fechaInicio: "2024-03-20", fechaFin: "2024-05-30", estado: "Completada", avance: 100 },
   { id: "3", proyectoId: "1", nombre: "Análisis de laboratorio", responsable: "Carlos Quispe", fechaInicio: "2024-06-01", fechaFin: "2024-07-31", estado: "Completada", avance: 100 },
-  { id: "4", proyectoId: "1", nombre: "Elaboración de informe técnico", responsable: "María Torres", fechaInicio: "2024-08-01", fechaFin: "2024-09-30", estado: "En progreso", avance: 65 },
+  { id: "4", proyectoId: "1", nombre: "Elaboración de informe técnico", responsable: "María Torres", fechaInicio: "2024-08-01", fechaFin: "2024-09-30", estado: "En progreso", avance: 65, subactividades: [
+    { id: "sub3", nombre: "Recolección de datos secundarios", responsable: "María Torres", hombresInvolucrados: 2, mujeresInvolucradas: 3 }
+  ]},
   { id: "5", proyectoId: "1", nombre: "Socialización con comunidades", responsable: "Ana Huanca", fechaInicio: "2024-10-01", fechaFin: "2024-11-15", estado: "Pendiente", avance: 0 },
   { id: "6", proyectoId: "3", nombre: "Mapeo de actores", responsable: "José Mamani", fechaInicio: "2024-02-15", fechaFin: "2024-03-31", estado: "Completada", avance: 100 },
   { id: "7", proyectoId: "3", nombre: "Talleres informativos", responsable: "Rosa Quispe", fechaInicio: "2024-04-01", fechaFin: "2024-04-20", estado: "Vencida", avance: 80 },

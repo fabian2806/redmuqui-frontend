@@ -100,44 +100,6 @@ export default function ConfiguracionPage() {
                 </div>
               </CardContent>
             </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Palette className="h-5 w-5 text-primary" />
-                  Apariencia
-                </CardTitle>
-                <CardDescription>
-                  Personaliza la apariencia de la plataforma
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <div className="space-y-0.5">
-                    <Label>Modo Oscuro</Label>
-                    <p className="text-sm text-muted-foreground">
-                      Activa el tema oscuro para reducir la fatiga visual
-                    </p>
-                  </div>
-                  <Switch
-                    checked={modoOscuro}
-                    onCheckedChange={setModoOscuro}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Color Principal</Label>
-                  <div className="flex gap-3">
-                    {["#FFD600", "#C8102E", "#2E7D32", "#1565C0", "#6A1B9A"].map((color) => (
-                      <button
-                        key={color}
-                        className="h-8 w-8 rounded-full border-2 border-transparent ring-offset-2 hover:ring-2 hover:ring-primary"
-                        style={{ backgroundColor: color }}
-                      />
-                    ))}
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
           </TabsContent>
 
           {/* Notificaciones */}

@@ -148,7 +148,7 @@ export default function DashboardPage() {
               <thead>
                 <tr className="border-b border-[#E0E0E0] bg-[#FAFAFA]">
                   <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-[#5C5C5C]">
-                    Proyecto
+                    Partida
                   </th>
                   <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-[#5C5C5C]">
                     Macroregión
@@ -158,6 +158,9 @@ export default function DashboardPage() {
                   </th>
                   <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-[#5C5C5C]">
                     Días restantes
+                  </th>
+                  <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-[#5C5C5C]">
+                    Avance
                   </th>
                   <th className="px-5 py-3 text-right text-xs font-semibold uppercase tracking-wide text-[#5C5C5C]">
                     Acción
@@ -195,7 +198,13 @@ export default function DashboardPage() {
                         }`}
                       >
                         {proyecto.diasRestantes} días
+                      </span><br/>
+                      <span className="text-[10px] text-[#5C5C5C]">
+                        Vence: {formatDate(proyecto.fechaFin)}
                       </span>
+                    </td>
+                    <td className="px-5 py-3 w-32">
+                      <ProgressBar value={proyecto.avance} size="sm" />
                     </td>
                     <td className="px-5 py-3 text-right">
                       <Link

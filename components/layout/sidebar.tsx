@@ -21,7 +21,6 @@ const navItems = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
   { href: "/proyectos", label: "Proyectos", icon: FolderKanban },
   { href: "/informes", label: "Informes y Productos", icon: FileText },
-  { href: "/trazabilidad", label: "Trazabilidad", icon: Search },
   { href: "/reportes", label: "Reportes", icon: BarChart3 },
   { href: "/usuarios", label: "Usuarios y Permisos", icon: Users },
   { href: "/configuracion", label: "Configuración", icon: Settings },

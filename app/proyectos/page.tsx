@@ -116,7 +116,7 @@ export default function ProyectosPage() {
               }}
               className="h-10 rounded-lg border border-[#E0E0E0] bg-white px-3 text-sm text-[#1A1A1A] focus:border-[#FFD600] focus:outline-none focus:ring-1 focus:ring-[#FFD600]"
             >
-              <option value="">Macroregión</option>
+              <option value="">TODAS</option>
               {macroregiones.map(m => (
                 <option key={m} value={m}>{m}</option>
               ))}
@@ -131,7 +131,7 @@ export default function ProyectosPage() {
               }}
               className="h-10 rounded-lg border border-[#E0E0E0] bg-white px-3 text-sm text-[#1A1A1A] focus:border-[#FFD600] focus:outline-none focus:ring-1 focus:ring-[#FFD600]"
             >
-              <option value="">Eje Temático</option>
+              <option value="">TODAS</option>
               {ejesTematicos.map(e => (
                 <option key={e} value={e}>{e}</option>
               ))}

@@ -197,6 +197,10 @@ export default function ReportesPage() {
               <MapPin className="mr-2 h-4 w-4" />
               Geográfico
             </TabsTrigger>
+            <TabsTrigger value="actividad">
+              <Clock className="mr-2 h-4 w-4" />
+              Actividad Reciente
+            </TabsTrigger>
           </TabsList>
 
           {/* Tab General */}
@@ -278,7 +282,9 @@ export default function ReportesPage() {
                 </CardContent>
               </Card>
             </div>
+          </TabsContent>
 
+          <TabsContent value="actividad" className="space-y-4">
             {/* Actividad reciente */}
             <Card>
               <CardHeader>
@@ -293,7 +299,7 @@ export default function ReportesPage() {
                         entrada.tipo === "proyecto" ? "bg-green-100 text-green-600" :
                         entrada.tipo === "informe" ? "bg-blue-100 text-blue-600" :
                         entrada.tipo === "actividad" ? "bg-purple-100 text-purple-600" :
-                        "bg-gray-100 text-gray-600"
+                         "bg-gray-100 text-gray-600"
                       }`}>
                         {entrada.tipo === "proyecto" && <CheckCircle2 className="h-4 w-4" />}
                         {entrada.tipo === "informe" && <FileText className="h-4 w-4" />}
