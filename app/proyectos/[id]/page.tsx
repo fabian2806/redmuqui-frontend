@@ -29,7 +29,9 @@ import {
   Clock,
   CheckCircle2,
   Circle,
-  XCircle
+  XCircle,
+  Trash2,
+  UserPlus
 } from "lucide-react"
 import Link from "next/link"
 import { notFound } from "next/navigation"
@@ -44,9 +46,23 @@ type TabType = "resumen" | "actividades" | "hitos" | "informes" | "equipo" | "bi
 
 export default function ProyectoDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params)
-  const [activeTab, setActiveTab] = useState<TabType>("resumen")
-  
   const proyecto = getProyectoById(id)
+  const [activeTab, setActiveTab] = useState<TabType>("resumen")
+  const [equipo, setEquipo] = useState<{ nombre: string; rol: string }[]>(
+    () => (proyecto?.equipo ?? []).map(nombre => ({ nombre, rol: "Equipo T\u00e9cnico" }))
+  )
+  const [nuevoMiembroNombre, setNuevoMiembroNombre] = useState("")
+  const [nuevoMiembroRol, setNuevoMiembroRol] = useState("Equipo T\u00e9cnico")
+  const [addMemberOpen, setAddMemberOpen] = useState(false)
+
+  // State for hitos
+  const hitosData = getHitosByProyecto(id)
+  const [hitosState, setHitosState] = useState(
+    () => hitosData.map(h => ({ ...h }))
+  )
+  const [addHitoOpen, setAddHitoOpen] = useState(false)
+  const [editHito, setEditHito] = useState<typeof hitosState[0] | null>(null)
+  const [hitoForm, setHitoForm] = useState({ nombre: "", fecha: "", estado: "Pendiente" as "Completado" | "Pendiente" | "Vencido" })
   
   if (!proyecto) {
     notFound()
@@ -72,7 +88,7 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
     }
   });
 
-  const hitos = getHitosByProyecto(id)
+  const hitos = hitosData
   const documentos = getDocumentosByProyecto(id)
   const bitacora = getBitacoraByEntidad(id)
 
@@ -620,15 +636,93 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
               {/* Hitos Tab */}
               {activeTab === "hitos" && (
                 <div className="p-6">
-                  <h3 className="text-sm font-bold uppercase tracking-wide text-[#5C5C5C] mb-6">
-                    Cronograma e Hitos
-                  </h3>
-                  {hitos.length > 0 ? (
+                  <div className="flex items-center justify-between mb-6">
+                    <h3 className="text-sm font-bold uppercase tracking-wide text-[#5C5C5C]">
+                      Cronograma e Hitos
+                    </h3>
+                    <button
+                      onClick={() => {
+                        setHitoForm({ nombre: "", fecha: "", estado: "Pendiente" })
+                        setEditHito(null)
+                        setAddHitoOpen(true)
+                      }}
+                      className="flex items-center gap-2 rounded-lg bg-[#FFD600] px-3 py-1.5 text-xs font-bold text-[#1A1A1A] hover:bg-[#C9A42B] transition-colors"
+                    >
+                      <Plus className="h-3.5 w-3.5" />
+                      Agregar hito
+                    </button>
+                  </div>
+
+                  {/* Dialog agregar / editar hito */}
+                  <Dialog open={addHitoOpen} onOpenChange={setAddHitoOpen}>
+                    <DialogContent className="sm:max-w-sm">
+                      <DialogHeader>
+                        <DialogTitle>{editHito ? "Editar Hito" : "Nuevo Hito"}</DialogTitle>
+                        <DialogDescription>
+                          {editHito ? "Modifica los datos del hito seleccionado." : "Registra un nuevo hito para el cronograma."}
+                        </DialogDescription>
+                      </DialogHeader>
+                      <div className="grid gap-4 py-4">
+                        <div className="grid gap-2">
+                          <Label htmlFor="hito-nombre">Nombre del hito</Label>
+                          <Input
+                            id="hito-nombre"
+                            placeholder="Ej. Entrega de informe final"
+                            value={hitoForm.nombre}
+                            onChange={e => setHitoForm(f => ({ ...f, nombre: e.target.value }))}
+                          />
+                        </div>
+                        <div className="grid gap-2">
+                          <Label htmlFor="hito-fecha">Fecha</Label>
+                          <Input
+                            id="hito-fecha"
+                            type="date"
+                            value={hitoForm.fecha}
+                            onChange={e => setHitoForm(f => ({ ...f, fecha: e.target.value }))}
+                          />
+                        </div>
+                        <div className="grid gap-2">
+                          <Label htmlFor="hito-estado">Estado</Label>
+                          <Select
+                            value={hitoForm.estado}
+                            onValueChange={v => setHitoForm(f => ({ ...f, estado: v as "Completado" | "Pendiente" | "Vencido" }))}
+                          >
+                            <SelectTrigger id="hito-estado"><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="Pendiente">Pendiente</SelectItem>
+                              <SelectItem value="Completado">Completado</SelectItem>
+                              <SelectItem value="Vencido">Vencido</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+                      <DialogFooter>
+                        <Button variant="outline" onClick={() => setAddHitoOpen(false)}>Cancelar</Button>
+                        <Button
+                          className="bg-[#FFD600] text-[#1A1A1A] hover:bg-[#C9A42B]"
+                          onClick={() => {
+                            if (!hitoForm.nombre.trim() || !hitoForm.fecha) return
+                            if (editHito) {
+                              setHitosState(prev => prev.map(h => h.id === editHito.id ? { ...h, ...hitoForm } : h))
+                            } else {
+                              const newId = `hito-${Date.now()}`
+                              setHitosState(prev => [...prev, { id: newId, proyectoId: id, ...hitoForm }])
+                            }
+                            setAddHitoOpen(false)
+                          }}
+                        >
+                          {editHito ? "Guardar cambios" : "Crear hito"}
+                        </Button>
+                      </DialogFooter>
+                    </DialogContent>
+                  </Dialog>
+
+                  {hitosState.length > 0 ? (
                     <div className="relative">
                       <div className="absolute left-4 top-0 bottom-0 w-0.5 bg-[#E0E0E0]" />
                       <div className="space-y-6">
-                        {hitos.map((hito, index) => (
-                          <div key={hito.id} className="relative flex gap-4 pl-10">
+                        {hitosState.map((hito) => (
+                          <div key={hito.id} className="relative flex gap-4 pl-10 group">
                             <div className={`absolute left-2 top-1 flex h-5 w-5 items-center justify-center rounded-full ${
                               hito.estado === "Completado" ? "bg-[#2E7D32]" :
                               hito.estado === "Vencido" ? "bg-[#C8102E]" : "bg-[#E0E0E0]"
@@ -641,9 +735,9 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                                 <Circle className="h-3 w-3 text-[#5C5C5C]" />
                               )}
                             </div>
-                            <div className="flex-1 rounded-lg border border-[#E0E0E0] p-4">
-                              <div className="flex items-start justify-between">
-                                <div>
+                            <div className="flex-1 rounded-lg border border-[#E0E0E0] p-4 hover:border-[#FFD600] transition-colors">
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="flex-1 min-w-0">
                                   <p className="text-sm font-medium text-[#1A1A1A]">{hito.nombre}</p>
                                   <p className="text-xs text-[#5C5C5C] mt-1">
                                     {new Date(hito.fecha).toLocaleDateString("es-PE", {
@@ -653,7 +747,27 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                                     })}
                                   </p>
                                 </div>
-                                <StatusBadge estado={hito.estado} />
+                                <div className="flex items-center gap-2 shrink-0">
+                                  <StatusBadge estado={hito.estado} />
+                                  <button
+                                    onClick={() => {
+                                      setEditHito(hito)
+                                      setHitoForm({ nombre: hito.nombre, fecha: hito.fecha, estado: hito.estado })
+                                      setAddHitoOpen(true)
+                                    }}
+                                    className="opacity-0 group-hover:opacity-100 transition-opacity flex h-7 w-7 items-center justify-center rounded-full text-[#5C5C5C] hover:bg-[#F7F7F7]"
+                                    title="Editar hito"
+                                  >
+                                    <Pencil className="h-3.5 w-3.5" />
+                                  </button>
+                                  <button
+                                    onClick={() => setHitosState(prev => prev.filter(h => h.id !== hito.id))}
+                                    className="opacity-0 group-hover:opacity-100 transition-opacity flex h-7 w-7 items-center justify-center rounded-full text-[#C8102E] hover:bg-[#C8102E]/10"
+                                    title="Eliminar hito"
+                                  >
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                  </button>
+                                </div>
                               </div>
                             </div>
                           </div>
@@ -714,9 +828,68 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
               {/* Equipo Tab */}
               {activeTab === "equipo" && (
                 <div className="p-6">
-                  <h3 className="text-sm font-bold uppercase tracking-wide text-[#5C5C5C] mb-4">
-                    Equipo del Proyecto
-                  </h3>
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-sm font-bold uppercase tracking-wide text-[#5C5C5C]">
+                      Equipo del Proyecto
+                    </h3>
+                    <Dialog open={addMemberOpen} onOpenChange={setAddMemberOpen}>
+                      <DialogTrigger asChild>
+                        <button className="flex items-center gap-2 rounded-lg bg-[#FFD600] px-3 py-1.5 text-xs font-bold text-[#1A1A1A] hover:bg-[#C9A42B] transition-colors">
+                          <UserPlus className="h-3.5 w-3.5" />
+                          Agregar miembro
+                        </button>
+                      </DialogTrigger>
+                      <DialogContent className="sm:max-w-sm">
+                        <DialogHeader>
+                          <DialogTitle>Agregar Miembro</DialogTitle>
+                          <DialogDescription>Añade un nuevo integrante al equipo del proyecto.</DialogDescription>
+                        </DialogHeader>
+                        <div className="grid gap-4 py-4">
+                          <div className="grid gap-2">
+                            <Label htmlFor="miembro-nombre">Nombre completo</Label>
+                            <Input
+                              id="miembro-nombre"
+                              placeholder="Ej. Juan Pérez"
+                              value={nuevoMiembroNombre}
+                              onChange={e => setNuevoMiembroNombre(e.target.value)}
+                            />
+                          </div>
+                          <div className="grid gap-2">
+                            <Label htmlFor="miembro-rol">Rol en el proyecto</Label>
+                            <Select value={nuevoMiembroRol} onValueChange={setNuevoMiembroRol}>
+                              <SelectTrigger id="miembro-rol">
+                                <SelectValue placeholder="Seleccione un rol" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="Equipo Técnico">Equipo Técnico</SelectItem>
+                                <SelectItem value="Coordinador">Coordinador</SelectItem>
+                                <SelectItem value="Asesor">Asesor</SelectItem>
+                                <SelectItem value="Observador">Observador</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        </div>
+                        <DialogFooter>
+                          <DialogClose asChild>
+                            <Button variant="outline">Cancelar</Button>
+                          </DialogClose>
+                          <Button
+                            className="bg-[#FFD600] text-[#1A1A1A] hover:bg-[#C9A42B]"
+                            onClick={() => {
+                              if (nuevoMiembroNombre.trim()) {
+                                setEquipo(prev => [...prev, { nombre: nuevoMiembroNombre.trim(), rol: nuevoMiembroRol }])
+                                setNuevoMiembroNombre("")
+                                setNuevoMiembroRol("Equipo Técnico")
+                                setAddMemberOpen(false)
+                              }
+                            }}
+                          >
+                            Agregar
+                          </Button>
+                        </DialogFooter>
+                      </DialogContent>
+                    </Dialog>
+                  </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                     {/* Responsable principal */}
                     <div className="rounded-lg border-2 border-[#FFD600] bg-[#FFFDE7] p-4">
@@ -730,21 +903,31 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                         </div>
                       </div>
                     </div>
-                    {/* Equipo */}
-                    {proyecto.equipo.map(miembro => (
-                      <div key={miembro} className="rounded-lg border border-[#E0E0E0] p-4">
+                    {/* Equipo dinámico */}
+                    {equipo.map((miembro, idx) => (
+                      <div key={idx} className="group relative rounded-lg border border-[#E0E0E0] p-4 hover:border-[#FFD600] transition-colors">
                         <div className="flex items-center gap-3">
                           <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#F7F7F7]">
                             <User className="h-5 w-5 text-[#5C5C5C]" />
                           </div>
-                          <div>
-                            <p className="text-sm font-medium text-[#1A1A1A]">{miembro}</p>
-                            <p className="text-xs text-[#5C5C5C]">Equipo Técnico</p>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium text-[#1A1A1A] truncate">{miembro.nombre}</p>
+                            <p className="text-xs text-[#5C5C5C]">{miembro.rol}</p>
                           </div>
+                          <button
+                            onClick={() => setEquipo(prev => prev.filter((_, i) => i !== idx))}
+                            className="opacity-0 group-hover:opacity-100 transition-opacity flex h-7 w-7 items-center justify-center rounded-full text-[#C8102E] hover:bg-[#C8102E]/10"
+                            title="Eliminar miembro"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
                         </div>
                       </div>
                     ))}
                   </div>
+                  {equipo.length === 0 && (
+                    <p className="mt-4 text-center text-sm text-[#5C5C5C]">No hay miembros en el equipo. Agrega uno.</p>
+                  )}
                 </div>
               )}
 

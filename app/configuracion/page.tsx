@@ -221,33 +221,6 @@ export default function ConfiguracionPage() {
 
             <Card>
               <CardHeader>
-                <CardTitle>Autenticación de Dos Factores</CardTitle>
-                <CardDescription>
-                  Añade una capa extra de seguridad a tu cuenta
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <div className="space-y-0.5">
-                    <Label>Autenticación 2FA</Label>
-                    <p className="text-sm text-muted-foreground">
-                      Requiere un código adicional al iniciar sesión
-                    </p>
-                  </div>
-                  <Switch />
-                </div>
-                <div className="rounded-lg border border-yellow-200 bg-yellow-50 p-4">
-                  <p className="text-sm text-yellow-800">
-                    La autenticación de dos factores añade una capa adicional de seguridad. 
-                    Una vez activada, necesitarás tu contraseña y un código de verificación 
-                    para acceder a tu cuenta.
-                  </p>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
                 <CardTitle>Sesiones Activas</CardTitle>
                 <CardDescription>
                   Gestiona los dispositivos donde has iniciado sesión
@@ -279,43 +252,8 @@ export default function ConfiguracionPage() {
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
                   <Database className="h-5 w-5 text-primary" />
-                  Respaldo de Datos
+                  Información del Sistema
                 </CardTitle>
-                <CardDescription>
-                  Configura las opciones de respaldo del sistema
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <div className="space-y-0.5">
-                    <Label>Respaldo Automático</Label>
-                    <p className="text-sm text-muted-foreground">
-                      Realizar respaldo automático cada 24 horas
-                    </p>
-                  </div>
-                  <Switch
-                    checked={backupAutomatico}
-                    onCheckedChange={setBackupAutomatico}
-                  />
-                </div>
-                <div className="rounded-lg bg-muted p-4">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="font-medium">Último Respaldo</p>
-                      <p className="text-sm text-muted-foreground">6 de abril de 2026, 03:00 AM</p>
-                    </div>
-                    <Button variant="outline" size="sm">
-                      <RefreshCw className="mr-2 h-4 w-4" />
-                      Respaldar Ahora
-                    </Button>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle>Información del Sistema</CardTitle>
                 <CardDescription>
                   Detalles técnicos de la plataforma
                 </CardDescription>
@@ -342,28 +280,6 @@ export default function ConfiguracionPage() {
                     <span className="text-muted-foreground">Última Actualización</span>
                     <span className="font-medium">1 de abril de 2026</span>
                   </div>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="border-red-200">
-              <CardHeader>
-                <CardTitle className="text-red-600">Zona de Peligro</CardTitle>
-                <CardDescription>
-                  Acciones irreversibles del sistema
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="flex items-center justify-between rounded-lg border border-red-200 bg-red-50 p-4">
-                  <div>
-                    <p className="font-medium text-red-700">Eliminar todos los datos</p>
-                    <p className="text-sm text-red-600">
-                      Esta acción eliminará permanentemente todos los datos del sistema
-                    </p>
-                  </div>
-                  <Button variant="destructive" size="sm">
-                    Eliminar Todo
-                  </Button>
                 </div>
               </CardContent>
             </Card>
