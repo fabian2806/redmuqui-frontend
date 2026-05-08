@@ -1,0 +1,115 @@
+// =====================================================================
+// Cliente HTTP para hablar con el backend Spring Boot.
+//
+// - Toma la URL base de NEXT_PUBLIC_API_URL (default localhost:8080).
+// - Inyecta el access token en cada request si existe.
+// - Si el backend responde 401, intenta refrescar el token UNA vez y
+//   reintenta el request. Si el refresh falla, redirige a /login.
+// - Lanza ApiError con la shape de ErrorResponse del backend.
+// =====================================================================
+
+import type { ErrorResponse } from "./types"
+
+export const API_BASE_URL =
+  process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080/api/v1"
+
+export class ApiError extends Error {
+  constructor(
+    public status: number,
+    public body: ErrorResponse | null,
+    message: string,
+  ) {
+    super(message)
+    this.name = "ApiError"
+  }
+}
+
+interface RequestOptions {
+  method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE"
+  body?: unknown
+  headers?: Record<string, string>
+  // Si es true, no agrega Authorization (útil para /auth/login).
+  skipAuth?: boolean
+}
+
+async function rawFetch<T>(
+  path: string,
+  options: RequestOptions,
+  accessToken: string | null,
+): Promise<T> {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...options.headers,
+  }
+  if (!options.skipAuth && accessToken) {
+    headers.Authorization = `Bearer ${accessToken}`
+  }
+
+  const res = await fetch(`${API_BASE_URL}${path}`, {
+    method: options.method ?? "GET",
+    headers,
+    body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
+  })
+
+  if (res.status === 204) return undefined as T
+
+  const text = await res.text()
+  const parsed = text ? safeParse(text) : null
+
+  if (!res.ok) {
+    const errBody = parsed as ErrorResponse | null
+    throw new ApiError(
+      res.status,
+      errBody,
+      errBody?.message ?? `HTTP ${res.status}`,
+    )
+  }
+
+  return parsed as T
+}
+
+function safeParse(text: string): unknown {
+  try {
+    return JSON.parse(text)
+  } catch {
+    return null
+  }
+}
+
+async function apiFetch<T>(path: string, options: RequestOptions = {}): Promise<T> {
+  // Lazy-import para evitar ciclos: api.ts -> auth.ts -> api.ts
+  const { getAccessToken, refreshAccessToken, clearTokens } = await import("./auth")
+
+  const accessToken = getAccessToken()
+
+  try {
+    return await rawFetch<T>(path, options, accessToken)
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 401 && !options.skipAuth) {
+      // Intentar refresh UNA vez
+      const newToken = await refreshAccessToken()
+      if (newToken) {
+        return await rawFetch<T>(path, options, newToken)
+      }
+      // Refresh falló: limpiar y redirigir
+      clearTokens()
+      if (typeof window !== "undefined") {
+        window.location.href = "/login"
+      }
+    }
+    throw err
+  }
+}
+
+export const api = {
+  get: <T>(path: string, opts: Omit<RequestOptions, "method" | "body"> = {}) =>
+    apiFetch<T>(path, { ...opts, method: "GET" }),
+  post: <T>(path: string, body?: unknown, opts: Omit<RequestOptions, "method" | "body"> = {}) =>
+    apiFetch<T>(path, { ...opts, method: "POST", body }),
+  put: <T>(path: string, body?: unknown, opts: Omit<RequestOptions, "method" | "body"> = {}) =>
+    apiFetch<T>(path, { ...opts, method: "PUT", body }),
+  patch: <T>(path: string, body?: unknown, opts: Omit<RequestOptions, "method" | "body"> = {}) =>
+    apiFetch<T>(path, { ...opts, method: "PATCH", body }),
+  delete: <T>(path: string, opts: Omit<RequestOptions, "method" | "body"> = {}) =>
+    apiFetch<T>(path, { ...opts, method: "DELETE" }),
+}
