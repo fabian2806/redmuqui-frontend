@@ -1,0 +1,146 @@
+// =====================================================================
+// AuthContext: estado global de autenticación.
+//
+// El AuthProvider envuelve toda la app en app/layout.tsx, así cualquier
+// componente puede leer y modificar el usuario actual con useAuth() y
+// los cambios se propagan a todos los demás (header, sidebar, páginas).
+//
+// Modos:
+//   - "mock"  (default Sprint 1): admin hardcodeado. login() no toca
+//             el backend. Permite a los squads avanzar sin esperar a
+//             que squad Auth termine la Fase A.
+//   - "real": login real contra el backend + carga de /usuarios/me.
+//             Activar con NEXT_PUBLIC_AUTH_MODE=real en .env.local.
+// =====================================================================
+
+"use client"
+
+import {
+  createContext,
+  useCallback,
+  useEffect,
+  useState,
+  type ReactNode,
+} from "react"
+import { api, ApiError } from "@/lib/api"
+import {
+  login as authLogin,
+  logout as authLogout,
+  isAuthenticated as hasToken,
+} from "@/lib/auth"
+import type { LoginRequest, UsuarioResponse } from "@/lib/types"
+
+const AUTH_MODE = (process.env.NEXT_PUBLIC_AUTH_MODE ?? "mock") as "mock" | "real"
+
+const MOCK_ADMIN: UsuarioResponse = {
+  id: 1,
+  nombres: "Administrador",
+  apellidos: "Sistema",
+  email: "admin@redmuqui.org",
+  estado: true,
+  nombreRol: "ADMINISTRADOR",
+  idRol: 1,
+  nombreMacroregion: null,
+  idMacroregion: null,
+  nombreInstitucion: null,
+  idInstitucion: null,
+  ultimoAcceso: null,
+  permisos: ["*"], // wildcard: admin tiene todos
+}
+
+export interface AuthContextValue {
+  user: UsuarioResponse | null
+  isAuthenticated: boolean
+  loading: boolean
+  login: (credentials: LoginRequest) => Promise<void>
+  logout: () => Promise<void>
+  hasPermission: (permiso: string) => boolean
+}
+
+export const AuthContext = createContext<AuthContextValue | null>(null)
+
+export function AuthProvider({ children }: { children: ReactNode }) {
+  const [user, setUser] = useState<UsuarioResponse | null>(
+    AUTH_MODE === "mock" ? MOCK_ADMIN : null,
+  )
+  const [loading, setLoading] = useState<boolean>(AUTH_MODE === "real")
+
+  // Modo "real": al montar, si hay token persistido, cargar /usuarios/me.
+  useEffect(() => {
+    if (AUTH_MODE !== "real"){
+      console.log("🧪 [Modo Mock]: setUser a MOCK_ADMIN")
+      return
+    } 
+    if (!hasToken()) {
+      setLoading(false)
+      return
+    }
+    let cancelled = false
+    api
+      .get<UsuarioResponse>("/usuarios/me")
+      .then((data) => {
+        if (!cancelled) setUser(data)
+      })
+      .catch(() => {
+        if (!cancelled) setUser(null)
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const login = useCallback(async (credentials: LoginRequest) => {
+    if (AUTH_MODE === "mock") {
+      console.log("🧪 [Modo Mock]: setUser a MOCK_ADMIN")
+      setUser(MOCK_ADMIN)
+      return
+    }
+    await authLogin(credentials)
+    try {
+      const me = await api.get<UsuarioResponse>("/usuarios/me")
+      setUser(me)
+    } catch (err) {
+      if (err instanceof ApiError) {
+        // /usuarios/me todavía no implementado: dejar user mínimo.
+        setUser({ ...MOCK_ADMIN, email: credentials.email })
+      } else {
+        throw err
+      }
+    }
+  }, [])
+
+  const logout = useCallback(async () => {
+    if (AUTH_MODE === "mock") {
+      console.log("🧪 [Modo Mock]: setUser a NULL")
+      setUser(null)
+      return
+    }
+    await authLogout()
+    setUser(null)
+  }, [])
+
+  const hasPermission = useCallback(
+    (permiso: string) => {
+      if (!user) return false
+      if (!user.permisos || user.permisos.length === 0) return false
+      if (user.permisos.includes("*")) return true
+      return user.permisos.includes(permiso)
+    },
+    [user],
+  )
+
+  const value: AuthContextValue = {
+    user,
+    isAuthenticated:
+      AUTH_MODE === "mock" ? user !== null : hasToken() && user !== null,
+    loading,
+    login,
+    logout,
+    hasPermission,
+  }
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
+}
