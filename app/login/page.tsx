@@ -1,30 +1,36 @@
 "use client"
 
 import { useState } from "react"
-import { Eye, EyeOff, LogIn, Shield, ChevronDown } from "lucide-react"
+import { useRouter, useSearchParams } from "next/navigation"
+import { AlertCircle, Eye, EyeOff, LogIn, Shield } from "lucide-react"
 import Link from "next/link"
-
-const ROLES = [
-  "Secretaría Ejecutiva",
-  "Coordinación Macroregional",
-  "Equipo Técnico",
-  "Institución Miembro",
-  "Solo lectura",
-]
+import { useAuth } from "@/hooks/useAuth"
 
 export default function LoginPage() {
+  const router = useRouter()
+  const searchParams = useSearchParams()
+  const { login } = useAuth()
+
   const [showPassword, setShowPassword] = useState(false)
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
-  const [role, setRole] = useState("")
   const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
+    setError(null)
     setLoading(true)
-    setTimeout(() => {
-      window.location.href = "/"
-    }, 1200)
+    try {
+      await login({ email, contrasenha: password })
+      const from = searchParams.get("from")
+      router.push(from && from.startsWith("/") ? from : "/")
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "No pudimos iniciar sesión"
+      setError(msg)
+    } finally {
+      setLoading(false)
+    }
   }
 
   return (
@@ -168,28 +174,6 @@ export default function LoginPage() {
               </div>
             </div>
 
-            {/* Role selector */}
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium text-[#1A1A1A]" htmlFor="role">
-                Perfil de acceso
-              </label>
-              <div className="relative">
-                <select
-                  id="role"
-                  required
-                  value={role}
-                  onChange={(e) => setRole(e.target.value)}
-                  className="w-full appearance-none rounded-xl border border-[#E0E0E0] bg-white px-4 py-3 pr-10 text-sm text-[#1A1A1A] outline-none transition-all focus:border-[#FFD600] focus:ring-2 focus:ring-[#FFD600]/20"
-                >
-                  <option value="" disabled>Selecciona tu perfil</option>
-                  {ROLES.map((r) => (
-                    <option key={r} value={r}>{r}</option>
-                  ))}
-                </select>
-                <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#ADADAD]" />
-              </div>
-            </div>
-
             {/* Remember + forgot */}
             <div className="flex items-center justify-between">
               <label className="flex items-center gap-2 cursor-pointer select-none">
@@ -199,14 +183,30 @@ export default function LoginPage() {
                 />
                 <span className="text-sm text-[#5C5C5C]">Recordarme</span>
               </label>
-              <button
-                type="button"
-                className="text-sm font-medium transition-colors"
+              <Link
+                href="/recuperar"
+                className="text-sm font-medium transition-colors hover:underline"
                 style={{ color: "#C9A42B" }}
               >
                 ¿Olvidaste tu contraseña?
-              </button>
+              </Link>
             </div>
+
+            {/* Error banner */}
+            {error && (
+              <div
+                role="alert"
+                className="flex items-start gap-2 rounded-xl border px-4 py-3 text-sm font-medium"
+                style={{
+                  background: "#C8102E" + "0D",
+                  borderColor: "#C8102E" + "33",
+                  color: "#C8102E",
+                }}
+              >
+                <AlertCircle className="h-4 w-4 flex-shrink-0 mt-0.5" />
+                <span>{error}</span>
+              </div>
+            )}
 
             {/* Submit */}
             <button
