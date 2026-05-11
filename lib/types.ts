@@ -28,6 +28,7 @@ export interface UsuarioResponse {
   nombres: string
   apellidos: string
   email: string
+  telefono: string | null
   estado: boolean
   nombreRol: string
   idRol: number
@@ -46,6 +47,7 @@ export interface UsuarioCreate {
   nombres: string
   apellidos: string
   email: string
+  telefono?: string | null
   contrasenha: string
   idRol: number
   idMacroregion?: number | null
@@ -56,6 +58,7 @@ export interface UsuarioUpdate {
   nombres: string
   apellidos: string
   email: string
+  telefono?: string | null
   idRol: number
   idMacroregion?: number | null
   idInstitucion?: number | null

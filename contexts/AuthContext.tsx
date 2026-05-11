@@ -37,6 +37,7 @@ const MOCK_ADMIN: UsuarioResponse = {
   nombres: "Administrador",
   apellidos: "Sistema",
   email: "admin@redmuqui.org",
+  telefono: null,
   estado: true,
   nombreRol: "ADMINISTRADOR",
   idRol: 1,
