@@ -6,6 +6,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Label } from "@/components/ui/label"
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
@@ -17,8 +19,8 @@ import {
   DropdownMenuSeparator, 
   DropdownMenuTrigger 
 } from "@/components/ui/dropdown-menu"
-import { api } from "@/lib/api"
-import type { PageResponse, UsuarioResponse } from "@/lib/types"
+import { api, ApiError } from "@/lib/api"
+import type { Institucion, PageResponse, Rol, UsuarioResponse, UsuarioUpdate } from "@/lib/types"
 import { 
   Search, 
   MoreHorizontal, 
@@ -32,7 +34,9 @@ import {
   UserPlus,
   Users,
   CheckCircle2,
-  XCircle
+  XCircle,
+  AlertCircle,
+  X
 } from "lucide-react"
 import Link from "next/link"
 
@@ -43,6 +47,12 @@ export default function UsuariosPage() {
   const [busqueda, setBusqueda] = useState("")
   const [filtroRol, setFiltroRol] = useState("todos")
   const [filtroEstado, setFiltroEstado] = useState("todos")
+  const [rolesCatalogo, setRolesCatalogo] = useState<Rol[]>([])
+  const [instituciones, setInstituciones] = useState<Institucion[]>([])
+  const [usuarioEditando, setUsuarioEditando] = useState<UsuarioResponse | null>(null)
+  const [editData, setEditData] = useState({ nombre: "", email: "", telefono: "", rolId: "", institucion: "", estado: "activo" })
+  const [savingEdit, setSavingEdit] = useState(false)
+  const [feedbackCards, setFeedbackCards] = useState<{ id: number; type: "success" | "error"; title: string; description?: string }[]>([])
 
   useEffect(() => {
     let cancelado = false
@@ -68,6 +78,25 @@ export default function UsuariosPage() {
       cancelado = true
     }
   }, [])
+
+  useEffect(() => {
+    const loadCatalogos = async () => {
+      try {
+        const [rolesData, institucionesData] = await Promise.all([api.get<Rol[]>("/roles"), api.get<Institucion[]>("/instituciones")])
+        setRolesCatalogo(rolesData)
+        setInstituciones(institucionesData)
+      } catch (error) {
+        console.error("No se pudieron cargar catálogos", error)
+      }
+    }
+    void loadCatalogos()
+  }, [])
+
+  const addFeedbackCard = (card: { type: "success" | "error"; title: string; description?: string }) => {
+    const id = Date.now() + Math.floor(Math.random() * 1000)
+    setFeedbackCards((prev) => [...prev, { id, ...card }])
+    setTimeout(() => setFeedbackCards((prev) => prev.filter((item) => item.id !== id)), 5000)
+  }
 
   // Filtrar usuarios
   const usuariosFiltrados = useMemo(() => usuarios.filter(usuario => {
@@ -103,6 +132,76 @@ export default function UsuariosPage() {
   }
 
   const roles = Array.from(new Set(usuarios.map(usuario => usuario.nombreRol).filter(Boolean))).sort()
+
+  const openEditModal = (usuario: UsuarioResponse) => {
+    setUsuarioEditando(usuario)
+    setEditData({
+      nombre: getNombreCompleto(usuario),
+      email: usuario.email,
+      telefono: usuario.telefono ?? "",
+      rolId: String(usuario.idRol),
+      institucion: usuario.idInstitucion ? String(usuario.idInstitucion) : "",
+      estado: usuario.estado ? "activo" : "inactivo",
+    })
+  }
+
+  const closeEditModal = () => {
+    setUsuarioEditando(null)
+    setSavingEdit(false)
+  }
+
+  const handleUpdateUsuario = async () => {
+    if (!usuarioEditando) return
+    const validationErrors: { title: string; description: string }[] = []
+    const telefonoLimpio = editData.telefono.trim()
+    if (!editData.nombre.trim()) validationErrors.push({ title: "Nombre completo requerido", description: "Completa el nombre completo." })
+    if (!editData.email.trim()) validationErrors.push({ title: "Correo electrónico requerido", description: "Ingresa un correo electrónico válido." })
+    if (!editData.rolId) validationErrors.push({ title: "Rol requerido", description: "Selecciona el rol del usuario." })
+    if (!editData.institucion) validationErrors.push({ title: "Organización requerida", description: "Selecciona una organización." })
+    if (telefonoLimpio && !/^\d{9}$/.test(telefonoLimpio)) validationErrors.push({ title: "Teléfono inválido", description: "El teléfono debe contener solo números y exactamente 9 dígitos." })
+    if (validationErrors.length > 0) {
+      validationErrors.forEach((err) => addFeedbackCard({ type: "error", ...err }))
+      return
+    }
+    const split = splitNombreCompleto(editData.nombre)
+    const payload: UsuarioUpdate = {
+      nombres: split.nombres,
+      apellidos: split.apellidos,
+      email: editData.email.trim(),
+      telefono: telefonoLimpio || null,
+      idRol: Number(editData.rolId),
+      idInstitucion: Number(editData.institucion),
+    }
+    try {
+      setSavingEdit(true)
+      const actualizado = await api.put<UsuarioResponse>(`/usuarios/${usuarioEditando.id}`, payload)
+      if ((editData.estado === "inactivo") !== !actualizado.estado) {
+        await api.patch(`/usuarios/${usuarioEditando.id}/estado?activo=${editData.estado === "activo"}`)
+        actualizado.estado = editData.estado === "activo"
+      }
+      setUsuarios((prev) => prev.map((u) => (u.id === actualizado.id ? { ...u, ...actualizado } : u)))
+      addFeedbackCard({ type: "success", title: "Usuario actualizado correctamente", description: "Los cambios se guardaron exitosamente." })
+      closeEditModal()
+    } catch (err) {
+      setSavingEdit(false)
+      if (err instanceof ApiError) {
+        const labelMap: Record<string, string> = { nombres: "Nombre completo", apellidos: "Apellidos", email: "Correo electrónico", telefono: "Teléfono", idRol: "Rol", idInstitucion: "Organización" }
+        if (err.body?.fieldErrors?.length) {
+          err.body.fieldErrors.forEach((fieldError) => {
+            addFeedbackCard({
+              type: "error",
+              title: `${labelMap[fieldError.field] ?? fieldError.field} inválido`,
+              description: fieldError.message,
+            })
+          })
+        } else {
+          addFeedbackCard({ type: "error", title: "No se pudo actualizar el usuario", description: err.body?.message ?? "Revisa los datos e inténtalo nuevamente." })
+        }
+      } else {
+        addFeedbackCard({ type: "error", title: "No se pudo actualizar el usuario", description: err instanceof Error ? err.message : "Revisa los datos e inténtalo nuevamente." })
+      }
+    }
+  }
 
   return (
     <AppLayout>
@@ -321,12 +420,10 @@ export default function UsuariosPage() {
                                 Ver detalle
                               </DropdownMenuItem>
                             </Link>
-                            <Link href={`/usuarios/${usuario.id}/editar`}>
-                              <DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => openEditModal(usuario)}>
                                 <Pencil className="mr-2 h-4 w-4" />
                                 Editar
-                              </DropdownMenuItem>
-                            </Link>
+                            </DropdownMenuItem>
                             <DropdownMenuItem>
                               <Shield className="mr-2 h-4 w-4" />
                               Gestionar permisos
@@ -459,6 +556,45 @@ export default function UsuariosPage() {
           </Card>
         </div>
       </div>
+      <Dialog open={!!usuarioEditando} onOpenChange={(open) => !open && closeEditModal()}>
+        <DialogContent className="sm:max-w-xl">
+          <DialogHeader>
+            <DialogTitle>Editar usuario</DialogTitle>
+            <DialogDescription>Actualiza la información del usuario seleccionado.</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4">
+            <div className="space-y-2"><Label htmlFor="edit-nombre">Nombre completo *</Label><Input id="edit-nombre" value={editData.nombre} onChange={(e) => setEditData({ ...editData, nombre: e.target.value })} /></div>
+            <div className="space-y-2"><Label htmlFor="edit-email">Correo electrónico *</Label><Input id="edit-email" type="email" value={editData.email} onChange={(e) => setEditData({ ...editData, email: e.target.value })} /></div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-2"><Label htmlFor="edit-telefono">Teléfono</Label><Input id="edit-telefono" inputMode="numeric" maxLength={9} value={editData.telefono} onChange={(e) => setEditData({ ...editData, telefono: e.target.value.replace(/\D/g, "").slice(0, 9) })} /></div>
+              <div className="space-y-2"><Label>Estado</Label><Select value={editData.estado} onValueChange={(value) => setEditData({ ...editData, estado: value })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="activo">Activo</SelectItem><SelectItem value="inactivo">Inactivo</SelectItem></SelectContent></Select></div>
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-2"><Label>Rol *</Label><Select value={editData.rolId} onValueChange={(value) => setEditData({ ...editData, rolId: value })}><SelectTrigger><SelectValue placeholder="Seleccionar rol" /></SelectTrigger><SelectContent>{rolesCatalogo.map((rol) => (<SelectItem key={rol.id} value={String(rol.id)}>{rol.nombre}</SelectItem>))}</SelectContent></Select></div>
+              <div className="space-y-2"><Label>Organización *</Label><Select value={editData.institucion} onValueChange={(value) => setEditData({ ...editData, institucion: value })}><SelectTrigger><SelectValue placeholder="Seleccionar organización" /></SelectTrigger><SelectContent>{instituciones.map((institucion) => (<SelectItem key={institucion.id} value={String(institucion.id)}>{institucion.nombre}</SelectItem>))}</SelectContent></Select></div>
+            </div>
+            <div className="flex justify-end gap-3"><Button type="button" variant="outline" onClick={closeEditModal}>Cancelar</Button><Button type="button" onClick={handleUpdateUsuario} disabled={savingEdit}>{savingEdit ? "Guardando..." : "Guardar cambios"}</Button></div>
+          </div>
+        </DialogContent>
+      </Dialog>
+      {feedbackCards.length > 0 && (
+        <div className="fixed bottom-6 right-6 z-[80] flex w-[min(92vw,420px)] flex-col gap-3">
+          {feedbackCards.map((feedback) => (
+            <div key={feedback.id} className="rounded-xl border border-border bg-card shadow-xl">
+              <div className="flex items-start gap-3 p-4">
+                <div className={`mt-0.5 ${feedback.type === "success" ? "text-green-600" : "text-destructive"}`}>
+                  {feedback.type === "success" ? <CheckCircle2 className="h-5 w-5" /> : <AlertCircle className="h-5 w-5" />}
+                </div>
+                <div className="flex-1">
+                  <p className={`text-sm font-semibold ${feedback.type === "success" ? "text-green-700" : "text-destructive"}`}>{feedback.title}</p>
+                  {feedback.description && <p className="mt-1 text-xs text-muted-foreground">{feedback.description}</p>}
+                </div>
+                <Button type="button" variant="ghost" size="icon" className="h-7 w-7" onClick={() => setFeedbackCards((prev) => prev.filter((item) => item.id !== feedback.id))}><X className="h-4 w-4" /></Button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </AppLayout>
   )
 }
@@ -491,4 +627,11 @@ function formatFecha(fecha: string | null) {
     hour: "2-digit",
     minute: "2-digit",
   }).format(parsed)
+}
+
+function splitNombreCompleto(fullName: string) {
+  const parts = fullName.trim().split(/\s+/)
+  if (parts.length < 2) return { nombres: fullName.trim(), apellidos: "-" }
+  const half = Math.ceil(parts.length / 2)
+  return { nombres: parts.slice(0, half).join(" "), apellidos: parts.slice(half).join(" ") }
 }
