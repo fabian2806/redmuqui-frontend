@@ -4,6 +4,7 @@ import { Bell, Search, User, ChevronDown, LogOut, UserCircle, Settings } from "l
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useEffect, useRef, useState } from "react"
+import { useAuth } from "@/hooks/useAuth"
 
 interface HeaderProps {
   title?: string
@@ -14,6 +15,7 @@ export function Header({ title }: HeaderProps) {
   const [menuOpen, setMenuOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
   const router = useRouter()
+  const { logout } = useAuth()
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -25,8 +27,9 @@ export function Header({ title }: HeaderProps) {
     return () => document.removeEventListener("mousedown", handleClickOutside)
   }, [])
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
     setMenuOpen(false)
+    await logout()
     router.push("/login")
   }
 
