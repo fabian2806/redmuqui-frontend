@@ -126,6 +126,11 @@ export interface TerritorioRef {
   nombre: string
 }
 
+export interface MacroregionRef {
+  id: number
+  nombre: string
+}
+
 export interface ProyectoResponse {
   id: number
   nombre: string
@@ -140,6 +145,7 @@ export interface ProyectoResponse {
   presupuesto: number | null
   nombreMacroregion: string | null
   idMacroregion: number | null
+  macroregiones: MacroregionRef[]
   nombreEjeTematico: string | null
   idEjeTematico: number | null
   responsablePrincipal: UsuarioSummary | null
@@ -157,6 +163,7 @@ export interface ProyectoCreate {
   nivelPrioridad?: number
   presupuesto?: number
   idMacroregion?: number
+  idMacroregiones?: number[]
   idEjeTematico?: number
   idResponsablePrincipal?: number
   idTerritorios?: number[]

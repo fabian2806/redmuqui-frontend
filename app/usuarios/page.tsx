@@ -53,14 +53,14 @@ export default function UsuariosPage() {
 
   // Estadísticas
   const totalUsuarios = usuarios.length
-  const usuariosActivos = usuarios.filter(u => u.estado === "activo").length
-  const admins = usuarios.filter(u => u.rol === "administrador").length
-  const coordinadores = usuarios.filter(u => u.rol === "coordinador").length
+  const usuariosActivos = usuarios.filter(u => u.estado === "Activo").length
+  const admins = usuarios.filter(u => u.rol === "Administrador").length
+  const coordinadores = usuarios.filter(u => u.rol === "Coordinación Macroregional").length
 
   const getRolLabel = (rol: string) => {
     switch (rol) {
-      case "administrador": return "Administrador"
-      case "coordinador": return "Coordinador"
+      case "Administrador": return "Administrador"
+      case "Coordinación Macroregional": return "Coordinador"
       case "tecnico": return "Técnico"
       case "consultor": return "Consultor"
       default: return rol
@@ -69,8 +69,8 @@ export default function UsuariosPage() {
 
   const getRolColor = (rol: string) => {
     switch (rol) {
-      case "administrador": return "bg-red-100 text-red-700 border-red-200"
-      case "coordinador": return "bg-blue-100 text-blue-700 border-blue-200"
+      case "Administrador": return "bg-red-100 text-red-700 border-red-200"
+      case "Coordinación Macroregional": return "bg-blue-100 text-blue-700 border-blue-200"
       case "tecnico": return "bg-green-100 text-green-700 border-green-200"
       case "consultor": return "bg-purple-100 text-purple-700 border-purple-200"
       default: return "bg-gray-100 text-gray-700 border-gray-200"
@@ -175,10 +175,10 @@ export default function UsuariosPage() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="todos">Todos los roles</SelectItem>
-                  <SelectItem value="administrador">Administrador</SelectItem>
-                  <SelectItem value="coordinador">Coordinador</SelectItem>
-                  <SelectItem value="tecnico">Técnico</SelectItem>
-                  <SelectItem value="consultor">Consultor</SelectItem>
+                  <SelectItem value="Administrador">Administrador</SelectItem>
+                  <SelectItem value="Coordinación Macroregional">Coordinador</SelectItem>
+                  <SelectItem value="Equipo Técnico">Técnico</SelectItem>
+                  <SelectItem value="Secretaría Ejecutiva">Secretaría Ejecutiva</SelectItem>
                 </SelectContent>
               </Select>
               <Select value={filtroEstado} onValueChange={setFiltroEstado}>
@@ -187,8 +187,9 @@ export default function UsuariosPage() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="todos">Todos</SelectItem>
-                  <SelectItem value="activo">Activos</SelectItem>
-                  <SelectItem value="inactivo">Inactivos</SelectItem>
+                  <SelectItem value="Activo">Activos</SelectItem>
+                  <SelectItem value="Inactivo">Inactivos</SelectItem>
+                  <SelectItem value="Pendiente">Pendientes</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -244,7 +245,7 @@ export default function UsuariosPage() {
                         </div>
                       </TableCell>
                       <TableCell>
-                        {usuario.estado === "activo" ? (
+                        {usuario.estado === "Activo" ? (
                           <div className="flex items-center gap-1.5">
                             <div className="h-2 w-2 rounded-full bg-green-500" />
                             <span className="text-sm text-green-600">Activo</span>

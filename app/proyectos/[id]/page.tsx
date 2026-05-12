@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useState, use } from "react"
+import React, { useEffect, useMemo, useState, use } from "react"
 import { AppLayout } from "@/components/layout/app-layout"
 import { StatusBadge, MacroregionBadge, TypeBadge } from "@/components/ui/status-badge"
 import { ProgressBar } from "@/components/ui/progress-bar"
@@ -13,6 +13,9 @@ import {
   hitos as allHitos,
   actividades as allActividades
 } from "@/lib/data"
+import type { Proyecto as ProyectoMock } from "@/lib/data"
+import { api, ApiError } from "@/lib/api"
+import type { MacroregionRef, ProyectoResponse } from "@/lib/types"
 import { 
   ChevronRight,
   Pencil,
@@ -43,13 +46,135 @@ import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 
 type TabType = "resumen" | "actividades" | "hitos" | "informes" | "equipo" | "bitacora"
+type ProyectoDetalle = Omit<ProyectoMock, "macroregion" | "ejeTematico" | "estado"> & {
+  macroregion: string
+  macroregiones?: MacroregionRef[]
+  ejeTematico: string
+  estado: string
+  fuenteDatos: "api" | "mixto" | "mock"
+}
+
+function apiMacroregiones(proyecto: ProyectoResponse): MacroregionRef[] {
+  if (proyecto.macroregiones?.length) return proyecto.macroregiones
+  if (proyecto.idMacroregion && proyecto.nombreMacroregion) {
+    return [{ id: proyecto.idMacroregion, nombre: proyecto.nombreMacroregion }]
+  }
+  return []
+}
+
+function responsableApi(proyecto: ProyectoResponse): string | null {
+  const responsable = proyecto.responsablePrincipal
+  if (!responsable) return null
+  return `${responsable.nombres} ${responsable.apellidos}`.trim()
+}
+
+function proyectoDesdeApi(apiProyecto: ProyectoResponse): ProyectoDetalle {
+  const macroregiones = apiMacroregiones(apiProyecto)
+
+  return {
+    id: String(apiProyecto.id),
+    nombre: apiProyecto.nombre,
+    codigo: apiProyecto.codigoInterno,
+    descripcion: apiProyecto.descripcion ?? "",
+    objetivo: apiProyecto.objetivoGeneral ?? "",
+    macroregion: macroregiones[0]?.nombre ?? "Sin macroregión",
+    macroregiones,
+    ejeTematico: apiProyecto.nombreEjeTematico ?? "Sin eje temático",
+    territorios: apiProyecto.territorios.map(t => t.nombre),
+    responsable: responsableApi(apiProyecto) ?? "Sin responsable",
+    equipo: [],
+    fechaInicio: apiProyecto.fechaInicio,
+    fechaFin: apiProyecto.fechaFinEstimada ?? apiProyecto.fechaInicio,
+    avance: apiProyecto.porcentajeAvance ?? 0,
+    estado: apiProyecto.estado,
+    institucionesMiembro: [],
+    presupuesto: apiProyecto.presupuesto ?? undefined,
+    fuentesDonantes: [],
+    fuenteDatos: "api",
+  }
+}
+
+function combinarProyecto(
+  mockProyecto: ProyectoMock | undefined,
+  apiProyecto: ProyectoResponse | null,
+): ProyectoDetalle | null {
+  if (!mockProyecto && !apiProyecto) return null
+  if (!apiProyecto) {
+    return {
+      ...mockProyecto!,
+      macroregiones: [{ id: 0, nombre: mockProyecto!.macroregion }],
+      fuenteDatos: "mock",
+    }
+  }
+
+  const real = proyectoDesdeApi(apiProyecto)
+  if (!mockProyecto) return real
+
+  return {
+    ...mockProyecto,
+    ...real,
+    equipo: mockProyecto.equipo,
+    institucionesMiembro: mockProyecto.institucionesMiembro,
+    fuentesDonantes: mockProyecto.fuentesDonantes,
+    fuenteDatos: "mixto",
+  }
+}
+
+function getApiErrorMessage(error: unknown): string {
+  if (error instanceof ApiError) {
+    return error.body?.message ?? error.message
+  }
+  if (error instanceof Error) return error.message
+  return "No se pudo cargar la API del proyecto."
+}
+
+function MockDataTag() {
+  return (
+    <span className="inline-flex items-center rounded-full border border-[#E0E0E0] bg-[#F7F7F7] px-2 py-0.5 text-[10px] font-medium normal-case tracking-normal text-[#5C5C5C]">
+      Mock referencial
+    </span>
+  )
+}
+
+function ApiSourceTag({
+  loading,
+  error,
+  source,
+}: {
+  loading: boolean
+  error: string | null
+  source: ProyectoDetalle["fuenteDatos"]
+}) {
+  const label = loading
+    ? "Sincronizando API"
+    : error
+      ? "Mock con API no disponible"
+      : source === "mock"
+        ? "Mock referencial"
+        : source === "mixto"
+          ? "Datos base API"
+          : "API real"
+
+  return (
+    <span className="inline-flex items-center rounded-full border border-[#E0E0E0] bg-white px-2.5 py-1 text-xs font-medium text-[#5C5C5C]">
+      {label}
+    </span>
+  )
+}
 
 export default function ProyectoDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params)
-  const proyecto = getProyectoById(id)
+  const mockProyecto = getProyectoById(id)
+  const [apiProyecto, setApiProyecto] = useState<ProyectoResponse | null>(null)
+  const [apiLoading, setApiLoading] = useState(true)
+  const [apiError, setApiError] = useState<string | null>(null)
+  const proyecto = useMemo(
+    () => combinarProyecto(mockProyecto, apiProyecto),
+    [mockProyecto, apiProyecto],
+  )
   const [activeTab, setActiveTab] = useState<TabType>("resumen")
   const [equipo, setEquipo] = useState<{ nombre: string; rol: string }[]>(
-    () => (proyecto?.equipo ?? []).map(nombre => ({ nombre, rol: "Equipo T\u00e9cnico" }))
+    () => (mockProyecto?.equipo ?? []).map(nombre => ({ nombre, rol: "Equipo T\u00e9cnico" }))
   )
   const [nuevoMiembroNombre, setNuevoMiembroNombre] = useState("")
   const [nuevoMiembroRol, setNuevoMiembroRol] = useState("Equipo T\u00e9cnico")
@@ -63,7 +188,47 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
   const [addHitoOpen, setAddHitoOpen] = useState(false)
   const [editHito, setEditHito] = useState<typeof hitosState[0] | null>(null)
   const [hitoForm, setHitoForm] = useState({ nombre: "", fecha: "", estado: "Pendiente" as "Completado" | "Pendiente" | "Vencido" })
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function cargarProyecto() {
+      setApiLoading(true)
+      setApiError(null)
+      try {
+        const data = await api.get<ProyectoResponse>(`/proyectos/${id}`)
+        if (!cancelled) {
+          setApiProyecto(data)
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setApiProyecto(null)
+          setApiError(getApiErrorMessage(error))
+        }
+      } finally {
+        if (!cancelled) {
+          setApiLoading(false)
+        }
+      }
+    }
+
+    cargarProyecto()
+
+    return () => {
+      cancelled = true
+    }
+  }, [id])
   
+  if (!proyecto && apiLoading) {
+    return (
+      <AppLayout>
+        <div className="rounded-lg border border-[#E0E0E0] bg-white p-6 text-sm text-[#5C5C5C] shadow-sm">
+          Cargando proyecto...
+        </div>
+      </AppLayout>
+    )
+  }
+
   if (!proyecto) {
     notFound()
   }
@@ -121,9 +286,12 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
           <div className="space-y-3">
             <h1 className="text-2xl font-bold text-[#1A1A1A]">{proyecto.nombre}</h1>
             <div className="flex flex-wrap items-center gap-2">
-              <MacroregionBadge macroregion={proyecto.macroregion} />
+              {(proyecto.macroregiones?.length ? proyecto.macroregiones : [{ id: 0, nombre: proyecto.macroregion }]).map((macroregion) => (
+                <MacroregionBadge key={macroregion.id} macroregion={macroregion.nombre} />
+              ))}
               <TypeBadge tipo={proyecto.ejeTematico} />
               <StatusBadge estado={proyecto.estado} />
+              <ApiSourceTag loading={apiLoading} error={apiError} source={proyecto.fuenteDatos} />
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -165,7 +333,10 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                             <input
                               type="checkbox"
                               className="h-4 w-4 rounded border-[#E0E0E0] accent-[#FFD600]"
-                              defaultChecked={region === "Todas" || proyecto.macroregion === region}
+                              defaultChecked={
+                                region === "Todas" ||
+                                (proyecto.macroregiones?.some(m => m.nombre === region) ?? proyecto.macroregion === region)
+                              }
                             />
                             <span className="text-sm text-[#1A1A1A]">{region}</span>
                           </label>
@@ -267,9 +438,12 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                       </div>
                     </div>
                     <div>
-                      <h3 className="text-sm font-bold uppercase tracking-wide text-[#5C5C5C] mb-2">
-                        Instituciones Miembro
-                      </h3>
+                      <div className="mb-2 flex items-center gap-2">
+                        <h3 className="text-sm font-bold uppercase tracking-wide text-[#5C5C5C]">
+                          Instituciones Miembro
+                        </h3>
+                        <MockDataTag />
+                      </div>
                       <div className="flex flex-wrap gap-2">
                         {proyecto.institucionesMiembro.map(i => (
                           <span key={i} className="inline-flex items-center gap-1 rounded-full bg-[#FFD600]/10 px-3 py-1 text-xs text-[#C9A42B]">
@@ -287,9 +461,12 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
               {activeTab === "actividades" && (
                 <div className="p-6">
                   <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-sm font-bold uppercase tracking-wide text-[#5C5C5C]">
-                      Actividades del Proyecto
-                    </h3>
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-sm font-bold uppercase tracking-wide text-[#5C5C5C]">
+                        Actividades del Proyecto
+                      </h3>
+                      <MockDataTag />
+                    </div>
                     <Dialog>
                       <DialogTrigger asChild>
                         <button className="flex items-center gap-2 rounded-lg bg-[#FFD600] px-3 py-1.5 text-xs font-bold text-[#1A1A1A] hover:bg-[#C9A42B]">
@@ -637,9 +814,12 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
               {activeTab === "hitos" && (
                 <div className="p-6">
                   <div className="flex items-center justify-between mb-6">
-                    <h3 className="text-sm font-bold uppercase tracking-wide text-[#5C5C5C]">
-                      Cronograma e Hitos
-                    </h3>
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-sm font-bold uppercase tracking-wide text-[#5C5C5C]">
+                        Cronograma e Hitos
+                      </h3>
+                      <MockDataTag />
+                    </div>
                     <button
                       onClick={() => {
                         setHitoForm({ nombre: "", fecha: "", estado: "Pendiente" })
@@ -786,9 +966,12 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
               {activeTab === "informes" && (
                 <div className="p-6">
                   <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-sm font-bold uppercase tracking-wide text-[#5C5C5C]">
-                      Informes y Productos
-                    </h3>
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-sm font-bold uppercase tracking-wide text-[#5C5C5C]">
+                        Informes y Productos
+                      </h3>
+                      <MockDataTag />
+                    </div>
                     <Link
                       href="/informes/nuevo"
                       className="flex items-center gap-2 rounded-lg bg-[#FFD600] px-3 py-1.5 text-xs font-bold text-[#1A1A1A] hover:bg-[#C9A42B]"
@@ -829,9 +1012,12 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
               {activeTab === "equipo" && (
                 <div className="p-6">
                   <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-sm font-bold uppercase tracking-wide text-[#5C5C5C]">
-                      Equipo del Proyecto
-                    </h3>
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-sm font-bold uppercase tracking-wide text-[#5C5C5C]">
+                        Equipo del Proyecto
+                      </h3>
+                      <MockDataTag />
+                    </div>
                     <Dialog open={addMemberOpen} onOpenChange={setAddMemberOpen}>
                       <DialogTrigger asChild>
                         <button className="flex items-center gap-2 rounded-lg bg-[#FFD600] px-3 py-1.5 text-xs font-bold text-[#1A1A1A] hover:bg-[#C9A42B] transition-colors">
@@ -934,9 +1120,12 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
               {/* Bitácora Tab */}
               {activeTab === "bitacora" && (
                 <div className="p-6">
-                  <h3 className="text-sm font-bold uppercase tracking-wide text-[#5C5C5C] mb-4">
-                    Historial de Cambios
-                  </h3>
+                  <div className="mb-4 flex items-center gap-2">
+                    <h3 className="text-sm font-bold uppercase tracking-wide text-[#5C5C5C]">
+                      Historial de Cambios
+                    </h3>
+                    <MockDataTag />
+                  </div>
                   {bitacora.length > 0 ? (
                     <div className="space-y-4">
                       {bitacora.map(entry => (
