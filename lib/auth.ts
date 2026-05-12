@@ -8,7 +8,12 @@
 // =====================================================================
 
 import { API_BASE_URL } from "./api"
-import type { LoginRequest, TokenResponse } from "./types"
+import type {
+  LoginRequest,
+  RecoverRequest,
+  ResetRequest,
+  TokenResponse,
+} from "./types"
 
 export const ACCESS_TOKEN_KEY = "redmuqui.accessToken"
 export const REFRESH_TOKEN_KEY = "redmuqui.refreshToken"
@@ -100,4 +105,35 @@ export async function refreshAccessToken(): Promise<string | null> {
   const tokens: TokenResponse = await res.json()
   setTokens(tokens)
   return tokens.accessToken
+}
+
+export async function requestRecovery(email: string): Promise<void> {
+  const body: RecoverRequest = { email }
+  const res = await fetch(`${API_BASE_URL}/auth/recover`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  })
+
+  if (!res.ok) {
+    const errorBody = await res.json().catch(() => ({}))
+    throw new Error(errorBody.message || "No se pudo procesar la solicitud")
+  }
+}
+
+export async function resetPassword(
+  token: string,
+  nuevaContrasenha: string,
+): Promise<void> {
+  const body: ResetRequest = { token, nuevaContrasenha }
+  const res = await fetch(`${API_BASE_URL}/auth/reset`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  })
+
+  if (!res.ok) {
+    const errorBody = await res.json().catch(() => ({}))
+    throw new Error(errorBody.message || "Token inválido o expirado")
+  }
 }

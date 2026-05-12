@@ -21,6 +21,15 @@ export interface RefreshTokenRequest {
   refreshToken: string
 }
 
+export interface RecoverRequest {
+  email: string
+}
+
+export interface ResetRequest {
+  token: string
+  nuevaContrasenha: string
+}
+
 // ----- Usuario -----
 
 export interface UsuarioResponse {

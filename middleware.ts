@@ -13,7 +13,7 @@ import { NextResponse, type NextRequest } from "next/server"
 
 const AUTH_MODE = process.env.NEXT_PUBLIC_AUTH_MODE ?? "mock"
 
-const PUBLIC_ROUTES = ["/login"]
+const PUBLIC_ROUTES = ["/login", "/recuperar", "/reset-password"]
 
 export function middleware(request: NextRequest) {
   // En modo mock, no protegemos nada (los squads navegan libre).

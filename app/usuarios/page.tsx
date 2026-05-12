@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { AppLayout } from "@/components/layout/app-layout"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -17,15 +17,14 @@ import {
   DropdownMenuSeparator, 
   DropdownMenuTrigger 
 } from "@/components/ui/dropdown-menu"
-import { usuarios, institucionesMiembro } from "@/lib/data"
+import { api } from "@/lib/api"
+import type { PageResponse, UsuarioResponse } from "@/lib/types"
 import { 
   Search, 
-  Plus, 
   MoreHorizontal, 
   UserCog, 
   Shield,
   Building2,
-  Mail,
   Calendar,
   Eye,
   Pencil,
@@ -38,48 +37,72 @@ import {
 import Link from "next/link"
 
 export default function UsuariosPage() {
+  const [usuarios, setUsuarios] = useState<UsuarioResponse[]>([])
+  const [cargando, setCargando] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const [busqueda, setBusqueda] = useState("")
   const [filtroRol, setFiltroRol] = useState("todos")
   const [filtroEstado, setFiltroEstado] = useState("todos")
 
+  useEffect(() => {
+    let cancelado = false
+
+    const cargarUsuarios = async () => {
+      try {
+        setCargando(true)
+        setError(null)
+        const data = await api.get<PageResponse<UsuarioResponse>>("/usuarios?size=100&sort=id,asc")
+        if (!cancelado) setUsuarios(data.content)
+      } catch (err) {
+        if (!cancelado) {
+          setError(err instanceof Error ? err.message : "No se pudieron cargar los usuarios")
+        }
+      } finally {
+        if (!cancelado) setCargando(false)
+      }
+    }
+
+    cargarUsuarios()
+
+    return () => {
+      cancelado = true
+    }
+  }, [])
+
   // Filtrar usuarios
-  const usuariosFiltrados = usuarios.filter(usuario => {
-    const matchBusqueda = usuario.nombre.toLowerCase().includes(busqueda.toLowerCase()) ||
+  const usuariosFiltrados = useMemo(() => usuarios.filter(usuario => {
+    const nombreCompleto = getNombreCompleto(usuario)
+    const matchBusqueda = nombreCompleto.toLowerCase().includes(busqueda.toLowerCase()) ||
                           usuario.email.toLowerCase().includes(busqueda.toLowerCase())
-    const matchRol = filtroRol === "todos" || usuario.rol === filtroRol
-    const matchEstado = filtroEstado === "todos" || usuario.estado === filtroEstado
+    const matchRol = filtroRol === "todos" || usuario.nombreRol === filtroRol
+    const matchEstado = filtroEstado === "todos" || getEstadoValue(usuario.estado) === filtroEstado
     return matchBusqueda && matchRol && matchEstado
-  })
+  }), [busqueda, filtroEstado, filtroRol, usuarios])
 
   // Estadísticas
   const totalUsuarios = usuarios.length
-  const usuariosActivos = usuarios.filter(u => u.estado === "activo").length
-  const admins = usuarios.filter(u => u.rol === "administrador").length
-  const coordinadores = usuarios.filter(u => u.rol === "coordinador").length
+  const usuariosActivos = usuarios.filter(u => u.estado).length
+  const admins = usuarios.filter(u => normalizeRol(u.nombreRol).includes("administrador")).length
+  const coordinadores = usuarios.filter(u => normalizeRol(u.nombreRol).includes("coordin")).length
 
   const getRolLabel = (rol: string) => {
-    switch (rol) {
-      case "administrador": return "Administrador"
-      case "coordinador": return "Coordinador"
-      case "tecnico": return "Técnico"
-      case "consultor": return "Consultor"
-      default: return rol
-    }
+    return rol || "Sin rol"
   }
 
   const getRolColor = (rol: string) => {
-    switch (rol) {
-      case "administrador": return "bg-red-100 text-red-700 border-red-200"
-      case "coordinador": return "bg-blue-100 text-blue-700 border-blue-200"
-      case "tecnico": return "bg-green-100 text-green-700 border-green-200"
-      case "consultor": return "bg-purple-100 text-purple-700 border-purple-200"
-      default: return "bg-gray-100 text-gray-700 border-gray-200"
-    }
+    const rolNormalizado = normalizeRol(rol)
+    if (rolNormalizado.includes("administrador")) return "bg-red-100 text-red-700 border-red-200"
+    if (rolNormalizado.includes("coordin")) return "bg-blue-100 text-blue-700 border-blue-200"
+    if (rolNormalizado.includes("tecnico")) return "bg-green-100 text-green-700 border-green-200"
+    if (rolNormalizado.includes("consultor") || rolNormalizado.includes("lectura")) return "bg-purple-100 text-purple-700 border-purple-200"
+    return "bg-gray-100 text-gray-700 border-gray-200"
   }
 
   const getInitials = (nombre: string) => {
     return nombre.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()
   }
+
+  const roles = Array.from(new Set(usuarios.map(usuario => usuario.nombreRol).filter(Boolean))).sort()
 
   return (
     <AppLayout>
@@ -175,10 +198,9 @@ export default function UsuariosPage() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="todos">Todos los roles</SelectItem>
-                  <SelectItem value="administrador">Administrador</SelectItem>
-                  <SelectItem value="coordinador">Coordinador</SelectItem>
-                  <SelectItem value="tecnico">Técnico</SelectItem>
-                  <SelectItem value="consultor">Consultor</SelectItem>
+                  {roles.map((rol) => (
+                    <SelectItem key={rol} value={rol}>{rol}</SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
               <Select value={filtroEstado} onValueChange={setFiltroEstado}>
@@ -200,10 +222,15 @@ export default function UsuariosPage() {
           <CardHeader>
             <CardTitle>Usuarios Registrados</CardTitle>
             <CardDescription>
-              {usuariosFiltrados.length} usuario(s) encontrado(s)
+              {cargando ? "Cargando usuarios..." : `${usuariosFiltrados.length} usuario(s) encontrado(s)`}
             </CardDescription>
           </CardHeader>
           <CardContent>
+            {error && (
+              <div className="mb-4 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+                {error}
+              </div>
+            )}
             <Table>
               <TableHeader>
                 <TableRow>
@@ -216,35 +243,51 @@ export default function UsuariosPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
+                {cargando && (
+                  <TableRow>
+                    <TableCell colSpan={6} className="py-8 text-center text-muted-foreground">
+                      Cargando usuarios...
+                    </TableCell>
+                  </TableRow>
+                )}
+                {!cargando && !error && usuariosFiltrados.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={6} className="py-8 text-center text-muted-foreground">
+                      No se encontraron usuarios
+                    </TableCell>
+                  </TableRow>
+                )}
                 {usuariosFiltrados.map((usuario) => {
+                  const nombreCompleto = getNombreCompleto(usuario)
+                  const organizacion = usuario.nombreInstitucion || usuario.nombreMacroregion || "-"
                   return (
                     <TableRow key={usuario.id}>
                       <TableCell>
                         <div className="flex items-center gap-3">
                           <Avatar className="h-9 w-9">
                             <AvatarFallback className="bg-primary/10 text-primary text-sm">
-                              {getInitials(usuario.nombre)}
+                              {getInitials(nombreCompleto)}
                             </AvatarFallback>
                           </Avatar>
                           <div>
-                            <p className="font-medium">{usuario.nombre}</p>
+                            <p className="font-medium">{nombreCompleto}</p>
                             <p className="text-sm text-muted-foreground">{usuario.email}</p>
                           </div>
                         </div>
                       </TableCell>
                       <TableCell>
-                        <Badge variant="outline" className={getRolColor(usuario.rol)}>
-                          {getRolLabel(usuario.rol)}
+                        <Badge variant="outline" className={getRolColor(usuario.nombreRol)}>
+                          {getRolLabel(usuario.nombreRol)}
                         </Badge>
                       </TableCell>
                       <TableCell>
                         <div className="flex items-center gap-2">
                           <Building2 className="h-4 w-4 text-muted-foreground" />
-                          <span className="text-sm">{usuario.institucion || "-"}</span>
+                          <span className="text-sm">{organizacion}</span>
                         </div>
                       </TableCell>
                       <TableCell>
-                        {usuario.estado === "activo" ? (
+                        {usuario.estado ? (
                           <div className="flex items-center gap-1.5">
                             <div className="h-2 w-2 rounded-full bg-green-500" />
                             <span className="text-sm text-green-600">Activo</span>
@@ -259,7 +302,7 @@ export default function UsuariosPage() {
                       <TableCell>
                         <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
                           <Calendar className="h-3.5 w-3.5" />
-                          {usuario.ultimoAcceso}
+                          {formatFecha(usuario.ultimoAcceso)}
                         </div>
                       </TableCell>
                       <TableCell className="text-right">
@@ -418,4 +461,34 @@ export default function UsuariosPage() {
       </div>
     </AppLayout>
   )
+}
+
+function getNombreCompleto(usuario: UsuarioResponse) {
+  return `${usuario.nombres} ${usuario.apellidos}`.trim()
+}
+
+function getEstadoValue(estado: boolean) {
+  return estado ? "activo" : "inactivo"
+}
+
+function normalizeRol(rol: string) {
+  return rol
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+}
+
+function formatFecha(fecha: string | null) {
+  if (!fecha) return "-"
+
+  const parsed = new Date(fecha)
+  if (Number.isNaN(parsed.getTime())) return fecha
+
+  return new Intl.DateTimeFormat("es-PE", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(parsed)
 }
