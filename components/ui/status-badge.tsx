@@ -1,18 +1,28 @@
 import { cn } from "@/lib/utils"
-import type { EstadoProyecto, EstadoDocumento, Macroregion } from "@/lib/data"
 
 interface StatusBadgeProps {
-  estado: EstadoProyecto | EstadoDocumento | string
+  estado?: string
+  status?: string
+  type?: string
   className?: string
 }
 
-export function StatusBadge({ estado, className }: StatusBadgeProps) {
+const statusLabels: Record<string, string> = {
+  PENDIENTE: "Pendiente",
+  EN_CURSO: "En curso",
+  FINALIZADO: "Finalizado",
+}
+
+export function StatusBadge({ estado, status, className }: StatusBadgeProps) {
+  const value = estado ?? status ?? ""
   const getStatusStyles = () => {
-    switch (estado) {
+    switch (value) {
       case "Activo":
       case "Publicado":
       case "Completada":
       case "Completado":
+      case "EN_CURSO":
+      case "FINALIZADO":
         return "bg-[#2E7D32]/10 text-[#2E7D32] border-[#2E7D32]/20"
       case "En riesgo":
       case "En revisión":
@@ -28,6 +38,7 @@ export function StatusBadge({ estado, className }: StatusBadgeProps) {
       case "Borrador":
       case "Pendiente":
       case "Pendientes":
+      case "PENDIENTE":
         return "bg-[#0277BD]/10 text-[#0277BD] border-[#0277BD]/20"
       default:
         return "bg-[#5C5C5C]/10 text-[#5C5C5C] border-[#5C5C5C]/20"
@@ -39,20 +50,23 @@ export function StatusBadge({ estado, className }: StatusBadgeProps) {
       className={cn(
         "inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium",
         getStatusStyles(),
-        className
+        className,
       )}
     >
-      {estado}
+      {statusLabels[value] ?? value}
     </span>
   )
 }
 
 interface MacroregionBadgeProps {
-  macroregion: Macroregion
+  macroregion: string
   className?: string
 }
 
-export function MacroregionBadge({ macroregion, className }: MacroregionBadgeProps) {
+export function MacroregionBadge({
+  macroregion,
+  className,
+}: MacroregionBadgeProps) {
   const getStyles = () => {
     switch (macroregion) {
       case "Norte":
@@ -71,7 +85,7 @@ export function MacroregionBadge({ macroregion, className }: MacroregionBadgePro
       className={cn(
         "inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium",
         getStyles(),
-        className
+        className,
       )}
     >
       {macroregion}
@@ -89,7 +103,7 @@ export function TypeBadge({ tipo, className }: TypeBadgeProps) {
     <span
       className={cn(
         "inline-flex items-center rounded-full border border-[#E0E0E0] bg-[#F7F7F7] px-2.5 py-0.5 text-xs font-medium text-[#5C5C5C]",
-        className
+        className,
       )}
     >
       {tipo}

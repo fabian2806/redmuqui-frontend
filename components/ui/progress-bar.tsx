@@ -5,13 +5,15 @@ interface ProgressBarProps {
   showLabel?: boolean
   size?: "sm" | "md" | "lg"
   className?: string
+  indicatorClassName?: string
 }
 
 export function ProgressBar({
   value,
   showLabel = true,
   size = "md",
-  className
+  className,
+  indicatorClassName,
 }: ProgressBarProps) {
   const getColor = () => {
     if (value >= 75) return "bg-[#2E7D32]"
@@ -35,7 +37,11 @@ export function ProgressBar({
     <div className={cn("flex items-center gap-2", className)}>
       <div className={cn("flex-1 rounded-full bg-[#E0E0E0]", getHeight())}>
         <div
-          className={cn("rounded-full transition-all duration-300", getHeight(), getColor())}
+          className={cn(
+            "rounded-full transition-all duration-300",
+            getHeight(),
+            indicatorClassName ?? getColor(),
+          )}
           style={{ width: `${Math.min(100, Math.max(0, value))}%` }}
         />
       </div>

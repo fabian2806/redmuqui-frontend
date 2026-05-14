@@ -1,444 +1,573 @@
 "use client"
 
-import { useState } from "react"
-import { AppLayout } from "@/components/layout/app-layout"
-import { 
-  institucionesMiembro, 
-  type Macroregion, 
-  type EjeTematico, 
-  type EstadoProyecto 
-} from "@/lib/data"
-import { ChevronRight, Plus, X, Save, FileText } from "lucide-react"
+import { useEffect, useState, type FormEvent } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
+import { AlertCircle, ChevronRight, Save } from "lucide-react"
+import { AppLayout } from "@/components/layout/app-layout"
+import { Spinner } from "@/components/ui/spinner"
+import { api, ApiError } from "@/lib/api"
+import type {
+  EjeTematico,
+  EstadoProyecto,
+  Macroregion,
+  PageResponse,
+  ProyectoCreate,
+  ProyectoResponse,
+  Territorio,
+  UsuarioResponse,
+} from "@/lib/types"
 
-const macroregiones: Macroregion[] = ["Norte", "Centro", "Sur"]
-const ejesTematicos: EjeTematico[] = [
-  "Agua y Territorio",
-  "Derechos Humanos",
-  "Minería Artesanal (MAPE)",
-  "Vigilancia Ambiental",
-  "Incidencia Política",
-  "Fortalecimiento Organizacional"
-]
-const estados: EstadoProyecto[] = ["Activo", "En riesgo", "Cerrado", "Suspendido"]
-const prioridades = ["Alta", "Media", "Baja"]
-
-const territoriosDisponibles = [
-  "Cajamarca", "Piura", "La Libertad", "Lambayeque", // Norte
-  "Lima", "Junín", "Pasco", "Huancavelica", // Centro
-  "Arequipa", "Cusco", "Puno", "Moquegua", "Apurímac", "Tacna" // Sur
+const ESTADOS: Array<{ value: EstadoProyecto; label: string }> = [
+  { value: "PENDIENTE", label: "Pendiente" },
+  { value: "EN_CURSO", label: "En curso" },
+  { value: "FINALIZADO", label: "Finalizado" },
 ]
 
-const equipoDisponible = [
-  "María Torres", "Carlos Quispe", "Ana Huanca", "Luis Vargas",
-  "Pedro Mendoza", "Carmen Sánchez", "Roberto Díaz", "José Mamani", "Rosa Quispe"
+const PRIORIDADES = [
+  { value: "", label: "Sin prioridad" },
+  { value: "3", label: "Alta" },
+  { value: "2", label: "Media" },
+  { value: "1", label: "Baja" },
 ]
+
+interface FormState {
+  nombre: string
+  codigoInterno: string
+  descripcion: string
+  objetivoGeneral: string
+  idMacroregiones: string[]
+  idEjeTematico: string
+  idTerritorios: string[]
+  idResponsablePrincipal: string
+  fechaInicio: string
+  fechaFinEstimada: string
+  estado: EstadoProyecto
+  nivelPrioridad: string
+  presupuesto: string
+}
+
+const initialFormState: FormState = {
+  nombre: "",
+  codigoInterno: "",
+  descripcion: "",
+  objetivoGeneral: "",
+  idMacroregiones: [],
+  idEjeTematico: "",
+  idTerritorios: [],
+  idResponsablePrincipal: "",
+  fechaInicio: "",
+  fechaFinEstimada: "",
+  estado: "PENDIENTE",
+  nivelPrioridad: "",
+  presupuesto: "",
+}
+
+function toOptionalNumber(value: string): number | undefined {
+  if (!value) return undefined
+  const parsed = Number(value)
+  return Number.isNaN(parsed) ? undefined : parsed
+}
+
+function nombreCompleto(usuario: UsuarioResponse): string {
+  return `${usuario.nombres} ${usuario.apellidos}`.trim()
+}
 
 export default function NuevoProyectoPage() {
   const router = useRouter()
-  const [formData, setFormData] = useState({
-    nombre: "",
-    codigo: "",
-    descripcion: "",
-    objetivo: "",
-    macroregiones: [] as Macroregion[],
-    ejeTematico: "" as EjeTematico | "",
-    territorios: [] as string[],
-    institucionesMiembro: [] as string[],
-    responsable: "",
-    equipo: [] as string[],
-    fechaInicio: "",
-    fechaFin: "",
-    estado: "Activo" as EstadoProyecto,
-    prioridad: "Media"
-  })
+  const [formData, setFormData] = useState<FormState>(initialFormState)
+  const [macroregiones, setMacroregiones] = useState<Macroregion[]>([])
+  const [ejesTematicos, setEjesTematicos] = useState<EjeTematico[]>([])
+  const [territorios, setTerritorios] = useState<Territorio[]>([])
+  const [usuarios, setUsuarios] = useState<UsuarioResponse[]>([])
+  const [loadingCatalogos, setLoadingCatalogos] = useState(true)
+  const [loadingUsuarios, setLoadingUsuarios] = useState(true)
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
-  const [hitos, setHitos] = useState<{ nombre: string; fecha: string }[]>([])
-  const [nuevoHito, setNuevoHito] = useState({ nombre: "", fecha: "" })
+  useEffect(() => {
+    let cancelled = false
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault()
-    // In a real app, this would save to database
-    alert("Proyecto creado exitosamente (simulación)")
-    router.push("/proyectos")
-  }
+    async function loadCatalogos() {
+      setLoadingCatalogos(true)
+      setError(null)
+      try {
+        const [macroregionesData, ejesData, territoriosData] = await Promise.all([
+          api.get<Macroregion[]>("/macroregiones"),
+          api.get<EjeTematico[]>("/ejes-tematicos"),
+          api.get<Territorio[]>("/territorios"),
+        ])
 
-  const handleSaveDraft = () => {
-    alert("Borrador guardado (simulación)")
-  }
-
-  const addHito = () => {
-    if (nuevoHito.nombre && nuevoHito.fecha) {
-      setHitos([...hitos, nuevoHito])
-      setNuevoHito({ nombre: "", fecha: "" })
+        if (!cancelled) {
+          setMacroregiones(macroregionesData)
+          setEjesTematicos(ejesData)
+          setTerritorios(territoriosData)
+        }
+      } catch (err) {
+        if (!cancelled) {
+          const message =
+            err instanceof Error
+              ? err.message
+              : "No se pudieron cargar los catálogos"
+          setError(message)
+        }
+      } finally {
+        if (!cancelled) setLoadingCatalogos(false)
+      }
     }
+
+    async function loadUsuarios() {
+      setLoadingUsuarios(true)
+      try {
+        const data = await api.get<PageResponse<UsuarioResponse>>(
+          "/usuarios?page=0&size=100&sort=apellidos,asc",
+        )
+        if (!cancelled) setUsuarios(data.content.filter((usuario) => usuario.estado))
+      } catch {
+        if (!cancelled) setUsuarios([])
+      } finally {
+        if (!cancelled) setLoadingUsuarios(false)
+      }
+    }
+
+    loadCatalogos()
+    loadUsuarios()
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const updateField = <K extends keyof FormState>(field: K, value: FormState[K]) => {
+    setFormData((current) => ({ ...current, [field]: value }))
   }
 
-  const removeHito = (index: number) => {
-    setHitos(hitos.filter((_, i) => i !== index))
-  }
-
-  const toggleArrayItem = (field: "macroregiones" | "territorios" | "institucionesMiembro" | "equipo", value: string) => {
-    setFormData(prev => ({
-      ...prev,
-      [field]: prev[field].includes(value as never)
-        ? prev[field].filter(item => item !== value)
-        : [...prev[field], value as never]
+  const toggleTerritorio = (id: number) => {
+    const value = String(id)
+    setFormData((current) => ({
+      ...current,
+      idTerritorios: current.idTerritorios.includes(value)
+        ? current.idTerritorios.filter((item) => item !== value)
+        : [...current.idTerritorios, value],
     }))
+  }
+
+  const toggleMacroregion = (id: number) => {
+    const value = String(id)
+    setFormData((current) => ({
+      ...current,
+      idMacroregiones: current.idMacroregiones.includes(value)
+        ? current.idMacroregiones.filter((item) => item !== value)
+        : [...current.idMacroregiones, value],
+    }))
+  }
+
+  const buildPayload = (): ProyectoCreate => {
+    const payload: ProyectoCreate = {
+      nombre: formData.nombre.trim(),
+      codigoInterno: formData.codigoInterno.trim(),
+      fechaInicio: formData.fechaInicio,
+      estado: formData.estado,
+    }
+
+    if (formData.descripcion.trim()) {
+      payload.descripcion = formData.descripcion.trim()
+    }
+    if (formData.objetivoGeneral.trim()) {
+      payload.objetivoGeneral = formData.objetivoGeneral.trim()
+    }
+    if (formData.fechaFinEstimada) {
+      payload.fechaFinEstimada = formData.fechaFinEstimada
+    }
+    if (formData.idMacroregiones.length > 0) {
+      payload.idMacroregiones = formData.idMacroregiones.map(Number)
+    }
+    if (formData.idEjeTematico) {
+      payload.idEjeTematico = Number(formData.idEjeTematico)
+    }
+    if (formData.idResponsablePrincipal) {
+      payload.idResponsablePrincipal = Number(formData.idResponsablePrincipal)
+    }
+    if (formData.idTerritorios.length > 0) {
+      payload.idTerritorios = formData.idTerritorios.map(Number)
+    }
+
+    const nivelPrioridad = toOptionalNumber(formData.nivelPrioridad)
+    if (nivelPrioridad !== undefined) payload.nivelPrioridad = nivelPrioridad
+
+    const presupuesto = toOptionalNumber(formData.presupuesto)
+    if (presupuesto !== undefined) payload.presupuesto = presupuesto
+
+    return payload
+  }
+
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    setError(null)
+
+    if (
+      formData.idMacroregiones.length === 0 ||
+      !formData.idEjeTematico ||
+      !formData.fechaInicio ||
+      !formData.nombre.trim() ||
+      !formData.codigoInterno.trim()
+    ) {
+      setError("Completa los campos obligatorios antes de crear el proyecto")
+      return
+    }
+
+    if (
+      formData.fechaFinEstimada &&
+      formData.fechaInicio &&
+      formData.fechaFinEstimada < formData.fechaInicio
+    ) {
+      setError("La fecha de fin estimada no puede ser anterior a la fecha de inicio")
+      return
+    }
+
+    setSubmitting(true)
+    try {
+      const creado = await api.post<ProyectoResponse>("/proyectos", buildPayload())
+      router.push(`/proyectos/${creado.id}`)
+    } catch (err) {
+      const message =
+        err instanceof ApiError
+          ? err.message
+          : err instanceof Error
+            ? err.message
+            : "No se pudo crear el proyecto"
+      setError(message)
+    } finally {
+      setSubmitting(false)
+    }
   }
 
   return (
     <AppLayout title="Nuevo Proyecto">
-      <div className="max-w-4xl mx-auto space-y-6">
-        {/* Breadcrumb */}
+      <div className="mx-auto max-w-4xl space-y-6">
         <nav className="flex items-center gap-2 text-sm text-[#5C5C5C]">
-          <Link href="/proyectos" className="hover:text-[#1A1A1A]">Proyectos</Link>
+          <Link href="/proyectos" className="hover:text-[#1A1A1A]">
+            Proyectos
+          </Link>
           <ChevronRight className="h-4 w-4" />
-          <span className="text-[#1A1A1A] font-medium">Nuevo Proyecto</span>
+          <span className="font-medium text-[#1A1A1A]">Nuevo Proyecto</span>
         </nav>
 
-        {/* Header */}
         <div>
-          <h1 className="text-2xl font-bold text-[#1A1A1A]">Crear Nuevo Proyecto</h1>
+          <h1 className="text-2xl font-bold text-[#1A1A1A]">
+            Crear Nuevo Proyecto
+          </h1>
           <p className="text-sm text-[#5C5C5C]">
-            Complete la información del proyecto para registrarlo en la plataforma
+            Registra los datos base del proyecto para el Sprint 1
           </p>
         </div>
 
+        {error && (
+          <div
+            role="alert"
+            className="flex items-start gap-2 rounded-lg border border-[#C8102E]/20 bg-[#C8102E]/5 px-4 py-3 text-sm font-medium text-[#C8102E]"
+          >
+            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+            <span>{error}</span>
+          </div>
+        )}
+
         <form onSubmit={handleSubmit} className="space-y-6">
-          {/* Información General */}
-          <div className="rounded-lg border border-[#E0E0E0] bg-white shadow-sm">
+          <section className="rounded-lg border border-[#E0E0E0] bg-white shadow-sm">
             <div className="border-b border-[#E0E0E0] px-6 py-4">
               <h2 className="text-sm font-bold uppercase tracking-wide text-[#1A1A1A]">
                 Información General
               </h2>
             </div>
-            <div className="p-6 space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-4 p-6">
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                 <div className="md:col-span-2">
-                  <label className="block text-xs font-medium text-[#5C5C5C] mb-1.5">
+                  <label className="mb-1.5 block text-xs font-medium text-[#5C5C5C]">
                     Nombre del proyecto *
                   </label>
                   <input
                     type="text"
                     required
                     value={formData.nombre}
-                    onChange={(e) => setFormData({ ...formData, nombre: e.target.value })}
+                    onChange={(event) => updateField("nombre", event.target.value)}
                     className="w-full rounded-lg border border-[#E0E0E0] px-4 py-2.5 text-sm text-[#1A1A1A] focus:border-[#FFD600] focus:outline-none focus:ring-1 focus:ring-[#FFD600]"
                     placeholder="Ej: Monitoreo Ambiental Comunitario - Conga"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-[#5C5C5C] mb-1.5">
-                    Código interno
+                  <label className="mb-1.5 block text-xs font-medium text-[#5C5C5C]">
+                    Código interno *
                   </label>
                   <input
                     type="text"
-                    value={formData.codigo}
-                    onChange={(e) => setFormData({ ...formData, codigo: e.target.value })}
+                    required
+                    value={formData.codigoInterno}
+                    onChange={(event) =>
+                      updateField("codigoInterno", event.target.value)
+                    }
                     className="w-full rounded-lg border border-[#E0E0E0] px-4 py-2.5 text-sm text-[#1A1A1A] focus:border-[#FFD600] focus:outline-none focus:ring-1 focus:ring-[#FFD600]"
-                    placeholder="Ej: PRY-2024-001"
+                    placeholder="Ej: PRY-2026-001"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-[#5C5C5C] mb-1.5">
+                  <label className="mb-1.5 block text-xs font-medium text-[#5C5C5C]">
                     Eje temático *
                   </label>
                   <select
                     required
-                    value={formData.ejeTematico}
-                    onChange={(e) => setFormData({ ...formData, ejeTematico: e.target.value as EjeTematico })}
-                    className="w-full rounded-lg border border-[#E0E0E0] px-4 py-2.5 text-sm text-[#1A1A1A] focus:border-[#FFD600] focus:outline-none focus:ring-1 focus:ring-[#FFD600]"
+                    value={formData.idEjeTematico}
+                    onChange={(event) =>
+                      updateField("idEjeTematico", event.target.value)
+                    }
+                    disabled={loadingCatalogos}
+                    className="w-full rounded-lg border border-[#E0E0E0] px-4 py-2.5 text-sm text-[#1A1A1A] focus:border-[#FFD600] focus:outline-none focus:ring-1 focus:ring-[#FFD600] disabled:opacity-60"
                   >
                     <option value="">Seleccionar eje temático</option>
-                    {ejesTematicos.map(eje => (
-                      <option key={eje} value={eje}>{eje}</option>
+                    {ejesTematicos.map((eje) => (
+                      <option key={eje.id} value={eje.id}>
+                        {eje.nombre}
+                      </option>
                     ))}
                   </select>
                 </div>
               </div>
+
               <div>
-                <label className="block text-xs font-medium text-[#5C5C5C] mb-1.5">
-                  Descripción *
+                <label className="mb-1.5 block text-xs font-medium text-[#5C5C5C]">
+                  Descripción
                 </label>
                 <textarea
-                  required
                   rows={3}
                   value={formData.descripcion}
-                  onChange={(e) => setFormData({ ...formData, descripcion: e.target.value })}
+                  onChange={(event) => updateField("descripcion", event.target.value)}
                   className="w-full rounded-lg border border-[#E0E0E0] px-4 py-2.5 text-sm text-[#1A1A1A] focus:border-[#FFD600] focus:outline-none focus:ring-1 focus:ring-[#FFD600]"
-                  placeholder="Describa brevemente el proyecto..."
+                  placeholder="Describe brevemente el proyecto..."
                 />
               </div>
+
               <div>
-                <label className="block text-xs font-medium text-[#5C5C5C] mb-1.5">
-                  Objetivo general *
+                <label className="mb-1.5 block text-xs font-medium text-[#5C5C5C]">
+                  Objetivo general
                 </label>
                 <textarea
-                  required
                   rows={2}
-                  value={formData.objetivo}
-                  onChange={(e) => setFormData({ ...formData, objetivo: e.target.value })}
+                  value={formData.objetivoGeneral}
+                  onChange={(event) =>
+                    updateField("objetivoGeneral", event.target.value)
+                  }
                   className="w-full rounded-lg border border-[#E0E0E0] px-4 py-2.5 text-sm text-[#1A1A1A] focus:border-[#FFD600] focus:outline-none focus:ring-1 focus:ring-[#FFD600]"
-                  placeholder="Defina el objetivo principal del proyecto..."
+                  placeholder="Define el objetivo principal del proyecto..."
                 />
               </div>
             </div>
-          </div>
+          </section>
 
-          {/* Clasificación */}
-          <div className="rounded-lg border border-[#E0E0E0] bg-white shadow-sm">
+          <section className="rounded-lg border border-[#E0E0E0] bg-white shadow-sm">
             <div className="border-b border-[#E0E0E0] px-6 py-4">
               <h2 className="text-sm font-bold uppercase tracking-wide text-[#1A1A1A]">
                 Clasificación
               </h2>
             </div>
-            <div className="p-6 space-y-4">
-              <div>
-                <label className="block text-xs font-medium text-[#5C5C5C] mb-2">
-                  Macroregión *
-                </label>
-                <div className="flex flex-wrap gap-2">
-                  {macroregiones.map(macro => (
-                    <button
-                      key={macro}
-                      type="button"
-                      onClick={() => toggleArrayItem("macroregiones", macro)}
-                      className={`rounded-full px-4 py-1.5 text-sm font-medium transition-colors ${
-                        formData.macroregiones.includes(macro)
-                          ? macro === "Norte" ? "bg-[#C8102E] text-white" :
-                            macro === "Centro" ? "bg-[#C9A42B] text-white" :
-                            "bg-[#424242] text-white"
-                          : "border border-[#E0E0E0] text-[#5C5C5C] hover:bg-[#F7F7F7]"
-                      }`}
-                    >
-                      {macro}
-                    </button>
-                  ))}
+            <div className="space-y-4 p-6">
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                <div>
+                  <label className="mb-2 block text-xs font-medium text-[#5C5C5C]">
+                    Macroregiones *
+                  </label>
+                  {loadingCatalogos ? (
+                    <div className="flex items-center gap-2 text-sm text-[#5C5C5C]">
+                      <Spinner />
+                      Cargando macroregiones...
+                    </div>
+                  ) : (
+                    <div className="flex flex-wrap gap-2">
+                      {macroregiones.map((macroregion) => {
+                        const selected = formData.idMacroregiones.includes(
+                          String(macroregion.id),
+                        )
+                        return (
+                          <button
+                            key={macroregion.id}
+                            type="button"
+                            onClick={() => toggleMacroregion(macroregion.id)}
+                            className={`rounded-full px-3 py-1.5 text-sm font-medium transition-colors ${
+                              selected
+                                ? macroregion.nombre === "Norte"
+                                  ? "bg-[#C8102E] text-white"
+                                  : macroregion.nombre === "Centro"
+                                    ? "bg-[#C9A42B] text-white"
+                                    : "bg-[#424242] text-white"
+                                : "border border-[#E0E0E0] text-[#5C5C5C] hover:bg-[#F7F7F7]"
+                            }`}
+                          >
+                            {macroregion.nombre}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                <div>
+                  <label className="mb-1.5 block text-xs font-medium text-[#5C5C5C]">
+                    Responsable principal
+                  </label>
+                  <select
+                    value={formData.idResponsablePrincipal}
+                    onChange={(event) =>
+                      updateField("idResponsablePrincipal", event.target.value)
+                    }
+                    disabled={loadingUsuarios || usuarios.length === 0}
+                    className="w-full rounded-lg border border-[#E0E0E0] px-4 py-2.5 text-sm text-[#1A1A1A] focus:border-[#FFD600] focus:outline-none focus:ring-1 focus:ring-[#FFD600] disabled:opacity-60"
+                  >
+                    <option value="">
+                      {usuarios.length === 0
+                        ? "Sin usuarios disponibles"
+                        : "Seleccionar responsable"}
+                    </option>
+                    {usuarios.map((usuario) => (
+                      <option key={usuario.id} value={usuario.id}>
+                        {nombreCompleto(usuario)}
+                      </option>
+                    ))}
+                  </select>
                 </div>
               </div>
+
               <div>
-                <label className="block text-xs font-medium text-[#5C5C5C] mb-2">
+                <label className="mb-2 block text-xs font-medium text-[#5C5C5C]">
                   Territorios involucrados
                 </label>
-                <div className="flex flex-wrap gap-2">
-                  {territoriosDisponibles.map(territorio => (
-                    <button
-                      key={territorio}
-                      type="button"
-                      onClick={() => toggleArrayItem("territorios", territorio)}
-                      className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
-                        formData.territorios.includes(territorio)
-                          ? "bg-[#FFD600] text-[#1A1A1A]"
-                          : "border border-[#E0E0E0] text-[#5C5C5C] hover:bg-[#F7F7F7]"
-                      }`}
-                    >
-                      {territorio}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-[#5C5C5C] mb-2">
-                  Instituciones miembro vinculadas
-                </label>
-                <div className="flex flex-wrap gap-2">
-                  {institucionesMiembro.map(inst => (
-                    <button
-                      key={inst}
-                      type="button"
-                      onClick={() => toggleArrayItem("institucionesMiembro", inst)}
-                      className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
-                        formData.institucionesMiembro.includes(inst)
-                          ? "bg-[#C9A42B] text-white"
-                          : "border border-[#E0E0E0] text-[#5C5C5C] hover:bg-[#F7F7F7]"
-                      }`}
-                    >
-                      {inst}
-                    </button>
-                  ))}
-                </div>
+                {loadingCatalogos ? (
+                  <div className="flex items-center gap-2 text-sm text-[#5C5C5C]">
+                    <Spinner />
+                    Cargando territorios...
+                  </div>
+                ) : territorios.length > 0 ? (
+                  <div className="flex flex-wrap gap-2">
+                    {territorios.map((territorio) => {
+                      const selected = formData.idTerritorios.includes(
+                        String(territorio.id),
+                      )
+                      return (
+                        <button
+                          key={territorio.id}
+                          type="button"
+                          onClick={() => toggleTerritorio(territorio.id)}
+                          className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+                            selected
+                              ? "bg-[#FFD600] text-[#1A1A1A]"
+                              : "border border-[#E0E0E0] text-[#5C5C5C] hover:bg-[#F7F7F7]"
+                          }`}
+                        >
+                          {territorio.nombre}
+                        </button>
+                      )
+                    })}
+                  </div>
+                ) : (
+                  <p className="text-sm text-[#5C5C5C]">
+                    No hay territorios configurados todavía.
+                  </p>
+                )}
               </div>
             </div>
-          </div>
+          </section>
 
-          {/* Equipo */}
-          <div className="rounded-lg border border-[#E0E0E0] bg-white shadow-sm">
+          <section className="rounded-lg border border-[#E0E0E0] bg-white shadow-sm">
             <div className="border-b border-[#E0E0E0] px-6 py-4">
               <h2 className="text-sm font-bold uppercase tracking-wide text-[#1A1A1A]">
-                Equipo
+                Temporalidad y Presupuesto
               </h2>
             </div>
-            <div className="p-6 space-y-4">
-              <div>
-                <label className="block text-xs font-medium text-[#5C5C5C] mb-1.5">
-                  Responsable principal *
-                </label>
-                <select
-                  required
-                  value={formData.responsable}
-                  onChange={(e) => setFormData({ ...formData, responsable: e.target.value })}
-                  className="w-full rounded-lg border border-[#E0E0E0] px-4 py-2.5 text-sm text-[#1A1A1A] focus:border-[#FFD600] focus:outline-none focus:ring-1 focus:ring-[#FFD600]"
-                >
-                  <option value="">Seleccionar responsable</option>
-                  {equipoDisponible.map(persona => (
-                    <option key={persona} value={persona}>{persona}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-[#5C5C5C] mb-2">
-                  Equipo adicional
-                </label>
-                <div className="flex flex-wrap gap-2">
-                  {equipoDisponible.filter(p => p !== formData.responsable).map(persona => (
-                    <button
-                      key={persona}
-                      type="button"
-                      onClick={() => toggleArrayItem("equipo", persona)}
-                      className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
-                        formData.equipo.includes(persona)
-                          ? "bg-[#FFD600] text-[#1A1A1A]"
-                          : "border border-[#E0E0E0] text-[#5C5C5C] hover:bg-[#F7F7F7]"
-                      }`}
-                    >
-                      {persona}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Temporalidad */}
-          <div className="rounded-lg border border-[#E0E0E0] bg-white shadow-sm">
-            <div className="border-b border-[#E0E0E0] px-6 py-4">
-              <h2 className="text-sm font-bold uppercase tracking-wide text-[#1A1A1A]">
-                Temporalidad
-              </h2>
-            </div>
-            <div className="p-6 space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-4 p-6">
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                 <div>
-                  <label className="block text-xs font-medium text-[#5C5C5C] mb-1.5">
+                  <label className="mb-1.5 block text-xs font-medium text-[#5C5C5C]">
                     Fecha de inicio *
                   </label>
                   <input
                     type="date"
                     required
                     value={formData.fechaInicio}
-                    onChange={(e) => setFormData({ ...formData, fechaInicio: e.target.value })}
+                    onChange={(event) =>
+                      updateField("fechaInicio", event.target.value)
+                    }
                     className="w-full rounded-lg border border-[#E0E0E0] px-4 py-2.5 text-sm text-[#1A1A1A] focus:border-[#FFD600] focus:outline-none focus:ring-1 focus:ring-[#FFD600]"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-[#5C5C5C] mb-1.5">
-                    Fecha de fin estimada *
+                  <label className="mb-1.5 block text-xs font-medium text-[#5C5C5C]">
+                    Fecha de fin estimada
                   </label>
                   <input
                     type="date"
-                    required
-                    value={formData.fechaFin}
-                    onChange={(e) => setFormData({ ...formData, fechaFin: e.target.value })}
+                    value={formData.fechaFinEstimada}
+                    onChange={(event) =>
+                      updateField("fechaFinEstimada", event.target.value)
+                    }
                     className="w-full rounded-lg border border-[#E0E0E0] px-4 py-2.5 text-sm text-[#1A1A1A] focus:border-[#FFD600] focus:outline-none focus:ring-1 focus:ring-[#FFD600]"
                   />
                 </div>
               </div>
 
-              {/* Hitos */}
-              <div>
-                <label className="block text-xs font-medium text-[#5C5C5C] mb-2">
-                  Hitos clave
-                </label>
-                {hitos.length > 0 && (
-                  <div className="space-y-2 mb-3">
-                    {hitos.map((hito, index) => (
-                      <div key={index} className="flex items-center gap-2 rounded-lg bg-[#F7F7F7] px-3 py-2">
-                        <span className="flex-1 text-sm text-[#1A1A1A]">{hito.nombre}</span>
-                        <span className="text-xs text-[#5C5C5C]">
-                          {new Date(hito.fecha).toLocaleDateString("es-PE")}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => removeHito(index)}
-                          className="text-[#C8102E] hover:text-[#A00D24]"
-                        >
-                          <X className="h-4 w-4" />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    value={nuevoHito.nombre}
-                    onChange={(e) => setNuevoHito({ ...nuevoHito, nombre: e.target.value })}
-                    placeholder="Nombre del hito"
-                    className="flex-1 rounded-lg border border-[#E0E0E0] px-3 py-2 text-sm text-[#1A1A1A] focus:border-[#FFD600] focus:outline-none focus:ring-1 focus:ring-[#FFD600]"
-                  />
-                  <input
-                    type="date"
-                    value={nuevoHito.fecha}
-                    onChange={(e) => setNuevoHito({ ...nuevoHito, fecha: e.target.value })}
-                    className="w-40 rounded-lg border border-[#E0E0E0] px-3 py-2 text-sm text-[#1A1A1A] focus:border-[#FFD600] focus:outline-none focus:ring-1 focus:ring-[#FFD600]"
-                  />
-                  <button
-                    type="button"
-                    onClick={addHito}
-                    className="flex items-center gap-1 rounded-lg border border-[#E0E0E0] bg-white px-3 py-2 text-sm text-[#5C5C5C] hover:bg-[#F7F7F7]"
-                  >
-                    <Plus className="h-4 w-4" />
-                    Agregar
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Estado y Prioridad */}
-          <div className="rounded-lg border border-[#E0E0E0] bg-white shadow-sm">
-            <div className="border-b border-[#E0E0E0] px-6 py-4">
-              <h2 className="text-sm font-bold uppercase tracking-wide text-[#1A1A1A]">
-                Estado y Prioridad
-              </h2>
-            </div>
-            <div className="p-6">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
                 <div>
-                  <label className="block text-xs font-medium text-[#5C5C5C] mb-1.5">
+                  <label className="mb-1.5 block text-xs font-medium text-[#5C5C5C]">
                     Estado inicial
                   </label>
                   <select
                     value={formData.estado}
-                    onChange={(e) => setFormData({ ...formData, estado: e.target.value as EstadoProyecto })}
+                    onChange={(event) =>
+                      updateField("estado", event.target.value as EstadoProyecto)
+                    }
                     className="w-full rounded-lg border border-[#E0E0E0] px-4 py-2.5 text-sm text-[#1A1A1A] focus:border-[#FFD600] focus:outline-none focus:ring-1 focus:ring-[#FFD600]"
                   >
-                    {estados.map(estado => (
-                      <option key={estado} value={estado}>{estado}</option>
+                    {ESTADOS.map((estado) => (
+                      <option key={estado.value} value={estado.value}>
+                        {estado.label}
+                      </option>
                     ))}
                   </select>
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-[#5C5C5C] mb-1.5">
+                  <label className="mb-1.5 block text-xs font-medium text-[#5C5C5C]">
                     Nivel de prioridad
                   </label>
                   <select
-                    value={formData.prioridad}
-                    onChange={(e) => setFormData({ ...formData, prioridad: e.target.value })}
+                    value={formData.nivelPrioridad}
+                    onChange={(event) =>
+                      updateField("nivelPrioridad", event.target.value)
+                    }
                     className="w-full rounded-lg border border-[#E0E0E0] px-4 py-2.5 text-sm text-[#1A1A1A] focus:border-[#FFD600] focus:outline-none focus:ring-1 focus:ring-[#FFD600]"
                   >
-                    {prioridades.map(p => (
-                      <option key={p} value={p}>{p}</option>
+                    {PRIORIDADES.map((prioridad) => (
+                      <option key={prioridad.value || "none"} value={prioridad.value}>
+                        {prioridad.label}
+                      </option>
                     ))}
                   </select>
                 </div>
+                <div>
+                  <label className="mb-1.5 block text-xs font-medium text-[#5C5C5C]">
+                    Presupuesto
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={formData.presupuesto}
+                    onChange={(event) =>
+                      updateField("presupuesto", event.target.value)
+                    }
+                    className="w-full rounded-lg border border-[#E0E0E0] px-4 py-2.5 text-sm text-[#1A1A1A] focus:border-[#FFD600] focus:outline-none focus:ring-1 focus:ring-[#FFD600]"
+                    placeholder="Ej: 85000"
+                  />
+                </div>
               </div>
             </div>
-          </div>
+          </section>
 
-          {/* Actions */}
           <div className="flex items-center justify-end gap-3 pt-4">
             <Link
               href="/proyectos"
@@ -447,19 +576,12 @@ export default function NuevoProyectoPage() {
               Cancelar
             </Link>
             <button
-              type="button"
-              onClick={handleSaveDraft}
-              className="flex items-center gap-2 rounded-lg border border-[#E0E0E0] bg-white px-6 py-2.5 text-sm font-medium text-[#5C5C5C] hover:bg-[#F7F7F7]"
-            >
-              <FileText className="h-4 w-4" />
-              Guardar borrador
-            </button>
-            <button
               type="submit"
-              className="flex items-center gap-2 rounded-lg bg-[#FFD600] px-6 py-2.5 text-sm font-bold text-[#1A1A1A] hover:bg-[#C9A42B]"
+              disabled={submitting || loadingCatalogos}
+              className="flex items-center gap-2 rounded-lg bg-[#FFD600] px-6 py-2.5 text-sm font-bold text-[#1A1A1A] hover:bg-[#C9A42B] disabled:cursor-not-allowed disabled:opacity-60"
             >
-              <Save className="h-4 w-4" />
-              Crear proyecto
+              {submitting ? <Spinner /> : <Save className="h-4 w-4" />}
+              {submitting ? "Creando..." : "Crear proyecto"}
             </button>
           </div>
         </form>

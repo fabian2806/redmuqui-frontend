@@ -79,6 +79,7 @@ export interface Rol {
   id: number
   nombre: string
   descripcion: string | null
+  permisos?: Permiso[]
 }
 
 export interface Permiso {
@@ -129,6 +130,11 @@ export interface TerritorioRef {
   nombre: string
 }
 
+export interface MacroregionRef {
+  id: number
+  nombre: string
+}
+
 export interface ProyectoResponse {
   id: number
   nombre: string
@@ -143,6 +149,7 @@ export interface ProyectoResponse {
   presupuesto: number | null
   nombreMacroregion: string | null
   idMacroregion: number | null
+  macroregiones: MacroregionRef[]
   nombreEjeTematico: string | null
   idEjeTematico: number | null
   responsablePrincipal: UsuarioSummary | null
@@ -160,9 +167,28 @@ export interface ProyectoCreate {
   nivelPrioridad?: number
   presupuesto?: number
   idMacroregion?: number
+  idMacroregiones?: number[]
   idEjeTematico?: number
   idResponsablePrincipal?: number
   idTerritorios?: number[]
+}
+
+// ----- Bitacora -----
+
+export interface BitacoraResponse {
+  id: number
+  tipoAccion: string
+  fecha: string
+  descripcion: string
+  entidadReferenciada: string
+  idEntidadRef: number
+  idUsuario: number | null
+  nombreUsuario: string | null
+}
+
+export interface EquipoMember {
+  idUsuario: number
+  rolEnProyecto: string | null
 }
 
 // ----- Comunes -----
