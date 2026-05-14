@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Label } from "@/components/ui/label"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
@@ -36,7 +37,8 @@ import {
   CheckCircle2,
   XCircle,
   AlertCircle,
-  X
+  X,
+  UserX
 } from "lucide-react"
 import Link from "next/link"
 
@@ -53,6 +55,8 @@ export default function UsuariosPage() {
   const [editData, setEditData] = useState({ nombre: "", email: "", telefono: "", rolId: "", institucion: "", estado: "activo" })
   const [savingEdit, setSavingEdit] = useState(false)
   const [feedbackCards, setFeedbackCards] = useState<{ id: number; type: "success" | "error"; title: string; description?: string }[]>([])
+  const [usuarioAConfirmar, setUsuarioAConfirmar] = useState<UsuarioResponse | null>(null)
+  const [accionConfirmar, setAccionConfirmar] = useState<"activar" | "desactivar" | null>(null)
 
   useEffect(() => {
     let cancelado = false
@@ -204,6 +208,42 @@ export default function UsuariosPage() {
         addFeedbackCard({ type: "error", title: "No se pudo actualizar el usuario", description: err instanceof Error ? err.message : "Revisa los datos e inténtalo nuevamente." })
       }
     }
+  }
+
+  const handleDesactivarUsuario = async (usuario: UsuarioResponse) => {
+    try {
+      await api.patch(`/usuarios/${usuario.id}/estado?activo=false`)
+      setUsuarios((prev) => prev.map((u) => (u.id === usuario.id ? { ...u, estado: false } : u)))
+      addFeedbackCard({ type: "success", title: "Usuario desactivado correctamente" })
+    } catch (err) {
+      addFeedbackCard({ type: "error", title: "No se pudo desactivar el usuario", description: err instanceof Error ? err.message : "Inténtalo nuevamente." })
+    }
+  }
+
+  const handleActivarUsuario = async (usuario: UsuarioResponse) => {
+    try {
+      await api.patch(`/usuarios/${usuario.id}/estado?activo=true`)
+      setUsuarios((prev) => prev.map((u) => (u.id === usuario.id ? { ...u, estado: true } : u)))
+      addFeedbackCard({ type: "success", title: "Usuario activado correctamente" })
+    } catch (err) {
+      addFeedbackCard({ type: "error", title: "No se pudo activar el usuario", description: err instanceof Error ? err.message : "Inténtalo nuevamente." })
+    }
+  }
+
+  const handleConfirmarAccion = () => {
+    if (!usuarioAConfirmar || !accionConfirmar) return
+    if (accionConfirmar === "desactivar") {
+      handleDesactivarUsuario(usuarioAConfirmar)
+    } else {
+      handleActivarUsuario(usuarioAConfirmar)
+    }
+    setUsuarioAConfirmar(null)
+    setAccionConfirmar(null)
+  }
+
+  const closeConfirmacion = () => {
+    setUsuarioAConfirmar(null)
+    setAccionConfirmar(null)
   }
 
   return (
@@ -433,9 +473,9 @@ export default function UsuariosPage() {
                               Gestionar permisos
                             </DropdownMenuItem>
                             <DropdownMenuSeparator />
-                            <DropdownMenuItem className="text-red-600">
-                              <Trash2 className="mr-2 h-4 w-4" />
-                              Eliminar
+                            <DropdownMenuItem onClick={() => { setUsuarioAConfirmar(usuario); setAccionConfirmar(usuario.estado ? "desactivar" : "activar") }} className={usuario.estado ? "text-orange-600" : "text-green-600"}>
+                              <UserX className="mr-2 h-4 w-4" />
+                              {usuario.estado ? "Desactivar" : "Activar"}
                             </DropdownMenuItem>
                           </DropdownMenuContent>
                         </DropdownMenu>
@@ -581,6 +621,22 @@ export default function UsuariosPage() {
           </div>
         </DialogContent>
       </Dialog>
+      <AlertDialog open={!!usuarioAConfirmar} onOpenChange={(open) => !open && closeConfirmacion()}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Confirmar acción</AlertDialogTitle>
+            <AlertDialogDescription>
+              ¿Estás seguro de que quieres {accionConfirmar === "desactivar" ? "desactivar" : "activar"} al usuario {usuarioAConfirmar ? getNombreCompleto(usuarioAConfirmar) : ""}?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={closeConfirmacion}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={handleConfirmarAccion}>
+              {accionConfirmar === "desactivar" ? "Desactivar" : "Activar"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       {feedbackCards.length > 0 && (
         <div className="fixed bottom-6 right-6 z-[80] flex w-[min(92vw,420px)] flex-col gap-3">
           {feedbackCards.map((feedback) => (
