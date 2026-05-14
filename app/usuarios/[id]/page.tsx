@@ -7,8 +7,6 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
-import { Checkbox } from "@/components/ui/checkbox"
-import { Label } from "@/components/ui/label"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { api } from "@/lib/api"
@@ -26,38 +24,6 @@ import {
   MapPin,
   Phone,
 } from "lucide-react"
-
-type PermisoKey =
-  | "ver_proyectos"
-  | "crear_proyectos"
-  | "editar_proyectos"
-  | "eliminar_proyectos"
-  | "aprobar_informes"
-  | "gestionar_usuarios"
-  | "exportar_reportes"
-  | "configurar_sistema"
-
-const permisosLabels: Record<PermisoKey, { label: string; description: string }> = {
-  ver_proyectos: { label: "Ver proyectos e informes", description: "Acceso de lectura a todos los proyectos e informes" },
-  crear_proyectos: { label: "Crear proyectos e informes", description: "Puede crear nuevos proyectos e informes" },
-  editar_proyectos: { label: "Editar proyectos e informes", description: "Puede modificar proyectos e informes existentes" },
-  eliminar_proyectos: { label: "Eliminar proyectos e informes", description: "Puede eliminar permanentemente datos del sistema" },
-  aprobar_informes: { label: "Aprobar informes y productos", description: "Puede aprobar y publicar informes oficiales" },
-  gestionar_usuarios: { label: "Gestionar usuarios", description: "Puede crear, editar y eliminar usuarios" },
-  exportar_reportes: { label: "Exportar reportes", description: "Puede generar y descargar reportes del sistema" },
-  configurar_sistema: { label: "Configurar sistema", description: "Acceso a configuraciones avanzadas del sistema" },
-}
-
-const permisosBase: Record<PermisoKey, boolean> = {
-  ver_proyectos: true,
-  crear_proyectos: false,
-  editar_proyectos: false,
-  eliminar_proyectos: false,
-  aprobar_informes: false,
-  gestionar_usuarios: false,
-  exportar_reportes: true,
-  configurar_sistema: false,
-}
 
 export default function UsuarioDetallePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params)
@@ -144,7 +110,6 @@ export default function UsuarioDetallePage({ params }: { params: Promise<{ id: s
 
   const nombreCompleto = usuario ? getNombreCompleto(usuario) : ""
   const descripcionRol = useMemo(() => getRolDescripcion(usuario?.nombreRol ?? ""), [usuario?.nombreRol])
-  const permisosDelRol = useMemo(() => getPermisosPorRol(usuario?.nombreRol ?? ""), [usuario?.nombreRol])
 
   if (cargando) {
     return (
@@ -269,28 +234,25 @@ export default function UsuarioDetallePage({ params }: { params: Promise<{ id: s
                     </div>
                     <div>
                       <h4 className="font-medium mb-3">Permisos Asignados</h4>
-                      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                        {Object.entries(permisosLabels).map(([key, { label, description }]) => {
-                          const activo = permisosDelRol[key as PermisoKey] ?? permisos.some((permiso) => permisoCoincideConKey(permiso.nombre, key as PermisoKey))
+                      {permisos.length > 0 ? (
+                        <div className="grid gap-2 sm:grid-cols-2">
+                          {permisos.map((permiso) => {
+                            const permisoTexto = getPermisoTexto(permiso)
 
-                          return (
-                            <div
-                              key={key}
-                              className={`p-4 rounded-lg border transition-colors ${activo ? "border-primary/50 bg-primary/5" : "border-border opacity-80"}`}
-                            >
-                              <div className="flex items-start gap-3">
-                                <Checkbox id={`detalle-${key}`} checked={activo} disabled />
+                            return (
+                              <div key={permiso.id} className="flex items-start gap-3 rounded border border-green-200 bg-green-50 p-3">
+                                <CheckCircle2 className="mt-0.5 h-4 w-4 text-green-600 shrink-0" />
                                 <div>
-                                  <Label htmlFor={`detalle-${key}`} className="text-sm font-medium cursor-not-allowed">
-                                    {label}
-                                  </Label>
-                                  <p className="text-xs text-muted-foreground mt-1">{description}</p>
+                                  <p className="text-sm font-medium">{permisoTexto.label}</p>
+                                  <p className="mt-1 text-xs text-muted-foreground">{permisoTexto.description}</p>
                                 </div>
                               </div>
-                            </div>
-                          )
-                        })}
-                      </div>
+                            )
+                          })}
+                        </div>
+                      ) : (
+                        <p className="text-sm text-muted-foreground">Este rol no tiene permisos registrados.</p>
+                      )}
                     </div>
                   </div>
                 </TabsContent>
@@ -412,81 +374,6 @@ function getRolDescripcion(rol: string) {
   return "Permisos definidos por el rol asignado en el sistema."
 }
 
-function getPermisosPorRol(rol: string): Record<PermisoKey, boolean> {
-  const rolNormalizado = normalizeRol(rol)
-
-  if (rolNormalizado === "administrador") {
-    return {
-      ver_proyectos: true,
-      crear_proyectos: true,
-      editar_proyectos: true,
-      eliminar_proyectos: true,
-      aprobar_informes: true,
-      gestionar_usuarios: true,
-      exportar_reportes: true,
-      configurar_sistema: true,
-    }
-  }
-
-  if (rolNormalizado === "coordinador" || rolNormalizado.includes("coordin")) {
-    return {
-      ver_proyectos: true,
-      crear_proyectos: true,
-      editar_proyectos: true,
-      eliminar_proyectos: false,
-      aprobar_informes: true,
-      gestionar_usuarios: false,
-      exportar_reportes: true,
-      configurar_sistema: false,
-    }
-  }
-
-  if (rolNormalizado === "tecnico" || rolNormalizado.includes("tecnico")) {
-    return {
-      ver_proyectos: true,
-      crear_proyectos: true,
-      editar_proyectos: true,
-      eliminar_proyectos: false,
-      aprobar_informes: false,
-      gestionar_usuarios: false,
-      exportar_reportes: true,
-      configurar_sistema: false,
-    }
-  }
-
-  if (rolNormalizado === "consultor" || rolNormalizado.includes("lectura") || rolNormalizado.includes("institucion")) {
-    return {
-      ver_proyectos: true,
-      crear_proyectos: false,
-      editar_proyectos: false,
-      eliminar_proyectos: false,
-      aprobar_informes: false,
-      gestionar_usuarios: false,
-      exportar_reportes: true,
-      configurar_sistema: false,
-    }
-  }
-
-  return permisosBase
-}
-
-function permisoCoincideConKey(nombre: string, key: PermisoKey) {
-  const permiso = normalizeRol(nombre).replaceAll("_", " ")
-
-  const aliases: Record<PermisoKey, string[]> = {
-    ver_proyectos: ["ver proyectos", "leer proyectos", "proyectos read", "informes read"],
-    crear_proyectos: ["crear proyectos", "proyectos create", "informes create"],
-    editar_proyectos: ["editar proyectos", "actualizar proyectos", "proyectos update", "informes update"],
-    eliminar_proyectos: ["eliminar proyectos", "proyectos delete", "informes delete"],
-    aprobar_informes: ["aprobar informes", "aprobar productos", "informes approve"],
-    gestionar_usuarios: ["gestionar usuarios", "usuarios", "users"],
-    exportar_reportes: ["exportar reportes", "reportes", "export"],
-    configurar_sistema: ["configurar sistema", "configuracion", "settings"],
-  }
-
-  return aliases[key].some((alias) => permiso.includes(alias))
-}
-
 function getProyectoEstadoColor(estado: string) {
   if (estado === "EN_CURSO") return "bg-blue-50 text-blue-700 border-blue-200"
   if (estado === "FINALIZADO") return "bg-green-50 text-green-700 border-green-200"
@@ -507,6 +394,80 @@ function formatPermiso(value: string) {
     .toLowerCase()
     .replaceAll("_", " ")
     .replace(/\b\w/g, (letter) => letter.toUpperCase())
+}
+
+function getPermisoTexto(permiso: Permiso) {
+  const textos: Record<string, { label: string; description: string }> = {
+    USUARIOS_READ: {
+      label: "Ver usuarios",
+      description: "Puede consultar usuarios, roles y datos de acceso registrados.",
+    },
+    USUARIOS_CREATE: {
+      label: "Crear usuarios",
+      description: "Puede registrar nuevos usuarios en la plataforma.",
+    },
+    USUARIOS_UPDATE: {
+      label: "Editar usuarios",
+      description: "Puede actualizar informacion personal, rol e institucion de usuarios.",
+    },
+    USUARIOS_DEACTIVATE: {
+      label: "Activar o desactivar usuarios",
+      description: "Puede cambiar el estado de acceso de usuarios del sistema.",
+    },
+    CATALOGOS_READ: {
+      label: "Ver catalogos",
+      description: "Puede consultar macroregiones, instituciones, territorios y ejes tematicos.",
+    },
+    CATALOGOS_MANAGE: {
+      label: "Administrar catalogos",
+      description: "Puede crear, editar y mantener los catalogos base del sistema.",
+    },
+    PROYECTOS_READ: {
+      label: "Ver proyectos",
+      description: "Puede consultar proyectos, avances, responsables y territorios asociados.",
+    },
+    PROYECTOS_CREATE: {
+      label: "Crear proyectos",
+      description: "Puede registrar nuevos proyectos institucionales.",
+    },
+    PROYECTOS_UPDATE: {
+      label: "Editar proyectos",
+      description: "Puede modificar datos, equipo, avance y configuracion de proyectos.",
+    },
+    DOCUMENTOS_READ: {
+      label: "Ver documentos",
+      description: "Puede consultar documentos, informes y productos asociados.",
+    },
+    DOCUMENTOS_CREATE: {
+      label: "Crear documentos",
+      description: "Puede cargar nuevos informes, productos o archivos de soporte.",
+    },
+    DOCUMENTOS_UPDATE: {
+      label: "Editar documentos",
+      description: "Puede actualizar informacion y archivos de documentos existentes.",
+    },
+    DOCUMENTOS_VALIDATE: {
+      label: "Validar documentos",
+      description: "Puede revisar, aprobar u observar informes y productos oficiales.",
+    },
+    BITACORA_READ: {
+      label: "Ver bitacora",
+      description: "Puede revisar el historial de cambios y actividad registrada.",
+    },
+    REPORTES_READ: {
+      label: "Ver reportes",
+      description: "Puede consultar indicadores, resumenes y reportes del sistema.",
+    },
+    REPORTES_EXPORT: {
+      label: "Exportar reportes",
+      description: "Puede descargar reportes y datos para analisis externo.",
+    },
+  }
+
+  return textos[permiso.nombre] ?? {
+    label: formatPermiso(permiso.nombre),
+    description: permiso.tipo ? `Permiso de tipo ${formatPermiso(permiso.tipo).toLowerCase()} asignado a este rol.` : "Permiso asignado a este rol.",
+  }
 }
 
 function formatDateTime(value: string | null) {
