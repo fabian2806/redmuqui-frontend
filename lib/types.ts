@@ -165,6 +165,24 @@ export interface ProyectoCreate {
   idTerritorios?: number[]
 }
 
+// ----- Bitacora -----
+
+export interface BitacoraResponse {
+  id: number
+  tipoAccion: string
+  fecha: string
+  descripcion: string
+  entidadReferenciada: string
+  idEntidadRef: number
+  idUsuario: number | null
+  nombreUsuario: string | null
+}
+
+export interface EquipoMember {
+  idUsuario: number
+  rolEnProyecto: string | null
+}
+
 // ----- Comunes -----
 
 export interface PageResponse<T> {
