@@ -99,8 +99,8 @@ export default function NuevoUsuarioPage() {
     if (!formData.password.trim()) validationErrors.push({ title: "Contraseña requerida", description: "Ingresa una contraseña segura." })
     if (!formData.confirmPassword.trim()) validationErrors.push({ title: "Confirmación requerida", description: "Confirma la contraseña." })
     if (formData.password && formData.confirmPassword && formData.password !== formData.confirmPassword) validationErrors.push({ title: "Contraseñas no coinciden", description: "La contraseña y su confirmación deben ser iguales." })
-    if (formData.telefono.trim() && !/^\d{9}$/.test(formData.telefono.trim())) validationErrors.push({ title: "Teléfono inválido", description: "El teléfono debe contener solo números y exactamente 9 dígitos." })
 
+    if (formData.telefono.trim() && !/^\d{9}$/.test(formData.telefono.trim())) validationErrors.push({ title: "Teléfono inválido", description: "El teléfono debe contener solo números y exactamente 9 dígitos." })
     if (validationErrors.length > 0) {
       validationErrors.forEach((error) => addFeedbackCard({ type: "error", ...error }))
       return

@@ -19,19 +19,19 @@ export function getPermisoTexto(permiso: Permiso) {
     },
     USUARIOS_UPDATE: {
       label: "Editar usuarios",
-      description: "Puede actualizar informacion personal, rol e institucion de usuarios.",
+      description: "Puede actualizar información personal, rol e institución de usuarios.",
     },
     USUARIOS_DEACTIVATE: {
       label: "Activar o desactivar usuarios",
       description: "Puede cambiar el estado de acceso de usuarios del sistema.",
     },
     CATALOGOS_READ: {
-      label: "Ver catalogos",
-      description: "Puede consultar macroregiones, instituciones, territorios y ejes tematicos.",
+      label: "Ver catálogos",
+      description: "Puede consultar macroregiones, instituciones, territorios y ejes temáticos.",
     },
     CATALOGOS_MANAGE: {
-      label: "Administrar catalogos",
-      description: "Puede crear, editar y mantener los catalogos base del sistema.",
+      label: "Administrar catálogos",
+      description: "Puede crear, editar y mantener los catálogos base del sistema.",
     },
     PROYECTOS_READ: {
       label: "Ver proyectos",
@@ -43,7 +43,7 @@ export function getPermisoTexto(permiso: Permiso) {
     },
     PROYECTOS_UPDATE: {
       label: "Editar proyectos",
-      description: "Puede modificar datos, equipo, avance y configuracion de proyectos.",
+      description: "Puede modificar datos, equipo, avance y configuración de proyectos.",
     },
     DOCUMENTOS_READ: {
       label: "Ver documentos",
@@ -55,23 +55,23 @@ export function getPermisoTexto(permiso: Permiso) {
     },
     DOCUMENTOS_UPDATE: {
       label: "Editar documentos",
-      description: "Puede actualizar informacion y archivos de documentos existentes.",
+      description: "Puede actualizar información y archivos de documentos existentes.",
     },
     DOCUMENTOS_VALIDATE: {
       label: "Validar documentos",
       description: "Puede revisar, aprobar u observar informes y productos oficiales.",
     },
     BITACORA_READ: {
-      label: "Ver bitacora",
+      label: "Ver bitácora",
       description: "Puede revisar el historial de cambios y actividad registrada.",
     },
     REPORTES_READ: {
       label: "Ver reportes",
-      description: "Puede consultar indicadores, resumenes y reportes del sistema.",
+      description: "Puede consultar indicadores, resúmenes y reportes del sistema.",
     },
     REPORTES_EXPORT: {
       label: "Exportar reportes",
-      description: "Puede descargar reportes y datos para analisis externo.",
+      description: "Puede descargar reportes y datos para análisis externo.",
     },
   }
 

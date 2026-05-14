@@ -48,7 +48,7 @@ export default function UsuarioDetallePage({ params }: { params: Promise<{ id: s
 
         setUsuario(usuarioData)
 
-        const [permisosResult, proyectosResult, bitacoraResult] = await Promise.allSettled([
+        const [permisosResult, proyectosResult, bitácoraResult] = await Promise.allSettled([
           api.get<Permiso[]>(`/roles/${usuarioData.idRol}/permisos`),
           api.get<PageResponse<ProyectoResponse>>("/proyectos?size=100&sort=id,asc"),
           api.get<PageResponse<BitacoraResponse>>("/bitacora?size=100&sort=fecha,desc"),
@@ -87,8 +87,8 @@ export default function UsuarioDetallePage({ params }: { params: Promise<{ id: s
           setProyectosUsuario([])
         }
 
-        if (bitacoraResult.status === "fulfilled") {
-          setActividadUsuario(bitacoraResult.value.content.filter((entrada) => entrada.idUsuario === usuarioData.id).slice(0, 10))
+        if (bitácoraResult.status === "fulfilled") {
+          setActividadUsuario(bitácoraResult.value.content.filter((entrada) => entrada.idUsuario === usuarioData.id).slice(0, 10))
         } else {
           setActividadUsuario([])
         }
@@ -149,7 +149,7 @@ export default function UsuarioDetallePage({ params }: { params: Promise<{ id: s
           </Link>
           <div className="flex-1">
             <h1 className="text-2xl font-bold text-foreground">Perfil de Usuario</h1>
-            <p className="text-muted-foreground">Informacion detallada y actividad</p>
+            <p className="text-muted-foreground">Información detallada y actividad</p>
           </div>
         </div>
 
@@ -192,7 +192,7 @@ export default function UsuarioDetallePage({ params }: { params: Promise<{ id: s
                   )}
                   <div className="flex items-center gap-3 text-sm">
                     <Calendar className="h-4 w-4 text-muted-foreground shrink-0" />
-                    <span>Ultimo acceso: {formatDateTime(usuario.ultimoAcceso) ?? "Sin registro"}</span>
+                    <span>Último acceso: {formatDateTime(usuario.ultimoAcceso) ?? "Sin registro"}</span>
                   </div>
                 </div>
 
@@ -264,7 +264,7 @@ export default function UsuarioDetallePage({ params }: { params: Promise<{ id: s
                       <TableHeader>
                         <TableRow>
                           <TableHead>Proyecto</TableHead>
-                          <TableHead>Macroregion</TableHead>
+                          <TableHead>Macroregión</TableHead>
                           <TableHead>Estado</TableHead>
                           <TableHead>Avance</TableHead>
                         </TableRow>
@@ -280,7 +280,7 @@ export default function UsuarioDetallePage({ params }: { params: Promise<{ id: s
                             <TableCell>
                               <div className="flex items-center gap-1.5 text-sm">
                                 <MapPin className="h-3.5 w-3.5 text-muted-foreground" />
-                                {proyecto.nombreMacroregion ?? "Sin macroregion"}
+                                {proyecto.nombreMacroregion ?? "Sin macroregión"}
                               </div>
                             </TableCell>
                             <TableCell>
@@ -369,9 +369,9 @@ function getRolDescripcion(rol: string) {
   if (rolNormalizado.includes("administrador")) return "Acceso completo a todas las funcionalidades del sistema."
   if (rolNormalizado.includes("secretaria")) return "Puede gestionar proyectos, aprobar informes y supervisar el equipo."
   if (rolNormalizado.includes("tecnico")) return "Puede crear y editar proyectos e informes asignados."
-  if (rolNormalizado.includes("coordin")) return "Gestiona proyectos en su macroregion asignada."
-  if (rolNormalizado.includes("institucion")) return "Acceso de lectura con capacidad de exportacion."
-  if (rolNormalizado.includes("lectura") || rolNormalizado.includes("consultor")) return "Solo puede visualizar informacion del sistema."
+  if (rolNormalizado.includes("coordin")) return "Gestiona proyectos en su macroregión asignada."
+  if (rolNormalizado.includes("institucion")) return "Acceso de lectura con capacidad de exportación."
+  if (rolNormalizado.includes("lectura") || rolNormalizado.includes("consultor")) return "Solo puede visualizar información del sistema."
   return "Permisos definidos por el rol asignado en el sistema."
 }
 
