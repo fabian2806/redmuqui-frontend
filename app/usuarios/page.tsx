@@ -133,16 +133,18 @@ export default function UsuariosPage() {
 
   const roles = Array.from(new Set(usuarios.map(usuario => usuario.nombreRol).filter(Boolean))).sort()
 
-  const openEditModal = (usuario: UsuarioResponse) => {
+  const openEditModal = async (usuario: UsuarioResponse) => {
     setUsuarioEditando(usuario)
-    setEditData({
-      nombre: getNombreCompleto(usuario),
-      email: usuario.email,
-      telefono: usuario.telefono ?? "",
-      rolId: String(usuario.idRol),
-      institucion: usuario.idInstitucion ? String(usuario.idInstitucion) : "",
-      estado: usuario.estado ? "activo" : "inactivo",
-    })
+    setEditData(getEditDataFromUsuario(usuario))
+
+    try {
+      const detalle = await api.get<UsuarioResponse>(`/usuarios/${usuario.id}`)
+      setUsuarioEditando(detalle)
+      setEditData(getEditDataFromUsuario(detalle))
+      setUsuarios((prev) => prev.map((item) => (item.id === detalle.id ? { ...item, ...detalle } : item)))
+    } catch (err) {
+      console.error("No se pudo cargar el detalle actualizado del usuario", err)
+    }
   }
 
   const closeEditModal = () => {
@@ -153,13 +155,10 @@ export default function UsuariosPage() {
   const handleUpdateUsuario = async () => {
     if (!usuarioEditando) return
     const validationErrors: { title: string; description: string }[] = []
-    const telefonoLimpio = editData.telefono.trim()
     if (!editData.nombre.trim()) validationErrors.push({ title: "Nombre completo requerido", description: "Completa el nombre completo." })
     if (!editData.email.trim()) validationErrors.push({ title: "Correo electrónico requerido", description: "Ingresa un correo electrónico válido." })
     if (!editData.rolId) validationErrors.push({ title: "Rol requerido", description: "Selecciona el rol del usuario." })
     if (!editData.institucion) validationErrors.push({ title: "Organización requerida", description: "Selecciona una organización." })
-    if (!telefonoLimpio) validationErrors.push({ title: "Teléfono requerido", description: "Ingresa el teléfono del usuario." })
-    if (telefonoLimpio && !/^\d{9}$/.test(telefonoLimpio)) validationErrors.push({ title: "Teléfono inválido", description: "El teléfono debe contener solo números y exactamente 9 dígitos." })
     if (validationErrors.length > 0) {
       validationErrors.forEach((err) => addFeedbackCard({ type: "error", ...err }))
       return
@@ -602,6 +601,17 @@ export default function UsuariosPage() {
 
 function getNombreCompleto(usuario: UsuarioResponse) {
   return `${usuario.nombres} ${usuario.apellidos}`.trim()
+}
+
+function getEditDataFromUsuario(usuario: UsuarioResponse) {
+  return {
+    nombre: getNombreCompleto(usuario),
+    email: usuario.email,
+    telefono: usuario.telefono ?? "",
+    rolId: String(usuario.idRol),
+    institucion: usuario.idInstitucion ? String(usuario.idInstitucion) : "",
+    estado: usuario.estado ? "activo" : "inactivo",
+  }
 }
 
 function getEstadoValue(estado: boolean) {

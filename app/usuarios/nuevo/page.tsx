@@ -1,5 +1,4 @@
 "use client"
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { useEffect, useState } from "react"
 import { AppLayout } from "@/components/layout/app-layout"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -10,7 +9,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Checkbox } from "@/components/ui/checkbox"
 import { Separator } from "@/components/ui/separator"
 import { api, ApiError } from "@/lib/api"
-import type { Institucion, Rol, UsuarioCreate } from "@/lib/types"
+import { getPermisoTexto } from "@/lib/permissions"
+import type { Institucion, Permiso, Rol, UsuarioCreate } from "@/lib/types"
 import { ArrowLeft, Save, User, Mail, PhoneIcon, Building2, Shield, Eye, EyeOff, CheckCircle2, AlertCircle, X } from "lucide-react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
@@ -21,6 +21,8 @@ export default function NuevoUsuarioPage() {
   const [saving, setSaving] = useState(false)
   const [roles, setRoles] = useState<Rol[]>([])
   const [instituciones, setInstituciones] = useState<Institucion[]>([])
+  const [permisosSeleccionados, setPermisosSeleccionados] = useState<Permiso[]>([])
+  const [cargandoPermisos, setCargandoPermisos] = useState(false)
   const [feedbackCards, setFeedbackCards] = useState<{ id: number; type: "success" | "error"; title: string; description?: string }[]>([])
   const [formData, setFormData] = useState({
     nombre: "",
@@ -31,16 +33,6 @@ export default function NuevoUsuarioPage() {
     rolId: "",
     institucion: "",
     estado: "activo",
-    permisos: {
-      ver_proyectos: true,
-      crear_proyectos: false,
-      editar_proyectos: false,
-      eliminar_proyectos: false,
-      aprobar_informes: false,
-      gestionar_usuarios: false,
-      exportar_reportes: true,
-      configurar_sistema: false,
-    },
   })
 
   const addFeedbackCard = (card: { type: "success" | "error"; title: string; description?: string }) => {
@@ -64,27 +56,28 @@ export default function NuevoUsuarioPage() {
     void loadCatalogos()
   }, [])
 
-  const handleRolChange = (rolId: string) => {
-    let nuevosPermisos = { ...formData.permisos }
+  const handleRolChange = async (rolId: string) => {
     const selectedRol = roles.find((role) => String(role.id) === rolId)
-    const rolNombre = selectedRol?.nombre.toLowerCase() ?? ""
 
-    switch (rolNombre) {
-      case "administrador":
-        nuevosPermisos = { ver_proyectos: true, crear_proyectos: true, editar_proyectos: true, eliminar_proyectos: true, aprobar_informes: true, gestionar_usuarios: true, exportar_reportes: true, configurar_sistema: true }
-        break
-      case "coordinador":
-        nuevosPermisos = { ver_proyectos: true, crear_proyectos: true, editar_proyectos: true, eliminar_proyectos: false, aprobar_informes: true, gestionar_usuarios: false, exportar_reportes: true, configurar_sistema: false }
-        break
-      case "tecnico":
-        nuevosPermisos = { ver_proyectos: true, crear_proyectos: true, editar_proyectos: true, eliminar_proyectos: false, aprobar_informes: false, gestionar_usuarios: false, exportar_reportes: true, configurar_sistema: false }
-        break
-      case "consultor":
-        nuevosPermisos = { ver_proyectos: true, crear_proyectos: false, editar_proyectos: false, eliminar_proyectos: false, aprobar_informes: false, gestionar_usuarios: false, exportar_reportes: true, configurar_sistema: false }
-        break
+    setFormData({ ...formData, rolId })
+    setPermisosSeleccionados(selectedRol?.permisos ?? [])
+
+    if (!selectedRol || selectedRol.permisos?.length) {
+      setCargandoPermisos(false)
+      return
     }
 
-    setFormData({ ...formData, rolId, permisos: nuevosPermisos })
+    try {
+      setCargandoPermisos(true)
+      const permisos = await api.get<Permiso[]>(`/roles/${rolId}/permisos`)
+      setPermisosSeleccionados(permisos)
+      setRoles((prev) => prev.map((rol) => (String(rol.id) === rolId ? { ...rol, permisos } : rol)))
+    } catch (error) {
+      console.error("No se pudieron cargar los permisos del rol", error)
+      setPermisosSeleccionados([])
+    } finally {
+      setCargandoPermisos(false)
+    }
   }
 
   const splitNombreCompleto = (fullName: string) => {
@@ -159,17 +152,6 @@ export default function NuevoUsuarioPage() {
     }
   }
 
-  const permisosLabels: Record<string, { label: string; description: string }> = {
-    ver_proyectos: { label: "Ver proyectos e informes", description: "Acceso de lectura a todos los proyectos e informes" },
-    crear_proyectos: { label: "Crear proyectos e informes", description: "Puede crear nuevos proyectos e informes" },
-    editar_proyectos: { label: "Editar proyectos e informes", description: "Puede modificar proyectos e informes existentes" },
-    eliminar_proyectos: { label: "Eliminar proyectos e informes", description: "Puede eliminar permanentemente datos del sistema" },
-    aprobar_informes: { label: "Aprobar informes y productos", description: "Puede aprobar y publicar informes oficiales" },
-    gestionar_usuarios: { label: "Gestionar usuarios", description: "Puede crear, editar y eliminar usuarios" },
-    exportar_reportes: { label: "Exportar reportes", description: "Puede generar y descargar reportes del sistema" },
-    configurar_sistema: { label: "Configurar sistema", description: "Acceso a configuraciones avanzadas del sistema" },
-  }
-
   return (
     <AppLayout>
       <div className="space-y-6">
@@ -186,7 +168,7 @@ export default function NuevoUsuarioPage() {
 
             <Card><CardHeader><CardTitle className="flex items-center gap-2"><Shield className="h-5 w-5" />Rol y Estado</CardTitle><CardDescription>Configuración de acceso</CardDescription></CardHeader><CardContent className="space-y-6"><div className="space-y-2"><Label htmlFor="rol">Rol del Usuario *</Label><Select value={formData.rolId} onValueChange={handleRolChange}><SelectTrigger><SelectValue placeholder="Seleccionar rol" /></SelectTrigger><SelectContent>{roles.map((rol) => (<SelectItem key={rol.id} value={String(rol.id)}>{rol.nombre}</SelectItem>))}</SelectContent></Select></div><div className="space-y-2"><Label>Estado</Label><Select value={formData.estado} onValueChange={(value) => setFormData({ ...formData, estado: value })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="activo"><div className="flex items-center gap-2"><div className="h-2 w-2 rounded-full bg-green-500" />Activo</div></SelectItem><SelectItem value="inactivo"><div className="flex items-center gap-2"><div className="h-2 w-2 rounded-full bg-gray-400" />Inactivo</div></SelectItem></SelectContent></Select></div></CardContent></Card>
 
-            <Card className="lg:col-span-3"><CardHeader><CardTitle>Permisos Específicos</CardTitle><CardDescription>Los permisos se asignan automáticamente según el rol seleccionado y no pueden editarse manualmente.</CardDescription></CardHeader><CardContent><div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">{Object.entries(permisosLabels).map(([key, { label, description }]) => (<div key={key} className={`p-4 rounded-lg border transition-colors ${formData.permisos[key as keyof typeof formData.permisos] ? "border-primary/50 bg-primary/5" : "border-border opacity-80"}`}><div className="flex items-start gap-3"><Checkbox id={key} checked={formData.permisos[key as keyof typeof formData.permisos]} disabled /><div><Label htmlFor={key} className="text-sm font-medium cursor-not-allowed">{label}</Label><p className="text-xs text-muted-foreground mt-1">{description}</p></div></div></div>))}</div></CardContent></Card>
+            <Card className="lg:col-span-3"><CardHeader><CardTitle>Permisos Específicos</CardTitle><CardDescription>Los permisos se asignan automáticamente según el rol seleccionado y no pueden editarse manualmente.</CardDescription></CardHeader><CardContent>{cargandoPermisos ? (<p className="text-sm text-muted-foreground">Cargando permisos del rol...</p>) : permisosSeleccionados.length > 0 ? (<div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">{permisosSeleccionados.map((permiso) => { const permisoTexto = getPermisoTexto(permiso); return (<div key={permiso.id} className="rounded-lg border border-primary/50 bg-primary/5 p-4 transition-colors"><div className="flex items-start gap-3"><Checkbox id={`permiso-${permiso.id}`} checked disabled /><div><Label htmlFor={`permiso-${permiso.id}`} className="text-sm font-medium cursor-not-allowed">{permisoTexto.label}</Label><p className="text-xs text-muted-foreground mt-1">{permisoTexto.description}</p></div></div></div>) })}</div>) : (<p className="text-sm text-muted-foreground">{formData.rolId ? "Este rol no tiene permisos registrados." : "Selecciona un rol para ver sus permisos."}</p>)}</CardContent></Card>
           </div>
 
           <div className="flex items-center justify-end gap-3 mt-6"><Link href="/usuarios"><Button type="button" variant="outline">Cancelar</Button></Link><Button type="submit" className="bg-primary hover:bg-primary/90" disabled={saving}><Save className="mr-2 h-4 w-4" />{saving ? "Creando..." : "Crear Usuario"}</Button></div>
