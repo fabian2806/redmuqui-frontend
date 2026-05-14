@@ -1,0 +1,6 @@
+export { BaseCatalogService } from "./BaseCatalogService"
+export { macroregionCatalogService } from "./macroregionCatalogService"
+export { ejeTematicoCatalogService } from "./ejeTematicoCatalogService"
+export { institucionCatalogService } from "./institucionCatalogService"
+export { territorioCatalogService } from "./territorioCatalogService"
+export type * from "./types"
