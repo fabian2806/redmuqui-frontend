@@ -1,11 +1,13 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { AppLayout } from "@/components/layout/app-layout"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Label } from "@/components/ui/label"
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
@@ -17,15 +19,14 @@ import {
   DropdownMenuSeparator, 
   DropdownMenuTrigger 
 } from "@/components/ui/dropdown-menu"
-import { usuarios, institucionesMiembro } from "@/lib/data"
+import { api, ApiError } from "@/lib/api"
+import type { Institucion, PageResponse, Rol, UsuarioResponse, UsuarioUpdate } from "@/lib/types"
 import { 
   Search, 
-  Plus, 
   MoreHorizontal, 
   UserCog, 
   Shield,
   Building2,
-  Mail,
   Calendar,
   Eye,
   Pencil,
@@ -33,52 +34,176 @@ import {
   UserPlus,
   Users,
   CheckCircle2,
-  XCircle
+  XCircle,
+  AlertCircle,
+  X
 } from "lucide-react"
 import Link from "next/link"
 
 export default function UsuariosPage() {
+  const [usuarios, setUsuarios] = useState<UsuarioResponse[]>([])
+  const [cargando, setCargando] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const [busqueda, setBusqueda] = useState("")
   const [filtroRol, setFiltroRol] = useState("todos")
   const [filtroEstado, setFiltroEstado] = useState("todos")
+  const [rolesCatalogo, setRolesCatalogo] = useState<Rol[]>([])
+  const [instituciones, setInstituciones] = useState<Institucion[]>([])
+  const [usuarioEditando, setUsuarioEditando] = useState<UsuarioResponse | null>(null)
+  const [editData, setEditData] = useState({ nombre: "", email: "", telefono: "", rolId: "", institucion: "", estado: "activo" })
+  const [savingEdit, setSavingEdit] = useState(false)
+  const [feedbackCards, setFeedbackCards] = useState<{ id: number; type: "success" | "error"; title: string; description?: string }[]>([])
+
+  useEffect(() => {
+    let cancelado = false
+
+    const cargarUsuarios = async () => {
+      try {
+        setCargando(true)
+        setError(null)
+        const data = await api.get<PageResponse<UsuarioResponse>>("/usuarios?size=100&sort=id,asc")
+        if (!cancelado) setUsuarios(data.content)
+      } catch (err) {
+        if (!cancelado) {
+          setError(err instanceof Error ? err.message : "No se pudieron cargar los usuarios")
+        }
+      } finally {
+        if (!cancelado) setCargando(false)
+      }
+    }
+
+    cargarUsuarios()
+
+    return () => {
+      cancelado = true
+    }
+  }, [])
+
+  useEffect(() => {
+    const loadCatalogos = async () => {
+      try {
+        const [rolesData, institucionesData] = await Promise.all([api.get<Rol[]>("/roles"), api.get<Institucion[]>("/instituciones")])
+        setRolesCatalogo(rolesData)
+        setInstituciones(institucionesData)
+      } catch (error) {
+        console.error("No se pudieron cargar catálogos", error)
+      }
+    }
+    void loadCatalogos()
+  }, [])
+
+  const addFeedbackCard = (card: { type: "success" | "error"; title: string; description?: string }) => {
+    const id = Date.now() + Math.floor(Math.random() * 1000)
+    setFeedbackCards((prev) => [...prev, { id, ...card }])
+    setTimeout(() => setFeedbackCards((prev) => prev.filter((item) => item.id !== id)), 5000)
+  }
 
   // Filtrar usuarios
-  const usuariosFiltrados = usuarios.filter(usuario => {
-    const matchBusqueda = usuario.nombre.toLowerCase().includes(busqueda.toLowerCase()) ||
+  const usuariosFiltrados = useMemo(() => usuarios.filter(usuario => {
+    const nombreCompleto = getNombreCompleto(usuario)
+    const matchBusqueda = nombreCompleto.toLowerCase().includes(busqueda.toLowerCase()) ||
                           usuario.email.toLowerCase().includes(busqueda.toLowerCase())
-    const matchRol = filtroRol === "todos" || usuario.rol === filtroRol
-    const matchEstado = filtroEstado === "todos" || usuario.estado === filtroEstado
+    const matchRol = filtroRol === "todos" || usuario.nombreRol === filtroRol
+    const matchEstado = filtroEstado === "todos" || getEstadoValue(usuario.estado) === filtroEstado
     return matchBusqueda && matchRol && matchEstado
-  })
+  }), [busqueda, filtroEstado, filtroRol, usuarios])
 
   // Estadísticas
   const totalUsuarios = usuarios.length
-  const usuariosActivos = usuarios.filter(u => u.estado === "Activo").length
-  const admins = usuarios.filter(u => u.rol === "Administrador").length
-  const coordinadores = usuarios.filter(u => u.rol === "Coordinación Macroregional").length
+  const usuariosActivos = usuarios.filter(u => u.estado).length
+  const admins = usuarios.filter(u => normalizeRol(u.nombreRol).includes("administrador")).length
+  const coordinadores = usuarios.filter(u => normalizeRol(u.nombreRol).includes("coordin")).length
 
   const getRolLabel = (rol: string) => {
-    switch (rol) {
-      case "Administrador": return "Administrador"
-      case "Coordinación Macroregional": return "Coordinador"
-      case "tecnico": return "Técnico"
-      case "consultor": return "Consultor"
-      default: return rol
-    }
+    return rol || "Sin rol"
   }
 
   const getRolColor = (rol: string) => {
-    switch (rol) {
-      case "Administrador": return "bg-red-100 text-red-700 border-red-200"
-      case "Coordinación Macroregional": return "bg-blue-100 text-blue-700 border-blue-200"
-      case "tecnico": return "bg-green-100 text-green-700 border-green-200"
-      case "consultor": return "bg-purple-100 text-purple-700 border-purple-200"
-      default: return "bg-gray-100 text-gray-700 border-gray-200"
-    }
+    const rolNormalizado = normalizeRol(rol)
+    if (rolNormalizado.includes("administrador")) return "bg-red-100 text-red-700 border-red-200"
+    if (rolNormalizado.includes("coordin")) return "bg-blue-100 text-blue-700 border-blue-200"
+    if (rolNormalizado.includes("tecnico")) return "bg-green-100 text-green-700 border-green-200"
+    if (rolNormalizado.includes("consultor") || rolNormalizado.includes("lectura")) return "bg-purple-100 text-purple-700 border-purple-200"
+    return "bg-gray-100 text-gray-700 border-gray-200"
   }
 
   const getInitials = (nombre: string) => {
     return nombre.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()
+  }
+
+  const roles = Array.from(new Set(usuarios.map(usuario => usuario.nombreRol).filter(Boolean))).sort()
+
+  const openEditModal = async (usuario: UsuarioResponse) => {
+    setUsuarioEditando(usuario)
+    setEditData(getEditDataFromUsuario(usuario))
+
+    try {
+      const detalle = await api.get<UsuarioResponse>(`/usuarios/${usuario.id}`)
+      setUsuarioEditando(detalle)
+      setEditData(getEditDataFromUsuario(detalle))
+      setUsuarios((prev) => prev.map((item) => (item.id === detalle.id ? { ...item, ...detalle } : item)))
+    } catch (err) {
+      console.error("No se pudo cargar el detalle actualizado del usuario", err)
+    }
+  }
+
+  const closeEditModal = () => {
+    setUsuarioEditando(null)
+    setSavingEdit(false)
+  }
+
+  const handleUpdateUsuario = async () => {
+    if (!usuarioEditando) return
+    const validationErrors: { title: string; description: string }[] = []
+    const telefonoLimpio = editData.telefono.trim()
+    if (!editData.nombre.trim()) validationErrors.push({ title: "Nombre completo requerido", description: "Completa el nombre completo." })
+    if (!editData.email.trim()) validationErrors.push({ title: "Correo electrónico requerido", description: "Ingresa un correo electrónico válido." })
+    if (!editData.rolId) validationErrors.push({ title: "Rol requerido", description: "Selecciona el rol del usuario." })
+    if (!editData.institucion) validationErrors.push({ title: "Organización requerida", description: "Selecciona una organización." })
+    if (!telefonoLimpio) validationErrors.push({ title: "Teléfono requerido", description: "Ingresa el teléfono del usuario." })
+    if (telefonoLimpio && !/^\d{9}$/.test(telefonoLimpio)) validationErrors.push({ title: "Teléfono inválido", description: "El teléfono debe contener solo números y exactamente 9 dígitos." })
+    if (validationErrors.length > 0) {
+      validationErrors.forEach((err) => addFeedbackCard({ type: "error", ...err }))
+      return
+    }
+    const split = splitNombreCompleto(editData.nombre)
+    const payload: UsuarioUpdate = {
+      nombres: split.nombres,
+      apellidos: split.apellidos,
+      email: editData.email.trim(),
+      telefono: telefonoLimpio || null,
+      idRol: Number(editData.rolId),
+      idInstitucion: Number(editData.institucion),
+    }
+    try {
+      setSavingEdit(true)
+      const actualizado = await api.put<UsuarioResponse>(`/usuarios/${usuarioEditando.id}`, payload)
+      if ((editData.estado === "inactivo") !== !actualizado.estado) {
+        await api.patch(`/usuarios/${usuarioEditando.id}/estado?activo=${editData.estado === "activo"}`)
+        actualizado.estado = editData.estado === "activo"
+      }
+      setUsuarios((prev) => prev.map((u) => (u.id === actualizado.id ? { ...u, ...actualizado } : u)))
+      addFeedbackCard({ type: "success", title: "Usuario actualizado correctamente", description: "Los cambios se guardaron exitosamente." })
+      closeEditModal()
+    } catch (err) {
+      setSavingEdit(false)
+      if (err instanceof ApiError) {
+        const labelMap: Record<string, string> = { nombres: "Nombre completo", apellidos: "Apellidos", email: "Correo electrónico", telefono: "Teléfono", idRol: "Rol", idInstitucion: "Organización" }
+        if (err.body?.fieldErrors?.length) {
+          err.body.fieldErrors.forEach((fieldError) => {
+            addFeedbackCard({
+              type: "error",
+              title: `${labelMap[fieldError.field] ?? fieldError.field} inválido`,
+              description: fieldError.message,
+            })
+          })
+        } else {
+          addFeedbackCard({ type: "error", title: "No se pudo actualizar el usuario", description: err.body?.message ?? "Revisa los datos e inténtalo nuevamente." })
+        }
+      } else {
+        addFeedbackCard({ type: "error", title: "No se pudo actualizar el usuario", description: err instanceof Error ? err.message : "Revisa los datos e inténtalo nuevamente." })
+      }
+    }
   }
 
   return (
@@ -175,10 +300,9 @@ export default function UsuariosPage() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="todos">Todos los roles</SelectItem>
-                  <SelectItem value="Administrador">Administrador</SelectItem>
-                  <SelectItem value="Coordinación Macroregional">Coordinador</SelectItem>
-                  <SelectItem value="Equipo Técnico">Técnico</SelectItem>
-                  <SelectItem value="Secretaría Ejecutiva">Secretaría Ejecutiva</SelectItem>
+                  {roles.map((rol) => (
+                    <SelectItem key={rol} value={rol}>{rol}</SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
               <Select value={filtroEstado} onValueChange={setFiltroEstado}>
@@ -201,10 +325,15 @@ export default function UsuariosPage() {
           <CardHeader>
             <CardTitle>Usuarios Registrados</CardTitle>
             <CardDescription>
-              {usuariosFiltrados.length} usuario(s) encontrado(s)
+              {cargando ? "Cargando usuarios..." : `${usuariosFiltrados.length} usuario(s) encontrado(s)`}
             </CardDescription>
           </CardHeader>
           <CardContent>
+            {error && (
+              <div className="mb-4 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+                {error}
+              </div>
+            )}
             <Table>
               <TableHeader>
                 <TableRow>
@@ -217,35 +346,51 @@ export default function UsuariosPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
+                {cargando && (
+                  <TableRow>
+                    <TableCell colSpan={6} className="py-8 text-center text-muted-foreground">
+                      Cargando usuarios...
+                    </TableCell>
+                  </TableRow>
+                )}
+                {!cargando && !error && usuariosFiltrados.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={6} className="py-8 text-center text-muted-foreground">
+                      No se encontraron usuarios
+                    </TableCell>
+                  </TableRow>
+                )}
                 {usuariosFiltrados.map((usuario) => {
+                  const nombreCompleto = getNombreCompleto(usuario)
+                  const organizacion = usuario.nombreInstitucion || usuario.nombreMacroregion || "-"
                   return (
                     <TableRow key={usuario.id}>
                       <TableCell>
                         <div className="flex items-center gap-3">
                           <Avatar className="h-9 w-9">
                             <AvatarFallback className="bg-primary/10 text-primary text-sm">
-                              {getInitials(usuario.nombre)}
+                              {getInitials(nombreCompleto)}
                             </AvatarFallback>
                           </Avatar>
                           <div>
-                            <p className="font-medium">{usuario.nombre}</p>
+                            <p className="font-medium">{nombreCompleto}</p>
                             <p className="text-sm text-muted-foreground">{usuario.email}</p>
                           </div>
                         </div>
                       </TableCell>
                       <TableCell>
-                        <Badge variant="outline" className={getRolColor(usuario.rol)}>
-                          {getRolLabel(usuario.rol)}
+                        <Badge variant="outline" className={getRolColor(usuario.nombreRol)}>
+                          {getRolLabel(usuario.nombreRol)}
                         </Badge>
                       </TableCell>
                       <TableCell>
                         <div className="flex items-center gap-2">
                           <Building2 className="h-4 w-4 text-muted-foreground" />
-                          <span className="text-sm">{usuario.institucion || "-"}</span>
+                          <span className="text-sm">{organizacion}</span>
                         </div>
                       </TableCell>
                       <TableCell>
-                        {usuario.estado === "Activo" ? (
+                        {usuario.estado ? (
                           <div className="flex items-center gap-1.5">
                             <div className="h-2 w-2 rounded-full bg-green-500" />
                             <span className="text-sm text-green-600">Activo</span>
@@ -260,7 +405,7 @@ export default function UsuariosPage() {
                       <TableCell>
                         <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
                           <Calendar className="h-3.5 w-3.5" />
-                          {usuario.ultimoAcceso}
+                          {formatFecha(usuario.ultimoAcceso)}
                         </div>
                       </TableCell>
                       <TableCell className="text-right">
@@ -279,12 +424,10 @@ export default function UsuariosPage() {
                                 Ver detalle
                               </DropdownMenuItem>
                             </Link>
-                            <Link href={`/usuarios/${usuario.id}/editar`}>
-                              <DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => openEditModal(usuario)}>
                                 <Pencil className="mr-2 h-4 w-4" />
                                 Editar
-                              </DropdownMenuItem>
-                            </Link>
+                            </DropdownMenuItem>
                             <DropdownMenuItem>
                               <Shield className="mr-2 h-4 w-4" />
                               Gestionar permisos
@@ -417,6 +560,93 @@ export default function UsuariosPage() {
           </Card>
         </div>
       </div>
+      <Dialog open={!!usuarioEditando} onOpenChange={(open) => !open && closeEditModal()}>
+        <DialogContent className="sm:max-w-xl">
+          <DialogHeader>
+            <DialogTitle>Editar usuario</DialogTitle>
+            <DialogDescription>Actualiza la información del usuario seleccionado.</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4">
+            <div className="space-y-2"><Label htmlFor="edit-nombre">Nombre completo *</Label><Input id="edit-nombre" value={editData.nombre} onChange={(e) => setEditData({ ...editData, nombre: e.target.value })} /></div>
+            <div className="space-y-2"><Label htmlFor="edit-email">Correo electrónico *</Label><Input id="edit-email" type="email" value={editData.email} onChange={(e) => setEditData({ ...editData, email: e.target.value })} /></div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-2"><Label htmlFor="edit-telefono">Teléfono</Label><Input id="edit-telefono" inputMode="numeric" maxLength={9} value={editData.telefono} onChange={(e) => setEditData({ ...editData, telefono: e.target.value.replace(/\D/g, "").slice(0, 9) })} /></div>
+              <div className="space-y-2"><Label>Estado</Label><Select value={editData.estado} onValueChange={(value) => setEditData({ ...editData, estado: value })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="activo">Activo</SelectItem><SelectItem value="inactivo">Inactivo</SelectItem></SelectContent></Select></div>
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-2"><Label>Rol *</Label><Select value={editData.rolId} onValueChange={(value) => setEditData({ ...editData, rolId: value })}><SelectTrigger><SelectValue placeholder="Seleccionar rol" /></SelectTrigger><SelectContent>{rolesCatalogo.map((rol) => (<SelectItem key={rol.id} value={String(rol.id)}>{rol.nombre}</SelectItem>))}</SelectContent></Select></div>
+              <div className="space-y-2"><Label>Organización *</Label><Select value={editData.institucion} onValueChange={(value) => setEditData({ ...editData, institucion: value })}><SelectTrigger><SelectValue placeholder="Seleccionar organización" /></SelectTrigger><SelectContent>{instituciones.map((institucion) => (<SelectItem key={institucion.id} value={String(institucion.id)}>{institucion.nombre}</SelectItem>))}</SelectContent></Select></div>
+            </div>
+            <div className="flex justify-end gap-3"><Button type="button" variant="outline" onClick={closeEditModal}>Cancelar</Button><Button type="button" onClick={handleUpdateUsuario} disabled={savingEdit}>{savingEdit ? "Guardando..." : "Guardar cambios"}</Button></div>
+          </div>
+        </DialogContent>
+      </Dialog>
+      {feedbackCards.length > 0 && (
+        <div className="fixed bottom-6 right-6 z-[80] flex w-[min(92vw,420px)] flex-col gap-3">
+          {feedbackCards.map((feedback) => (
+            <div key={feedback.id} className="rounded-xl border border-border bg-card shadow-xl">
+              <div className="flex items-start gap-3 p-4">
+                <div className={`mt-0.5 ${feedback.type === "success" ? "text-green-600" : "text-destructive"}`}>
+                  {feedback.type === "success" ? <CheckCircle2 className="h-5 w-5" /> : <AlertCircle className="h-5 w-5" />}
+                </div>
+                <div className="flex-1">
+                  <p className={`text-sm font-semibold ${feedback.type === "success" ? "text-green-700" : "text-destructive"}`}>{feedback.title}</p>
+                  {feedback.description && <p className="mt-1 text-xs text-muted-foreground">{feedback.description}</p>}
+                </div>
+                <Button type="button" variant="ghost" size="icon" className="h-7 w-7" onClick={() => setFeedbackCards((prev) => prev.filter((item) => item.id !== feedback.id))}><X className="h-4 w-4" /></Button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </AppLayout>
   )
+}
+
+function getNombreCompleto(usuario: UsuarioResponse) {
+  return `${usuario.nombres} ${usuario.apellidos}`.trim()
+}
+
+function getEditDataFromUsuario(usuario: UsuarioResponse) {
+  return {
+    nombre: getNombreCompleto(usuario),
+    email: usuario.email,
+    telefono: usuario.telefono ?? "",
+    rolId: String(usuario.idRol),
+    institucion: usuario.idInstitucion ? String(usuario.idInstitucion) : "",
+    estado: usuario.estado ? "activo" : "inactivo",
+  }
+}
+
+function getEstadoValue(estado: boolean) {
+  return estado ? "activo" : "inactivo"
+}
+
+function normalizeRol(rol: string) {
+  return rol
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+}
+
+function formatFecha(fecha: string | null) {
+  if (!fecha) return "-"
+
+  const parsed = new Date(fecha)
+  if (Number.isNaN(parsed.getTime())) return fecha
+
+  return new Intl.DateTimeFormat("es-PE", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(parsed)
+}
+
+function splitNombreCompleto(fullName: string) {
+  const parts = fullName.trim().split(/\s+/)
+  if (parts.length < 2) return { nombres: fullName.trim(), apellidos: "-" }
+  const half = Math.ceil(parts.length / 2)
+  return { nombres: parts.slice(0, half).join(" "), apellidos: parts.slice(half).join(" ") }
 }

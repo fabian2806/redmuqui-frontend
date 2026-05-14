@@ -37,6 +37,7 @@ export interface UsuarioResponse {
   nombres: string
   apellidos: string
   email: string
+  telefono: string | null
   estado: boolean
   nombreRol: string
   idRol: number
@@ -55,6 +56,7 @@ export interface UsuarioCreate {
   nombres: string
   apellidos: string
   email: string
+  telefono?: string | null
   contrasenha: string
   idRol: number
   idMacroregion?: number | null
@@ -65,6 +67,7 @@ export interface UsuarioUpdate {
   nombres: string
   apellidos: string
   email: string
+  telefono?: string | null
   idRol: number
   idMacroregion?: number | null
   idInstitucion?: number | null
@@ -76,6 +79,7 @@ export interface Rol {
   id: number
   nombre: string
   descripcion: string | null
+  permisos?: Permiso[]
 }
 
 export interface Permiso {
@@ -167,6 +171,24 @@ export interface ProyectoCreate {
   idEjeTematico?: number
   idResponsablePrincipal?: number
   idTerritorios?: number[]
+}
+
+// ----- Bitacora -----
+
+export interface BitacoraResponse {
+  id: number
+  tipoAccion: string
+  fecha: string
+  descripcion: string
+  entidadReferenciada: string
+  idEntidadRef: number
+  idUsuario: number | null
+  nombreUsuario: string | null
+}
+
+export interface EquipoMember {
+  idUsuario: number
+  rolEnProyecto: string | null
 }
 
 // ----- Comunes -----
