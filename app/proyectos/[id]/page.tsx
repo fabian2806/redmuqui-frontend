@@ -54,6 +54,55 @@ type ProyectoDetalle = Omit<ProyectoMock, "macroregion" | "ejeTematico" | "estad
   fuenteDatos: "api" | "mixto" | "mock"
 }
 
+const DIAS_ALERTA_ACTIVIDAD = 15
+
+function parseLocalDate(date: string): Date {
+  return new Date(`${date}T00:00:00`)
+}
+
+function startOfToday(): Date {
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  return today
+}
+
+function getDiasHastaFecha(date: string, today = startOfToday()): number {
+  const fechaFin = parseLocalDate(date)
+  return Math.ceil((fechaFin.getTime() - today.getTime()) / (1000 * 60 * 60 * 24))
+}
+
+function getAlertaVencimientoActividad(actividad: {
+  fechaFin: string
+  estado: string
+}) {
+  if (actividad.estado === "Completada") return null
+
+  const diasRestantes = getDiasHastaFecha(actividad.fechaFin)
+
+  if (diasRestantes < 0) {
+    return {
+      tipo: "vencida" as const,
+      label: `Vencida hace ${Math.abs(diasRestantes)} día${Math.abs(diasRestantes) === 1 ? "" : "s"}`,
+    }
+  }
+
+  if (diasRestantes === 0) {
+    return {
+      tipo: "vence-hoy" as const,
+      label: "Vence hoy",
+    }
+  }
+
+  if (diasRestantes <= DIAS_ALERTA_ACTIVIDAD) {
+    return {
+      tipo: "proxima" as const,
+      label: `Vence en ${diasRestantes} día${diasRestantes === 1 ? "" : "s"}`,
+    }
+  }
+
+  return null
+}
+
 function apiMacroregiones(proyecto: ProyectoResponse): MacroregionRef[] {
   if (proyecto.macroregiones?.length) return proyecto.macroregiones
   if (proyecto.idMacroregion && proyecto.nombreMacroregion) {
@@ -252,6 +301,19 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
       subactividades: [...(act.subactividades || []), ...cofinanciadasTargetingThisAct]
     }
   });
+  const actividadesConAlertas = actividades
+    .map((actividad) => ({
+      ...actividad,
+      alertaVencimiento: getAlertaVencimientoActividad(actividad),
+    }))
+  const actividadesVencidas = actividadesConAlertas.filter(
+    (actividad) => actividad.alertaVencimiento?.tipo === "vencida",
+  )
+  const actividadesProximasAVencer = actividadesConAlertas.filter(
+    (actividad) =>
+      actividad.alertaVencimiento?.tipo === "proxima" ||
+      actividad.alertaVencimiento?.tipo === "vence-hoy",
+  )
 
   const hitos = hitosData
   const documentos = getDocumentosByProyecto(id)
@@ -510,7 +572,38 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                       </DialogContent>
                     </Dialog>
                   </div>
-                  {actividades.length > 0 ? (
+                  {actividadesConAlertas.length > 0 ? (
+                    <>
+                    {(actividadesVencidas.length > 0 || actividadesProximasAVencer.length > 0) && (
+                      <div className="mb-4 grid gap-3 md:grid-cols-2">
+                        {actividadesVencidas.length > 0 && (
+                          <div className="rounded-lg border border-[#C8102E]/20 bg-[#C8102E]/5 p-4">
+                            <div className="mb-1 flex items-center gap-2 text-[#C8102E]">
+                              <AlertTriangle className="h-4 w-4" />
+                              <p className="text-sm font-bold">
+                                {actividadesVencidas.length} actividad{actividadesVencidas.length === 1 ? "" : "es"} vencida{actividadesVencidas.length === 1 ? "" : "s"}
+                              </p>
+                            </div>
+                            <p className="text-xs text-[#C8102E]">
+                              Requiere seguimiento para regularizar el avance o actualizar la fecha de cierre.
+                            </p>
+                          </div>
+                        )}
+                        {actividadesProximasAVencer.length > 0 && (
+                          <div className="rounded-lg border border-[#F57C00]/20 bg-[#F57C00]/5 p-4">
+                            <div className="mb-1 flex items-center gap-2 text-[#F57C00]">
+                              <Clock className="h-4 w-4" />
+                              <p className="text-sm font-bold">
+                                {actividadesProximasAVencer.length} actividad{actividadesProximasAVencer.length === 1 ? "" : "es"} próxima{actividadesProximasAVencer.length === 1 ? "" : "s"} a vencer
+                              </p>
+                            </div>
+                            <p className="text-xs text-[#F57C00]">
+                              Vencen dentro de los próximos {DIAS_ALERTA_ACTIVIDAD} días o durante el día actual.
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    )}
                     <div className="overflow-x-auto">
                       <table className="w-full">
                         <thead>
@@ -533,10 +626,34 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-[#E0E0E0]">
-                          {actividades.map(act => (
+                          {actividadesConAlertas.map(act => (
                             <React.Fragment key={act.id}>
-                              <tr className="hover:bg-[#FFFDE7]">
-                                <td className="py-3 text-sm font-medium text-[#1A1A1A]">{act.nombre}</td>
+                              <tr className={
+                                act.alertaVencimiento?.tipo === "vencida"
+                                  ? "bg-[#C8102E]/5 hover:bg-[#C8102E]/10"
+                                  : act.alertaVencimiento
+                                    ? "bg-[#F57C00]/5 hover:bg-[#F57C00]/10"
+                                    : "hover:bg-[#FFFDE7]"
+                              }>
+                                <td className="py-3 text-sm font-medium text-[#1A1A1A]">
+                                  <div className="flex flex-col gap-1">
+                                    <span>{act.nombre}</span>
+                                    {act.alertaVencimiento && (
+                                      <span className={`inline-flex w-fit items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-semibold ${
+                                        act.alertaVencimiento.tipo === "vencida"
+                                          ? "border-[#C8102E]/20 bg-[#C8102E]/10 text-[#C8102E]"
+                                          : "border-[#F57C00]/20 bg-[#F57C00]/10 text-[#F57C00]"
+                                      }`}>
+                                        {act.alertaVencimiento.tipo === "vencida" ? (
+                                          <AlertTriangle className="h-3 w-3" />
+                                        ) : (
+                                          <Clock className="h-3 w-3" />
+                                        )}
+                                        {act.alertaVencimiento.label}
+                                      </span>
+                                    )}
+                                  </div>
+                                </td>
                                 <td className="py-3 text-sm text-[#5C5C5C]">{act.responsable}</td>
                                 <td className="py-3 text-xs text-[#5C5C5C]">
                                   {new Date(act.fechaFin).toLocaleDateString("es-PE")}
@@ -802,6 +919,7 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                         </tbody>
                       </table>
                     </div>
+                    </>
                   ) : (
                     <div className="text-center py-8 text-sm text-[#5C5C5C]">
                       No hay actividades registradas para este proyecto.
