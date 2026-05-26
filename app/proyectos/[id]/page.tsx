@@ -103,6 +103,38 @@ function getAlertaVencimientoActividad(actividad: {
   return null
 }
 
+function getAlertaVencimientoHito(hito: {
+  fecha: string
+  estado: string
+}) {
+  if (hito.estado === "Completado") return null
+
+  const diasRestantes = getDiasHastaFecha(hito.fecha)
+
+  if (diasRestantes < 0) {
+    return {
+      tipo: "vencido" as const,
+      label: `Vencido hace ${Math.abs(diasRestantes)} día${Math.abs(diasRestantes) === 1 ? "" : "s"}`,
+    }
+  }
+
+  if (diasRestantes === 0) {
+    return {
+      tipo: "vence-hoy" as const,
+      label: "Vence hoy",
+    }
+  }
+
+  if (diasRestantes <= DIAS_ALERTA_ACTIVIDAD) {
+    return {
+      tipo: "proximo" as const,
+      label: `Vence en ${diasRestantes} día${diasRestantes === 1 ? "" : "s"}`,
+    }
+  }
+
+  return null
+}
+
 function apiMacroregiones(proyecto: ProyectoResponse): MacroregionRef[] {
   if (proyecto.macroregiones?.length) return proyecto.macroregiones
   if (proyecto.idMacroregion && proyecto.nombreMacroregion) {
@@ -313,6 +345,18 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
     (actividad) =>
       actividad.alertaVencimiento?.tipo === "proxima" ||
       actividad.alertaVencimiento?.tipo === "vence-hoy",
+  )
+  const hitosConAlertas = hitosState.map((hito) => ({
+    ...hito,
+    alertaVencimiento: getAlertaVencimientoHito(hito),
+  }))
+  const hitosVencidos = hitosConAlertas.filter(
+    (hito) => hito.alertaVencimiento?.tipo === "vencido",
+  )
+  const hitosProximosAVencer = hitosConAlertas.filter(
+    (hito) =>
+      hito.alertaVencimiento?.tipo === "proximo" ||
+      hito.alertaVencimiento?.tipo === "vence-hoy",
   )
 
   const hitos = hitosData
@@ -1015,25 +1059,65 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                     </DialogContent>
                   </Dialog>
 
-                  {hitosState.length > 0 ? (
+                  {hitosConAlertas.length > 0 ? (
+                    <>
+                    {(hitosVencidos.length > 0 || hitosProximosAVencer.length > 0) && (
+                      <div className="mb-6 grid gap-3 md:grid-cols-2">
+                        {hitosVencidos.length > 0 && (
+                          <div className="rounded-lg border border-[#C8102E]/20 bg-[#C8102E]/5 p-4">
+                            <div className="mb-1 flex items-center gap-2 text-[#C8102E]">
+                              <AlertTriangle className="h-4 w-4" />
+                              <p className="text-sm font-bold">
+                                {hitosVencidos.length} hito{hitosVencidos.length === 1 ? "" : "s"} vencido{hitosVencidos.length === 1 ? "" : "s"}
+                              </p>
+                            </div>
+                            <p className="text-xs text-[#C8102E]">
+                              Requiere revisar el cronograma o registrar el cumplimiento del hito.
+                            </p>
+                          </div>
+                        )}
+                        {hitosProximosAVencer.length > 0 && (
+                          <div className="rounded-lg border border-[#F57C00]/20 bg-[#F57C00]/5 p-4">
+                            <div className="mb-1 flex items-center gap-2 text-[#F57C00]">
+                              <Clock className="h-4 w-4" />
+                              <p className="text-sm font-bold">
+                                {hitosProximosAVencer.length} hito{hitosProximosAVencer.length === 1 ? "" : "s"} próximo{hitosProximosAVencer.length === 1 ? "" : "s"} a vencer
+                              </p>
+                            </div>
+                            <p className="text-xs text-[#F57C00]">
+                              Vencen dentro de los próximos {DIAS_ALERTA_ACTIVIDAD} días o durante el día actual.
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    )}
                     <div className="relative">
                       <div className="absolute left-4 top-0 bottom-0 w-0.5 bg-[#E0E0E0]" />
                       <div className="space-y-6">
-                        {hitosState.map((hito) => (
+                        {hitosConAlertas.map((hito) => (
                           <div key={hito.id} className="relative flex gap-4 pl-10 group">
                             <div className={`absolute left-2 top-1 flex h-5 w-5 items-center justify-center rounded-full ${
                               hito.estado === "Completado" ? "bg-[#2E7D32]" :
-                              hito.estado === "Vencido" ? "bg-[#C8102E]" : "bg-[#E0E0E0]"
+                              hito.estado === "Vencido" || hito.alertaVencimiento?.tipo === "vencido" ? "bg-[#C8102E]" :
+                              hito.alertaVencimiento ? "bg-[#F57C00]" : "bg-[#E0E0E0]"
                             }`}>
                               {hito.estado === "Completado" ? (
                                 <CheckCircle2 className="h-3 w-3 text-white" />
-                              ) : hito.estado === "Vencido" ? (
+                              ) : hito.estado === "Vencido" || hito.alertaVencimiento?.tipo === "vencido" ? (
                                 <XCircle className="h-3 w-3 text-white" />
+                              ) : hito.alertaVencimiento ? (
+                                <Clock className="h-3 w-3 text-white" />
                               ) : (
                                 <Circle className="h-3 w-3 text-[#5C5C5C]" />
                               )}
                             </div>
-                            <div className="flex-1 rounded-lg border border-[#E0E0E0] p-4 hover:border-[#FFD600] transition-colors">
+                            <div className={`flex-1 rounded-lg border p-4 transition-colors ${
+                              hito.alertaVencimiento?.tipo === "vencido"
+                                ? "border-[#C8102E]/20 bg-[#C8102E]/5 hover:border-[#C8102E]/40"
+                                : hito.alertaVencimiento
+                                  ? "border-[#F57C00]/20 bg-[#F57C00]/5 hover:border-[#F57C00]/40"
+                                  : "border-[#E0E0E0] hover:border-[#FFD600]"
+                            }`}>
                               <div className="flex items-start justify-between gap-2">
                                 <div className="flex-1 min-w-0">
                                   <p className="text-sm font-medium text-[#1A1A1A]">{hito.nombre}</p>
@@ -1044,6 +1128,20 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                                       day: "numeric"
                                     })}
                                   </p>
+                                  {hito.alertaVencimiento && (
+                                    <span className={`mt-2 inline-flex w-fit items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-semibold ${
+                                      hito.alertaVencimiento.tipo === "vencido"
+                                        ? "border-[#C8102E]/20 bg-[#C8102E]/10 text-[#C8102E]"
+                                        : "border-[#F57C00]/20 bg-[#F57C00]/10 text-[#F57C00]"
+                                    }`}>
+                                      {hito.alertaVencimiento.tipo === "vencido" ? (
+                                        <AlertTriangle className="h-3 w-3" />
+                                      ) : (
+                                        <Clock className="h-3 w-3" />
+                                      )}
+                                      {hito.alertaVencimiento.label}
+                                    </span>
+                                  )}
                                 </div>
                                 <div className="flex items-center gap-2 shrink-0">
                                   <StatusBadge estado={hito.estado} />
@@ -1072,6 +1170,7 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                         ))}
                       </div>
                     </div>
+                    </>
                   ) : (
                     <div className="text-center py-8 text-sm text-[#5C5C5C]">
                       No hay hitos registrados para este proyecto.
