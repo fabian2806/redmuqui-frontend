@@ -6,16 +6,20 @@ import { StatusBadge, MacroregionBadge, TypeBadge } from "@/components/ui/status
 import { ProgressBar } from "@/components/ui/progress-bar"
 import { 
   getProyectoById, 
-  getActividadesByProyecto, 
   getHitosByProyecto,
   getDocumentosByProyecto,
   getBitacoraByEntidad,
-  hitos as allHitos,
-  actividades as allActividades
+  hitos as allHitos
 } from "@/lib/data"
 import type { Proyecto as ProyectoMock } from "@/lib/data"
 import { api, ApiError } from "@/lib/api"
-import type { MacroregionRef, ProyectoResponse } from "@/lib/types"
+import type { 
+  MacroregionRef, 
+  ProyectoResponse, 
+  ActividadResponse, 
+  UsuarioResponse,
+  PageResponse 
+} from "@/lib/types"
 import { 
   ChevronRight,
   Pencil,
@@ -189,6 +193,35 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
   const [editHito, setEditHito] = useState<typeof hitosState[0] | null>(null)
   const [hitoForm, setHitoForm] = useState({ nombre: "", fecha: "", estado: "Pendiente" as "Completado" | "Pendiente" | "Vencido" })
 
+  // ── Actividades desde API ──
+  const [actividadesApi, setActividadesApi] = useState<ActividadResponse[]>([])
+  const [actividadesLoading, setActividadesLoading] = useState(true)
+  const [actividadesError, setActividadesError] = useState<string | null>(null)
+  const [usuariosMap, setUsuariosMap] = useState<Map<number, string>>(new Map())
+
+  const [createActividadOpen, setCreateActividadOpen] = useState(false)
+  const [creandoActividad, setCreandoActividad] = useState(false)
+  const [actForm, setActForm] = useState({
+    nombre: "",
+    descripcion: "",
+    fechaInicio: "",
+    fechaFin: "",
+    idResponsables: [] as number[],
+  })
+
+  // ── Editar actividad ──
+  const [editActividadOpen, setEditActividadOpen] = useState(false)
+  const [editandoActividad, setEditandoActividad] = useState(false)
+  const [editingActividad, setEditingActividad] = useState<ActividadResponse | null>(null)
+  const [editForm, setEditForm] = useState({
+    nombre: "",
+    descripcion: "",
+    fechaInicio: "",
+    fechaFin: "",
+    estado: "PENDIENTE" as "PENDIENTE" | "EN_CURSO" | "FINALIZADA",
+    idResponsables: [] as number[],
+  })
+
   useEffect(() => {
     let cancelled = false
 
@@ -218,7 +251,47 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
       cancelled = true
     }
   }, [id])
-  
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function cargarActividades() {
+      setActividadesLoading(true)
+      setActividadesError(null)
+      try {
+        const data = await api.get<PageResponse<ActividadResponse>>(
+          "/actividades?proyectoId=" + id + "&size=100"
+        )
+        if (!cancelled) setActividadesApi(data.content)
+      } catch (error) {
+        if (!cancelled) {
+          setActividadesApi([])
+          setActividadesError(getApiErrorMessage(error))
+        }
+      } finally {
+        if (!cancelled) setActividadesLoading(false)
+      }
+    }
+
+    async function cargarUsuarios() {
+      try {
+        const data = await api.get<PageResponse<UsuarioResponse>>("/usuarios?page=0&size=100&sort=apellidos,asc")
+        if (!cancelled) {
+          const map = new Map<number, string>()
+          data.content.forEach(u => map.set(u.id, `${u.nombres} ${u.apellidos}`))
+          setUsuariosMap(map)
+        }
+      } catch {
+        // Silently fail — fallback a "Usuario #ID"
+      }
+    }
+
+    cargarActividades()
+    cargarUsuarios()
+
+    return () => { cancelled = true }
+  }, [id])
+
   if (!proyecto && apiLoading) {
     return (
       <AppLayout>
@@ -233,25 +306,15 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
     notFound()
   }
 
-  const actividadesBase = getActividadesByProyecto(id)
-  const actividades = actividadesBase.map(act => {
-    const cofinanciadasTargetingThisAct = allActividades
-      .flatMap(a => a.subactividades?.map(s => ({ ...s, parentActividad: a })) || [])
-      .filter(s => s.cofinanciadoPor?.some(c => c.actividadId === act.id))
-      .map(s => {
-         const cofundingData = s.cofinanciadoPor?.find(c => c.actividadId === act.id);
-         return {
-           ...s,
-           isCofinancedIncoming: true,
-           montoCofinanciado: cofundingData?.monto || 0
-         }
-      });
-      
-    return {
+  const actividades = useMemo(() =>
+    actividadesApi.map(act => ({
       ...act,
-      subactividades: [...(act.subactividades || []), ...cofinanciadasTargetingThisAct]
-    }
-  });
+      responsableDisplay: act.idResponsables
+        .map(id => usuariosMap.get(id) ?? `Usuario #${id}`)
+        .join(", "),
+    })),
+    [actividadesApi, usuariosMap]
+  )
 
   const hitos = hitosData
   const documentos = getDocumentosByProyecto(id)
@@ -465,71 +528,227 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                       <h3 className="text-sm font-bold uppercase tracking-wide text-[#5C5C5C]">
                         Actividades del Proyecto
                       </h3>
-                      <MockDataTag />
+                      {actividadesLoading && (
+                        <span className="text-xs text-[#5C5C5C]">Sincronizando...</span>
+                      )}
                     </div>
-                    <Dialog>
+                    <Dialog open={createActividadOpen} onOpenChange={setCreateActividadOpen}>
                       <DialogTrigger asChild>
                         <button className="flex items-center gap-2 rounded-lg bg-[#FFD600] px-3 py-1.5 text-xs font-bold text-[#1A1A1A] hover:bg-[#C9A42B]">
                           <Plus className="h-3.5 w-3.5" />
                           Agregar actividad
                         </button>
                       </DialogTrigger>
-                      <DialogContent className="overflow-y-auto sm:max-w-md">
+                      <DialogContent className="overflow-y-auto sm:max-w-lg">
                         <DialogHeader>
                           <DialogTitle>Nueva Actividad</DialogTitle>
-                          <DialogDescription>Deltalle la nueva actividad a registrar para este proyecto.</DialogDescription>
+                          <DialogDescription>Detalle la nueva actividad a registrar para este proyecto.</DialogDescription>
                         </DialogHeader>
                         <div className="grid gap-4 py-6">
                           <div className="grid gap-2">
                             <Label htmlFor="act-nombre">Nombre de la actividad</Label>
-                            <Input id="act-nombre" placeholder="Ej. Taller de sensibilización" />
+                            <Input id="act-nombre" placeholder="Ej. Taller de sensibilización" value={actForm.nombre} onChange={e => setActForm(f => ({ ...f, nombre: e.target.value }))} />
                           </div>
                           <div className="grid gap-2">
-                            <Label htmlFor="act-responsable">Responsable</Label>
-                            <Input id="act-responsable" placeholder="Pedro Mendoza" />
+                            <Label htmlFor="act-descripcion">Descripción</Label>
+                            <Textarea id="act-descripcion" placeholder="Descripción de la actividad..." value={actForm.descripcion} onChange={e => setActForm(f => ({ ...f, descripcion: e.target.value }))} />
+                          </div>
+                          <div className="grid gap-2">
+                            <Label>Responsable(s)</Label>
+                            <div className="flex flex-wrap gap-2 rounded-md border border-[#E0E0E0] bg-white p-3 max-h-40 overflow-y-auto">
+                              {Array.from(usuariosMap.entries()).length > 0 ? (
+                                Array.from(usuariosMap.entries()).map(([id, nombre]) => (
+                                  <label key={id} className="flex items-center gap-2 cursor-pointer">
+                                    <input
+                                      type="checkbox"
+                                      className="h-4 w-4 rounded border-[#E0E0E0] accent-[#FFD600]"
+                                      checked={actForm.idResponsables.includes(id)}
+                                      onChange={e => {
+                                        if (e.target.checked) {
+                                          setActForm(f => ({ ...f, idResponsables: [...f.idResponsables, id] }))
+                                        } else {
+                                          setActForm(f => ({ ...f, idResponsables: f.idResponsables.filter(i => i !== id) }))
+                                        }
+                                      }}
+                                    />
+                                    <span className="text-sm text-[#1A1A1A]">{nombre}</span>
+                                  </label>
+                                ))
+                              ) : (
+                                <span className="text-sm text-[#5C5C5C]">Cargando usuarios...</span>
+                              )}
+                            </div>
                           </div>
                           <div className="grid grid-cols-2 gap-4">
                             <div className="grid gap-2">
                               <Label htmlFor="act-inicio">Fecha de Inicio</Label>
-                              <Input id="act-inicio" type="date" />
+                              <Input id="act-inicio" type="date" value={actForm.fechaInicio} onChange={e => setActForm(f => ({ ...f, fechaInicio: e.target.value }))} />
                             </div>
                             <div className="grid gap-2">
                               <Label htmlFor="act-fin">Fecha de Fin</Label>
-                              <Input id="act-fin" type="date" />
+                              <Input id="act-fin" type="date" value={actForm.fechaFin} onChange={e => setActForm(f => ({ ...f, fechaFin: e.target.value }))} />
                             </div>
                           </div>
+                          {(() => {
+                            const invalida = actForm.fechaInicio && actForm.fechaFin && actForm.fechaFin < actForm.fechaInicio
+                            return invalida ? <p className="text-xs text-[#C8102E]">La fecha de fin no puede ser anterior a la fecha de inicio.</p> : null
+                          })()}
                         </div>
                         <DialogFooter>
-                          <DialogClose asChild>
-                            <Button variant="outline">Cancelar</Button>
-                          </DialogClose>
-                          <DialogClose asChild>
-                            <Button className="bg-[#FFD600] text-[#1A1A1A] hover:bg-[#C9A42B]">Crear actividad</Button>
-                          </DialogClose>
+                          <Button variant="outline" onClick={() => setCreateActividadOpen(false)}>Cancelar</Button>
+                          <Button
+                            className="bg-[#FFD600] text-[#1A1A1A] hover:bg-[#C9A42B]"
+                            disabled={creandoActividad || !actForm.nombre.trim() || (actForm.fechaInicio && actForm.fechaFin && actForm.fechaFin < actForm.fechaInicio)}
+                            onClick={async () => {
+                              if (!actForm.nombre.trim()) return
+                              if (actForm.fechaInicio && actForm.fechaFin && actForm.fechaFin < actForm.fechaInicio) return
+                              setCreandoActividad(true)
+                              try {
+                                const creada = await api.post<ActividadResponse>("/actividades", {
+                                  nombre: actForm.nombre,
+                                  descripcion: actForm.descripcion || undefined,
+                                  fechaInicio: actForm.fechaInicio || undefined,
+                                  fechaFin: actForm.fechaFin || undefined,
+                                  idProyecto: Number(id),
+                                  idResponsables: actForm.idResponsables.length > 0 ? actForm.idResponsables : undefined,
+                                })
+                                setActividadesApi(prev => [...prev, creada])
+                                setActForm({ nombre: "", descripcion: "", fechaInicio: "", fechaFin: "", idResponsables: [] })
+                                setCreateActividadOpen(false)
+                              } catch (err) {
+                                console.error(err)
+                              } finally {
+                                setCreandoActividad(false)
+                              }
+                            }}
+                          >
+                            {creandoActividad ? "Creando..." : "Crear actividad"}
+                          </Button>
+                        </DialogFooter>
+                      </DialogContent>
+                    </Dialog>
+
+                    {/* ── EDITAR ACTIVIDAD ── */}
+                    <Dialog open={editActividadOpen} onOpenChange={setEditActividadOpen}>
+                      <DialogContent className="overflow-y-auto sm:max-w-lg">
+                        <DialogHeader>
+                          <DialogTitle>Editar Actividad</DialogTitle>
+                          <DialogDescription>Modifica los datos de la actividad seleccionada.</DialogDescription>
+                        </DialogHeader>
+                        <div className="grid gap-4 py-6">
+                          <div className="grid gap-2">
+                            <Label htmlFor="edit-nombre">Nombre de la actividad</Label>
+                            <Input id="edit-nombre" placeholder="Ej. Taller de sensibilización" value={editForm.nombre} onChange={e => setEditForm(f => ({ ...f, nombre: e.target.value }))} />
+                          </div>
+                          <div className="grid gap-2">
+                            <Label htmlFor="edit-descripcion">Descripción</Label>
+                            <Textarea id="edit-descripcion" placeholder="Descripción de la actividad..." value={editForm.descripcion} onChange={e => setEditForm(f => ({ ...f, descripcion: e.target.value }))} />
+                          </div>
+                          <div className="grid gap-2">
+                            <Label>Responsable(s)</Label>
+                            <div className="flex flex-wrap gap-2 rounded-md border border-[#E0E0E0] bg-white p-3 max-h-40 overflow-y-auto">
+                              {Array.from(usuariosMap.entries()).length > 0 ? (
+                                Array.from(usuariosMap.entries()).map(([id, nombre]) => (
+                                  <label key={id} className="flex items-center gap-2 cursor-pointer">
+                                    <input
+                                      type="checkbox"
+                                      className="h-4 w-4 rounded border-[#E0E0E0] accent-[#FFD600]"
+                                      checked={editForm.idResponsables.includes(id)}
+                                      onChange={e => {
+                                        if (e.target.checked) {
+                                          setEditForm(f => ({ ...f, idResponsables: [...f.idResponsables, id] }))
+                                        } else {
+                                          setEditForm(f => ({ ...f, idResponsables: f.idResponsables.filter(i => i !== id) }))
+                                        }
+                                      }}
+                                    />
+                                    <span className="text-sm text-[#1A1A1A]">{nombre}</span>
+                                  </label>
+                                ))
+                              ) : (
+                                <span className="text-sm text-[#5C5C5C]">Cargando usuarios...</span>
+                              )}
+                            </div>
+                          </div>
+                          <div className="grid gap-2">
+                            <Label htmlFor="edit-estado">Estado</Label>
+                            <Select value={editForm.estado} onValueChange={v => setEditForm(f => ({ ...f, estado: v as "PENDIENTE" | "EN_CURSO" | "FINALIZADA" }))}>
+                              <SelectTrigger id="edit-estado"><SelectValue /></SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="PENDIENTE">Pendiente</SelectItem>
+                                <SelectItem value="EN_CURSO">En curso</SelectItem>
+                                <SelectItem value="FINALIZADA">Finalizada</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div className="grid grid-cols-2 gap-4">
+                            <div className="grid gap-2">
+                              <Label htmlFor="edit-inicio">Fecha de Inicio</Label>
+                              <Input id="edit-inicio" type="date" value={editForm.fechaInicio} onChange={e => setEditForm(f => ({ ...f, fechaInicio: e.target.value }))} />
+                            </div>
+                            <div className="grid gap-2">
+                              <Label htmlFor="edit-fin">Fecha de Fin</Label>
+                              <Input id="edit-fin" type="date" value={editForm.fechaFin} onChange={e => setEditForm(f => ({ ...f, fechaFin: e.target.value }))} />
+                            </div>
+                          </div>
+                          {(() => {
+                            const invalida = editForm.fechaInicio && editForm.fechaFin && editForm.fechaFin < editForm.fechaInicio
+                            return invalida ? <p className="text-xs text-[#C8102E]">La fecha de fin no puede ser anterior a la fecha de inicio.</p> : null
+                          })()}
+                        </div>
+                        <DialogFooter>
+                          <Button variant="outline" onClick={() => setEditActividadOpen(false)}>Cancelar</Button>
+                          <Button
+                            className="bg-[#FFD600] text-[#1A1A1A] hover:bg-[#C9A42B]"
+                            disabled={editandoActividad || !editForm.nombre.trim() || (editForm.fechaInicio && editForm.fechaFin && editForm.fechaFin < editForm.fechaInicio)}
+                            onClick={async () => {
+                              if (!editForm.nombre.trim() || !editingActividad) return
+                              if (editForm.fechaInicio && editForm.fechaFin && editForm.fechaFin < editForm.fechaInicio) return
+                              setEditandoActividad(true)
+                              try {
+                                const actualizada = await api.put<ActividadResponse>("/actividades/" + editingActividad.id, {
+                                  nombre: editForm.nombre,
+                                  descripcion: editForm.descripcion || undefined,
+                                  fechaInicio: editForm.fechaInicio || undefined,
+                                  fechaFin: editForm.fechaFin || undefined,
+                                  estado: editForm.estado,
+                                  idProyecto: editingActividad.idProyecto,
+                                  idResponsables: editForm.idResponsables.length > 0 ? editForm.idResponsables : undefined,
+                                })
+                                setActividadesApi(prev => prev.map(a => a.id === actualizada.id ? actualizada : a))
+                                setEditActividadOpen(false)
+                                setEditingActividad(null)
+                              } catch (err) {
+                                console.error(err)
+                              } finally {
+                                setEditandoActividad(false)
+                              }
+                            }}
+                          >
+                            {editandoActividad ? "Guardando..." : "Guardar cambios"}
+                          </Button>
                         </DialogFooter>
                       </DialogContent>
                     </Dialog>
                   </div>
-                  {actividades.length > 0 ? (
+
+                  {actividadesLoading ? (
+                    <div className="text-center py-8 text-sm text-[#5C5C5C]">Cargando actividades...</div>
+                  ) : actividadesError ? (
+                    <div className="text-center py-8">
+                      <p className="text-sm text-[#C8102E]">Error al cargar actividades: {actividadesError}</p>
+                    </div>
+                  ) : actividades.length > 0 ? (
                     <div className="overflow-x-auto">
                       <table className="w-full">
                         <thead>
                           <tr className="border-b border-[#E0E0E0]">
-                            <th className="pb-3 text-left text-xs font-semibold uppercase tracking-wide text-[#5C5C5C]">
-                              Actividad
-                            </th>
-                            <th className="pb-3 text-left text-xs font-semibold uppercase tracking-wide text-[#5C5C5C]">
-                              Responsable
-                            </th>
-                            <th className="pb-3 text-left text-xs font-semibold uppercase tracking-wide text-[#5C5C5C]">
-                              Fecha
-                            </th>
-                            <th className="pb-3 text-left text-xs font-semibold uppercase tracking-wide text-[#5C5C5C]">
-                              Avance
-                            </th>
-                            <th className="pb-3 text-left text-xs font-semibold uppercase tracking-wide text-[#5C5C5C]">
-                              Estado
-                            </th>
+                            <th className="pb-3 text-left text-xs font-semibold uppercase tracking-wide text-[#5C5C5C]">Actividad</th>
+                            <th className="pb-3 text-left text-xs font-semibold uppercase tracking-wide text-[#5C5C5C]">Responsable</th>
+                            <th className="pb-3 text-left text-xs font-semibold uppercase tracking-wide text-[#5C5C5C]">Fecha</th>
+                            <th className="pb-3 text-left text-xs font-semibold uppercase tracking-wide text-[#5C5C5C]">Avance</th>
+                            <th className="pb-3 text-left text-xs font-semibold uppercase tracking-wide text-[#5C5C5C]">Estado</th>
+                            <th className="pb-3 text-left text-xs font-semibold uppercase tracking-wide text-[#5C5C5C]">Acciones</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-[#E0E0E0]">
@@ -537,263 +756,52 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                             <React.Fragment key={act.id}>
                               <tr className="hover:bg-[#FFFDE7]">
                                 <td className="py-3 text-sm font-medium text-[#1A1A1A]">{act.nombre}</td>
-                                <td className="py-3 text-sm text-[#5C5C5C]">{act.responsable}</td>
+                                <td className="py-3 text-sm text-[#5C5C5C]">{act.responsableDisplay}</td>
                                 <td className="py-3 text-xs text-[#5C5C5C]">
-                                  {new Date(act.fechaFin).toLocaleDateString("es-PE")}
+                                  {act.fechaFin ? act.fechaFin.split('-').reverse().join('/') : "—"}
                                 </td>
                                 <td className="py-3">
                                   <div className="w-20">
-                                    <ProgressBar value={act.avance} size="sm" />
+                                    <ProgressBar value={0} size="sm" />
                                   </div>
                                 </td>
                                 <td className="py-3">
                                   <StatusBadge estado={act.estado} />
                                 </td>
+                                <td className="py-3">
+                                  <button
+                                    className="flex items-center gap-1 rounded-lg border border-[#E0E0E0] bg-white px-2 py-1 text-xs font-medium text-[#5C5C5C] hover:bg-[#F7F7F7]"
+                                    onClick={() => {
+                                      setEditingActividad(act)
+                                      setEditForm({
+                                        nombre: act.nombre,
+                                        descripcion: act.descripcion ?? "",
+                                        fechaInicio: act.fechaInicio ?? "",
+                                        fechaFin: act.fechaFin ?? "",
+                                        estado: act.estado,
+                                        idResponsables: [...act.idResponsables],
+                                      })
+                                      setEditActividadOpen(true)
+                                    }}
+                                  >
+                                    <Pencil className="h-3 w-3" />
+                                    Editar
+                                  </button>
+                                </td>
                               </tr>
-                              {act.subactividades && act.subactividades.map(sub => (
-                                <tr key={sub.id} className="bg-[#FAFAFA] border-none group">
-                                  <td className="py-3 pl-8 text-sm text-[#5C5C5C] relative">
-                                     <div className="absolute left-3 top-0 bottom-0 w-px bg-[#E0E0E0] group-last:bottom-1/2"></div>
-                                     <div className="absolute left-3 top-1/2 w-4 h-px bg-[#E0E0E0]"></div>
-                                     <div className="flex items-center gap-2 relative z-10 bg-[#FAFAFA] pr-2">
-                                       <Circle className="h-2 w-2 fill-[#C9A42B] text-[#C9A42B]" />
-                                       <span className="truncate max-w-[200px]" title={sub.nombre}>{sub.nombre}</span>
-                                       {(sub as any).isCofinancedIncoming ? (
-                                         <span className="ml-2 inline-flex shrink-0 items-center rounded-sm bg-[#F7F7F7] px-2 py-0.5 text-[10px] font-bold text-[#5C5C5C] border border-[#E0E0E0]" title={`Originario de: ${(sub as any).parentActividad.nombre}`}>
-                                           Compartido (S/ {(sub as any).montoCofinanciado.toLocaleString()})
-                                         </span>
-                                       ) : (() => {
-                                         const propioRaw = sub.presupuesto ?? 0
-                                         const cofinanciado = (sub.cofinanciadoPor ?? []).reduce((acc, c) => acc + c.monto, 0)
-                                         const total = propioRaw + cofinanciado
-                                         return total > 0 ? (
-                                           <span
-                                             className="ml-2 inline-flex shrink-0 items-center gap-1 rounded-sm bg-[#FFFDE7] px-2 py-0.5 text-[10px] font-bold text-[#C9A42B] border border-[#FFD600]"
-                                             title={`Presupuesto propio: S/ ${propioRaw.toLocaleString()} | Cofinanciado: S/ ${cofinanciado.toLocaleString()}`}
-                                           >
-                                             <svg xmlns="http://www.w3.org/2000/svg" className="w-2.5 h-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
-                                             S/ {total.toLocaleString()}
-                                             {cofinanciado > 0 && <span className="opacity-60 font-normal">(+{cofinanciado.toLocaleString()} cofinac.)</span>}
-                                           </span>
-                                         ) : null
-                                       })()}
-                                     </div>
-                                  </td>
-                                  <td className="py-3 text-sm text-[#5C5C5C]">{sub.responsable}</td>
-                                  <td colSpan={3} className="py-2 px-2">
-                                    <div className="flex items-center justify-between gap-4">
-                                      <div className="flex-1">
-                                        {sub.archivosEvidencia && sub.archivosEvidencia.length > 0 ? (
-                                          <div className="flex items-center gap-4">
-                                            <Dialog>
-                                              <DialogTrigger asChild>
-                                                <button className="flex items-center gap-1.5 text-xs font-medium text-[#2E7D32] bg-[#2E7D32]/10 border border-[#2E7D32]/20 shadow-sm rounded-md px-3 py-1.5 hover:bg-[#2E7D32]/20 transition-colors">
-                                                  <CheckCircle2 className="w-3.5 h-3.5"/> Archivos anexados ({sub.archivosEvidencia.length})
-                                                </button>
-                                              </DialogTrigger>
-                                              <DialogContent className="overflow-y-auto sm:max-w-md">
-                                                <DialogHeader>
-                                                  <DialogTitle>Gestionar Evidencias</DialogTitle>
-                                                  <DialogDescription>Archivos cargados en esta subactividad.</DialogDescription>
-                                                </DialogHeader>
-                                                <div className="flex flex-col gap-3 py-2">
-                                                  {(sub as any).archivosEvidencia.map((file: any) => (
-                                                    <div key={file.id} className="flex items-center justify-between p-2 rounded border border-[#E0E0E0] bg-[#FAFAFA]">
-                                                      <span className="text-sm text-[#1A1A1A] truncate w-64" title={file.nombre}>{file.nombre}</span>
-                                                      <button className="text-[#C9A42B] hover:text-[#FFD600] text-xs font-semibold px-2">Descargar</button>
-                                                    </div>
-                                                  ))}
-                                                </div>
-                                                <div className="border-t border-[#E0E0E0] pt-4 mt-2">
-                                                  <h4 className="text-sm font-semibold text-[#1A1A1A] mb-3">Anexar nuevo archivo</h4>
-                                                  <div className="grid gap-2">
-                                                    <Input type="file" />
-                                                  </div>
-                                                </div>
-                                                <DialogFooter className="mt-4">
-                                                  <DialogClose asChild><Button variant="outline">Cerrar</Button></DialogClose>
-                                                  <DialogClose asChild><Button className="bg-[#FFD600] text-[#1A1A1A] hover:bg-[#C9A42B]">Guardar</Button></DialogClose>
-                                                </DialogFooter>
-                                              </DialogContent>
-                                            </Dialog>
-                                            <div className="flex gap-3 text-xs text-[#5C5C5C] bg-white px-2 py-1.5 rounded border border-[#E0E0E0] shadow-sm">
-                                                <span title="Hombres involucrados" className="flex items-center gap-1 font-medium"><User className="w-3 h-3 text-[#1A1A1A]"/> {sub.hombresInvolucrados || 0} H</span>
-                                                <span className="text-[#E0E0E0]">|</span>
-                                                <span title="Mujeres involucradas" className="flex items-center gap-1 font-medium"><User className="w-3 h-3 text-[#1A1A1A]"/> {sub.mujeresInvolucradas || 0} M</span>
-                                            </div>
-                                          </div>
-                                        ) : (
-                                          <div className="flex items-center gap-2">
-                                            <Dialog>
-                                              <DialogTrigger asChild>
-                                                <button className="flex items-center gap-1.5 text-xs font-medium text-[#1A1A1A] bg-white border border-[#E0E0E0] shadow-sm rounded-md px-3 py-1.5 hover:bg-[#F7F7F7] hover:border-[#1A1A1A] transition-colors">
-                                                  <Download className="w-3.5 h-3.5 rotate-180"/> Anexar evidencia
-                                                </button>
-                                              </DialogTrigger>
-                                              <DialogContent className="overflow-y-auto sm:max-w-md">
-                                                <DialogHeader>
-                                                  <DialogTitle>Anexar Evidencia</DialogTitle>
-                                                  <DialogDescription>Suba documentos o reporte asistencia relacionados a esta subactividad.</DialogDescription>
-                                                </DialogHeader>
-                                                <div className="grid gap-4 py-6">
-                                                  <div className="grid gap-2">
-                                                    <Label htmlFor={`file-new-${sub.id}`}>Archivo de soporte (PDF, Docx)</Label>
-                                                    <Input id={`file-new-${sub.id}`} type="file" multiple />
-                                                  </div>
-                                                  <div className="grid grid-cols-2 gap-4">
-                                                    <div className="grid gap-2">
-                                                      <Label htmlFor={`hombres-${sub.id}`}>Hombres Asistentes</Label>
-                                                      <Input id={`hombres-${sub.id}`} type="number" placeholder="Ej. 15" />
-                                                    </div>
-                                                    <div className="grid gap-2">
-                                                      <Label htmlFor={`mujeres-${sub.id}`}>Mujeres Asistentes</Label>
-                                                      <Input id={`mujeres-${sub.id}`} type="number" placeholder="Ej. 20" />
-                                                    </div>
-                                                  </div>
-                                                </div>
-                                                <DialogFooter>
-                                                  <DialogClose asChild>
-                                                    <Button variant="outline">Cancelar</Button>
-                                                  </DialogClose>
-                                                  <DialogClose asChild>
-                                                    <Button className="bg-[#FFD600] text-[#1A1A1A] hover:bg-[#C9A42B]">Guardar</Button>
-                                                  </DialogClose>
-                                                </DialogFooter>
-                                              </DialogContent>
-                                            </Dialog>
-                                            <div className="flex gap-2">
-                                              <div className="relative">
-                                                <User className="w-3 h-3 absolute left-2 top-1/2 -translate-y-1/2 text-[#5C5C5C]" />
-                                                <input type="number" placeholder="H" className="w-16 h-7 text-xs border border-[#E0E0E0] shadow-sm rounded-md pl-6 pr-2 outline-none focus:border-[#FFD600]" title="Cantidad de Hombres" />
-                                              </div>
-                                              <div className="relative">
-                                                <User className="w-3 h-3 absolute left-2 top-1/2 -translate-y-1/2 text-[#5C5C5C]" />
-                                                <input type="number" placeholder="M" className="w-16 h-7 text-xs border border-[#E0E0E0] shadow-sm rounded-md pl-6 pr-2 outline-none focus:border-[#FFD600]" title="Cantidad de Mujeres" />
-                                              </div>
-                                            </div>
-                                          </div>
-                                        )}
-                                      </div>
-                                      <div className="flex shrink-0 items-center justify-end">
-                                        {!(sub as any).isCofinancedIncoming && (
-                                          <Dialog>
-                                            <DialogTrigger asChild>
-                                              <button className="flex items-center gap-1 text-xs font-medium text-[#C9A42B] bg-white border border-[#E0E0E0] shadow-sm rounded-md px-2 py-1 hover:bg-[#FFFDE7] hover:border-[#FFD600] transition-colors" title="Gestionar Cofinanciamiento">
-                                                <DollarSign className="w-3.5 h-3.5" />
-                                                Cofinanciar
-                                              </button>
-                                            </DialogTrigger>
-                                            <DialogContent className="overflow-y-auto sm:max-w-md">
-                                              <DialogHeader>
-                                                <DialogTitle>Cofinanciar Subactividad</DialogTitle>
-                                                <DialogDescription>
-                                                  Asigna presupuesto proveniente de otras actividades institucionales vinculadas.
-                                                </DialogDescription>
-                                              </DialogHeader>
-                                              <div className="grid gap-4 py-6">
-                                                <div className="grid gap-2">
-                                                  <Label>Actividad Origen (Fondo)</Label>
-                                                  <Select>
-                                                    <SelectTrigger><SelectValue placeholder="Seleccione la actividad matriz" /></SelectTrigger>
-                                                    <SelectContent>
-                                                      <SelectItem value="6">Mapeo de actores - Partida 3</SelectItem>
-                                                      <SelectItem value="8">Incidencia Política - Partida 4</SelectItem>
-                                                    </SelectContent>
-                                                  </Select>
-                                                </div>
-                                                <div className="grid gap-2">
-                                                  <Label htmlFor="monto">Monto asignado (S/)</Label>
-                                                  <Input id="monto" type="number" placeholder="Ej. 2500" />
-                                                </div>
-                                              </div>
-                                              <DialogFooter>
-                                                <DialogClose asChild>
-                                                  <Button variant="outline">Cancelar</Button>
-                                                </DialogClose>
-                                                <DialogClose asChild>
-                                                  <Button className="bg-[#FFD600] text-[#1A1A1A] hover:bg-[#C9A42B]">Guardar</Button>
-                                                </DialogClose>
-                                              </DialogFooter>
-                                            </DialogContent>
-                                          </Dialog>
-                                        )}
-                                      </div>
-                                    </div>
-                                  </td>
-                                </tr>
-                              ))}
-                              <tr className="bg-[#FAFAFA] border-none group">
-                                <td colSpan={5} className="py-3 pl-8 relative">
-                                  <div className="absolute left-3 top-0 bottom-1/2 w-px bg-[#E0E0E0]"></div>
-                                  <div className="absolute left-3 top-1/2 w-4 h-px bg-[#E0E0E0]"></div>
-                                  <div className="flex items-center relative z-10 bg-[#FAFAFA] pr-2">
-                                    <Dialog>
-                                      <DialogTrigger asChild>
-                                        <button className="flex items-center gap-1.5 text-xs font-bold text-[#C9A42B] hover:text-[#1A1A1A] transition-colors py-1 pl-2 ml-1">
-                                          <Plus className="h-3 w-3" /> Agregar subactividad
-                                        </button>
-                                      </DialogTrigger>
-                                      <DialogContent className="sm:max-w-lg overflow-y-auto max-h-[90vh]">
-                                        <DialogHeader>
-                                          <DialogTitle>Nueva Subactividad</DialogTitle>
-                                          <DialogDescription>Añada una subactividad a '{act.nombre}'.</DialogDescription>
-                                        </DialogHeader>
-                                        <div className="grid gap-4 py-4">
-                                          {/* Nombre */}
-                                          <div className="grid gap-2">
-                                            <Label>Nombre de la Subactividad <span className="text-red-500">*</span></Label>
-                                            <Input placeholder="Ej. Taller grupal de sensibilización" />
-                                          </div>
-                                          {/* Responsable */}
-                                          <div className="grid gap-2">
-                                            <Label>Responsable <span className="text-red-500">*</span></Label>
-                                            <Input placeholder="Nombre del encargado" />
-                                          </div>
-                                          {/* Fechas */}
-                                          <div className="grid grid-cols-2 gap-4">
-                                            <div className="grid gap-2">
-                                              <Label>Fecha de Inicio</Label>
-                                              <Input type="date" />
-                                            </div>
-                                            <div className="grid gap-2">
-                                              <Label>Fecha de Fin</Label>
-                                              <Input type="date" />
-                                            </div>
-                                          </div>
-                                          {/* Presupuesto */}
-                                          <div className="grid gap-2">
-                                            <Label>Presupuesto Asignado (S/)</Label>
-                                            <Input type="number" placeholder="Ej. 2500" />
-                                          </div>
-                                          {/* Participantes */}
-                                          <div className="grid gap-1.5">
-                                            <Label>Participantes estimados</Label>
-                                            <div className="grid grid-cols-2 gap-4">
-                                              <div className="grid gap-2">
-                                                <Label className="text-xs text-[#5C5C5C] font-normal">Hombres</Label>
-                                                <Input type="number" placeholder="Ej. 10" />
-                                              </div>
-                                              <div className="grid gap-2">
-                                                <Label className="text-xs text-[#5C5C5C] font-normal">Mujeres</Label>
-                                                <Input type="number" placeholder="Ej. 15" />
-                                              </div>
-                                            </div>
-                                          </div>
-                                          {/* Descripcion */}
-                                          <div className="grid gap-2">
-                                            <Label>Descripción / Observaciones</Label>
-                                            <textarea
-                                              className="min-h-[80px] w-full rounded-md border border-[#E0E0E0] bg-white px-3 py-2 text-sm outline-none focus:border-[#FFD600] resize-none"
-                                              placeholder="Descripción corta de la subactividad, objetivos o contexto..."
-                                            />
-                                          </div>
-                                        </div>
-                                        <DialogFooter>
-                                          <DialogClose asChild><Button variant="outline">Cancelar</Button></DialogClose>
-                                          <DialogClose asChild><Button className="bg-[#FFD600] text-[#1A1A1A] hover:bg-[#C9A42B]">Guardar</Button></DialogClose>
-                                        </DialogFooter>
-                                      </DialogContent>
-                                    </Dialog>
+                              {/* Subactividades placeholder */}
+                              <tr className="bg-[#FAFAFA] border-none">
+                                <td colSpan={6} className="py-2 pl-8 relative">
+                                  <div className="flex items-center gap-2">
+                                    <div className="w-px h-4 bg-[#E0E0E0]" />
+                                    <button
+                                      className="flex items-center gap-1 text-xs font-medium text-[#C9A42B] hover:text-[#1A1A1A] transition-colors"
+                                      title="Funcionalidad próximamente"
+                                    >
+                                      <Plus className="h-3 w-3" />
+                                      Agregar subactividad
+                                    </button>
+                                    <span className="text-[10px] text-[#BDBDBD] italic">(próximamente)</span>
                                   </div>
                                 </td>
                               </tr>
