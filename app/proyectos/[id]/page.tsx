@@ -15,7 +15,7 @@ import {
 } from "@/lib/data"
 import type { Proyecto as ProyectoMock } from "@/lib/data"
 import { api, ApiError } from "@/lib/api"
-import type { MacroregionRef, ProyectoResponse } from "@/lib/types"
+import type { MacroregionRef, ProyectoResponse, ActividadResponse, PageResponse, UsuarioResponse } from "@/lib/types"
 import { 
   ChevronRight,
   Pencil,
@@ -166,6 +166,8 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
   const { id } = use(params)
   const mockProyecto = getProyectoById(id)
   const [apiProyecto, setApiProyecto] = useState<ProyectoResponse | null>(null)
+  const [apiActividades, setApiActividades] = useState<ActividadResponse[]>([])
+  const [usuariosSistema, setUsuariosSistema] = useState<UsuarioResponse[]>([])
   const [apiLoading, setApiLoading] = useState(true)
   const [apiError, setApiError] = useState<string | null>(null)
   const proyecto = useMemo(
@@ -197,8 +199,18 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
       setApiError(null)
       try {
         const data = await api.get<ProyectoResponse>(`/proyectos/${id}`)
+        let acts: ActividadResponse[] = []
+        let users: PageResponse<UsuarioResponse> = { content: [], page: 0, size: 0, totalElements: 0, totalPages: 0, first: true, last: true }
+        try {
+          acts = await api.get<ActividadResponse[]>(`/proyectos/${id}/actividades`)
+          users = await api.get<PageResponse<UsuarioResponse>>(`/usuarios`)
+        } catch (e) {
+          console.error("Error al cargar actividades o usuarios", e)
+        }
         if (!cancelled) {
           setApiProyecto(data)
+          setApiActividades(acts)
+          setUsuariosSistema(users.content)
         }
       } catch (error) {
         if (!cancelled) {
@@ -233,7 +245,27 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
     notFound()
   }
 
-  const actividadesBase = getActividadesByProyecto(id)
+  const actividadesBase = apiProyecto ? apiActividades.map(a => ({
+    id: String(a.id),
+    proyectoId: String(a.idProyecto),
+    nombre: a.nombre,
+    responsable: a.idResponsables.length > 0 ? "Varios" : "Sin asignar",
+    fechaInicio: a.fechaInicio || "",
+    fechaFin: a.fechaFin || "",
+    estado: a.estado === "PENDIENTE" ? "Pendiente" : a.estado === "EN_CURSO" ? "En progreso" : a.estado === "COMPLETADA" ? "Completada" : "Vencida",
+    avance: a.porcentajeAvance || 0,
+    subactividades: a.subactividades?.map(s => ({
+      id: String(s.id),
+      nombre: s.nombre,
+      responsable: s.responsable,
+      presupuesto: s.presupuesto,
+      hombresInvolucrados: s.hombresInvolucrados,
+      mujeresInvolucradas: s.mujeresInvolucradas,
+      archivosEvidencia: s.archivosEvidencia?.map(ar => ({ id: String(ar.id), nombre: ar.nombre, url: ar.url })),
+      cofinanciadoPor: s.cofinanciadoPor?.map(c => ({ actividadId: String(c.actividadId), monto: c.monto }))
+    }))
+  } as any)) : getActividadesByProyecto(id)
+  
   const actividades = actividadesBase.map(act => {
     const cofinanciadasTargetingThisAct = allActividades
       .flatMap(a => a.subactividades?.map(s => ({ ...s, parentActividad: a })) || [])
@@ -465,7 +497,6 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                       <h3 className="text-sm font-bold uppercase tracking-wide text-[#5C5C5C]">
                         Actividades del Proyecto
                       </h3>
-                      <MockDataTag />
                     </div>
                     <Dialog>
                       <DialogTrigger asChild>
@@ -475,6 +506,26 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                         </button>
                       </DialogTrigger>
                       <DialogContent className="overflow-y-auto sm:max-w-md">
+                        <form onSubmit={async (e) => {
+                          e.preventDefault();
+                          const form = e.currentTarget;
+                          const formData = new FormData(form);
+                          const payload = {
+                            nombre: formData.get('nombre'),
+                            idProyecto: parseInt(id, 10),
+                            idResponsables: [parseInt(formData.get('idResponsable') as string, 10)],
+                            fechaInicio: formData.get('fechaInicio') || null,
+                            fechaFin: formData.get('fechaFin') || null,
+                            estado: 'PENDIENTE'
+                          };
+                          try {
+                            await api.post('/actividades', payload);
+                            const acts = await api.get<ActividadResponse[]>(`/proyectos/${id}/actividades`);
+                            setApiActividades(acts);
+                          } catch (err) {
+                            console.error(err);
+                          }
+                        }}>
                         <DialogHeader>
                           <DialogTitle>Nueva Actividad</DialogTitle>
                           <DialogDescription>Deltalle la nueva actividad a registrar para este proyecto.</DialogDescription>
@@ -482,31 +533,39 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                         <div className="grid gap-4 py-6">
                           <div className="grid gap-2">
                             <Label htmlFor="act-nombre">Nombre de la actividad</Label>
-                            <Input id="act-nombre" placeholder="Ej. Taller de sensibilización" />
+                            <Input id="act-nombre" name="nombre" placeholder="Ej. Taller de sensibilización" required />
                           </div>
                           <div className="grid gap-2">
                             <Label htmlFor="act-responsable">Responsable</Label>
-                            <Input id="act-responsable" placeholder="Pedro Mendoza" />
+                            <Select name="idResponsable" required>
+                              <SelectTrigger id="act-responsable"><SelectValue placeholder="Seleccione un responsable" /></SelectTrigger>
+                              <SelectContent>
+                                {usuariosSistema.map(u => (
+                                  <SelectItem key={u.id} value={String(u.id)}>{u.nombres} {u.apellidos}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
                           </div>
                           <div className="grid grid-cols-2 gap-4">
                             <div className="grid gap-2">
                               <Label htmlFor="act-inicio">Fecha de Inicio</Label>
-                              <Input id="act-inicio" type="date" />
+                              <Input id="act-inicio" name="fechaInicio" type="date" required />
                             </div>
                             <div className="grid gap-2">
                               <Label htmlFor="act-fin">Fecha de Fin</Label>
-                              <Input id="act-fin" type="date" />
+                              <Input id="act-fin" name="fechaFin" type="date" />
                             </div>
                           </div>
                         </div>
                         <DialogFooter>
                           <DialogClose asChild>
-                            <Button variant="outline">Cancelar</Button>
+                            <Button variant="outline" type="button">Cancelar</Button>
                           </DialogClose>
                           <DialogClose asChild>
-                            <Button className="bg-[#FFD600] text-[#1A1A1A] hover:bg-[#C9A42B]">Crear actividad</Button>
+                            <Button type="submit" className="bg-[#FFD600] text-[#1A1A1A] hover:bg-[#C9A42B]">Crear actividad</Button>
                           </DialogClose>
                         </DialogFooter>
+                        </form>
                       </DialogContent>
                     </Dialog>
                   </div>
@@ -734,64 +793,95 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                                         </button>
                                       </DialogTrigger>
                                       <DialogContent className="sm:max-w-lg overflow-y-auto max-h-[90vh]">
-                                        <DialogHeader>
-                                          <DialogTitle>Nueva Subactividad</DialogTitle>
-                                          <DialogDescription>Añada una subactividad a '{act.nombre}'.</DialogDescription>
-                                        </DialogHeader>
-                                        <div className="grid gap-4 py-4">
-                                          {/* Nombre */}
-                                          <div className="grid gap-2">
-                                            <Label>Nombre de la Subactividad <span className="text-red-500">*</span></Label>
-                                            <Input placeholder="Ej. Taller grupal de sensibilización" />
-                                          </div>
-                                          {/* Responsable */}
-                                          <div className="grid gap-2">
-                                            <Label>Responsable <span className="text-red-500">*</span></Label>
-                                            <Input placeholder="Nombre del encargado" />
-                                          </div>
-                                          {/* Fechas */}
-                                          <div className="grid grid-cols-2 gap-4">
+                                          <form onSubmit={async (e) => {
+                                            e.preventDefault();
+                                            const form = e.currentTarget;
+                                            const formData = new FormData(form);
+                                            const payload = {
+                                              nombre: formData.get('nombre'),
+                                              idResponsable: parseInt(formData.get('idResponsable') as string, 10),
+                                              fechaInicio: formData.get('fechaInicio') || null,
+                                              fechaFin: formData.get('fechaFin') || null,
+                                              presupuesto: parseFloat(formData.get('presupuesto') as string) || 0,
+                                              hombresInvolucrados: parseInt(formData.get('hombres') as string) || 0,
+                                              mujeresInvolucradas: parseInt(formData.get('mujeres') as string) || 0,
+                                              descripcion: formData.get('descripcion')
+                                            };
+                                            try {
+                                              await api.post(`/actividades/${act.id}/subactividades`, payload);
+                                              const acts = await api.get<ActividadResponse[]>(`/proyectos/${id}/actividades`);
+                                              setApiActividades(acts);
+                                            } catch (err) {
+                                              console.error(err);
+                                            }
+                                          }}>
+                                          <DialogHeader>
+                                            <DialogTitle>Nueva Subactividad</DialogTitle>
+                                            <DialogDescription>Añada una subactividad a '{act.nombre}'.</DialogDescription>
+                                          </DialogHeader>
+                                          <div className="grid gap-4 py-4">
+                                            {/* Nombre */}
                                             <div className="grid gap-2">
-                                              <Label>Fecha de Inicio</Label>
-                                              <Input type="date" />
+                                              <Label>Nombre de la Subactividad <span className="text-red-500">*</span></Label>
+                                              <Input name="nombre" placeholder="Ej. Taller grupal de sensibilización" required />
                                             </div>
+                                            {/* Responsable */}
                                             <div className="grid gap-2">
-                                              <Label>Fecha de Fin</Label>
-                                              <Input type="date" />
+                                              <Label>Responsable <span className="text-red-500">*</span></Label>
+                                              <Select name="idResponsable" required>
+                                                <SelectTrigger><SelectValue placeholder="Seleccione un responsable" /></SelectTrigger>
+                                                <SelectContent>
+                                                  {usuariosSistema.map(u => (
+                                                    <SelectItem key={u.id} value={String(u.id)}>{u.nombres} {u.apellidos}</SelectItem>
+                                                  ))}
+                                                </SelectContent>
+                                              </Select>
                                             </div>
-                                          </div>
-                                          {/* Presupuesto */}
-                                          <div className="grid gap-2">
-                                            <Label>Presupuesto Asignado (S/)</Label>
-                                            <Input type="number" placeholder="Ej. 2500" />
-                                          </div>
-                                          {/* Participantes */}
-                                          <div className="grid gap-1.5">
-                                            <Label>Participantes estimados</Label>
+                                            {/* Fechas */}
                                             <div className="grid grid-cols-2 gap-4">
                                               <div className="grid gap-2">
-                                                <Label className="text-xs text-[#5C5C5C] font-normal">Hombres</Label>
-                                                <Input type="number" placeholder="Ej. 10" />
+                                                <Label>Fecha de Inicio</Label>
+                                                <Input name="fechaInicio" type="date" />
                                               </div>
                                               <div className="grid gap-2">
-                                                <Label className="text-xs text-[#5C5C5C] font-normal">Mujeres</Label>
-                                                <Input type="number" placeholder="Ej. 15" />
+                                                <Label>Fecha de Fin</Label>
+                                                <Input name="fechaFin" type="date" />
                                               </div>
                                             </div>
+                                            {/* Presupuesto */}
+                                            <div className="grid gap-2">
+                                              <Label>Presupuesto Asignado (S/)</Label>
+                                              <Input name="presupuesto" type="number" placeholder="Ej. 2500" step="0.01" />
+                                            </div>
+                                            {/* Participantes */}
+                                            <div className="grid gap-1.5">
+                                              <Label>Participantes estimados</Label>
+                                              <div className="grid grid-cols-2 gap-4">
+                                                <div className="grid gap-2">
+                                                  <Label className="text-xs text-[#5C5C5C] font-normal">Hombres</Label>
+                                                  <Input name="hombres" type="number" placeholder="Ej. 10" min="0" />
+                                                </div>
+                                                <div className="grid gap-2">
+                                                  <Label className="text-xs text-[#5C5C5C] font-normal">Mujeres</Label>
+                                                  <Input name="mujeres" type="number" placeholder="Ej. 15" min="0" />
+                                                </div>
+                                              </div>
+                                            </div>
+                                            {/* Descripcion */}
+                                            <div className="grid gap-2">
+                                              <Label>Descripción / Observaciones</Label>
+                                              <textarea
+                                                name="descripcion"
+                                                className="min-h-[80px] w-full rounded-md border border-[#E0E0E0] bg-white px-3 py-2 text-sm outline-none focus:border-[#FFD600] resize-none"
+                                                placeholder="Descripción corta de la subactividad, objetivos o contexto..."
+                                              />
+                                            </div>
                                           </div>
-                                          {/* Descripcion */}
-                                          <div className="grid gap-2">
-                                            <Label>Descripción / Observaciones</Label>
-                                            <textarea
-                                              className="min-h-[80px] w-full rounded-md border border-[#E0E0E0] bg-white px-3 py-2 text-sm outline-none focus:border-[#FFD600] resize-none"
-                                              placeholder="Descripción corta de la subactividad, objetivos o contexto..."
-                                            />
-                                          </div>
-                                        </div>
-                                        <DialogFooter>
-                                          <DialogClose asChild><Button variant="outline">Cancelar</Button></DialogClose>
-                                          <DialogClose asChild><Button className="bg-[#FFD600] text-[#1A1A1A] hover:bg-[#C9A42B]">Guardar</Button></DialogClose>
-                                        </DialogFooter>
+                                          <DialogFooter>
+                                            <DialogClose asChild><Button variant="outline" type="button">Cancelar</Button></DialogClose>
+                                            <Button type="submit" className="bg-[#FFD600] text-[#1A1A1A] hover:bg-[#C9A42B]">Guardar</Button>
+                                          </DialogFooter>
+                                          </form>
                                       </DialogContent>
                                     </Dialog>
                                   </div>

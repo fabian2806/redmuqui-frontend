@@ -173,6 +173,48 @@ export interface ProyectoCreate {
   idTerritorios?: number[]
 }
 
+// ----- Actividad y Subactividad -----
+
+export type EstadoActividad = "PENDIENTE" | "EN_CURSO" | "COMPLETADA" | "VENCIDA"
+
+export interface SubactividadArchivoResponse {
+  id: number
+  nombre: string
+  url: string
+}
+
+export interface SubactividadCofinanciamientoResponse {
+  actividadId: number
+  monto: number
+}
+
+export interface SubactividadResponse {
+  id: number
+  nombre: string
+  responsable: string
+  presupuesto?: number
+  hombresInvolucrados?: number
+  mujeresInvolucradas?: number
+  fechaInicio?: string
+  fechaFin?: string
+  descripcion?: string
+  archivosEvidencia?: SubactividadArchivoResponse[]
+  cofinanciadoPor?: SubactividadCofinanciamientoResponse[]
+}
+
+export interface ActividadResponse {
+  id: number
+  nombre: string
+  descripcion: string | null
+  fechaInicio: string | null
+  fechaFin: string | null
+  estado: EstadoActividad
+  porcentajeAvance: number | null
+  idProyecto: number
+  idResponsables: number[]
+  subactividades?: SubactividadResponse[]
+}
+
 // ----- Bitacora -----
 
 export interface BitacoraResponse {
