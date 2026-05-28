@@ -71,13 +71,18 @@ export async function login(credentials: LoginRequest): Promise<TokenResponse> {
 
 export async function logout(): Promise<void> {
   const accessToken = getAccessToken()
+  const refreshToken = getRefreshToken()
 
-  if (accessToken) {
+  if (accessToken && refreshToken) {
     // Best-effort: aunque falle el backend, limpiamos en cliente.
     try {
       await fetch(`${API_BASE_URL}/auth/logout`, {
         method: "POST",
-        headers: { Authorization: `Bearer ${accessToken}` },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({ refreshToken }),
       })
     } catch {
       // ignorar errores de red

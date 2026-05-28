@@ -22,6 +22,7 @@ import { api, ApiError } from "@/lib/api"
 import type {
   EjeTematico,
   EstadoProyecto,
+  Institucion,
   Macroregion,
   PageResponse,
   ProyectoResponse,
@@ -69,6 +70,8 @@ function buildProyectosPath(params: {
   estado: EstadoProyecto | ""
   idMacroregion: string
   idEjeTematico: string
+  idInstitucion: string
+  anio: string
 }) {
   const search = new URLSearchParams({
     page: String(params.page - 1),
@@ -80,6 +83,8 @@ function buildProyectosPath(params: {
   if (params.estado) search.set("estado", params.estado)
   if (params.idMacroregion) search.set("idMacroregion", params.idMacroregion)
   if (params.idEjeTematico) search.set("idEjeTematico", params.idEjeTematico)
+  if (params.idInstitucion) search.set("idInstitucion", params.idInstitucion)
+  if (params.anio.trim()) search.set("anio", params.anio.trim())
 
   return `/proyectos?${search.toString()}`
 }
@@ -89,10 +94,13 @@ export default function ProyectosPage() {
   const [selectedMacroregion, setSelectedMacroregion] = useState("")
   const [selectedEje, setSelectedEje] = useState("")
   const [selectedEstado, setSelectedEstado] = useState<EstadoProyecto | "">("")
+  const [selectedInstitucion, setSelectedInstitucion] = useState("")
+  const [selectedAnio, setSelectedAnio] = useState("")
   const [currentPage, setCurrentPage] = useState(1)
 
   const [macroregiones, setMacroregiones] = useState<Macroregion[]>([])
   const [ejesTematicos, setEjesTematicos] = useState<EjeTematico[]>([])
+  const [instituciones, setInstituciones] = useState<Institucion[]>([])
   const [proyectosPage, setProyectosPage] =
     useState<PageResponse<ProyectoResponse> | null>(null)
   const [loading, setLoading] = useState(true)
@@ -105,13 +113,15 @@ export default function ProyectosPage() {
     async function loadCatalogos() {
       setCatalogosLoading(true)
       try {
-        const [macroregionesData, ejesData] = await Promise.all([
+        const [macroregionesData, ejesData, institucionesData] = await Promise.all([
           api.get<Macroregion[]>("/macroregiones"),
           api.get<EjeTematico[]>("/ejes-tematicos"),
+          api.get<Institucion[]>("/instituciones"),
         ])
         if (!cancelled) {
           setMacroregiones(macroregionesData)
           setEjesTematicos(ejesData)
+          setInstituciones(institucionesData)
         }
       } catch (err) {
         if (!cancelled) {
@@ -146,6 +156,8 @@ export default function ProyectosPage() {
           estado: selectedEstado,
           idMacroregion: selectedMacroregion,
           idEjeTematico: selectedEje,
+          idInstitucion: selectedInstitucion,
+          anio: selectedAnio,
         })
         const data = await api.get<PageResponse<ProyectoResponse>>(path)
         if (!cancelled) setProyectosPage(data)
@@ -173,13 +185,16 @@ export default function ProyectosPage() {
     selectedEje,
     selectedEstado,
     selectedMacroregion,
+    selectedInstitucion,
+    selectedAnio,
   ])
 
   const proyectos = proyectosPage?.content ?? []
   const totalPages = proyectosPage?.totalPages ?? 0
   const totalElements = proyectosPage?.totalElements ?? 0
   const hasActiveFilters =
-    searchQuery || selectedMacroregion || selectedEje || selectedEstado
+    searchQuery || selectedMacroregion || selectedEje || selectedEstado ||
+    selectedInstitucion || selectedAnio
 
   const pageStart = useMemo(() => {
     if (!proyectosPage || totalElements === 0) return 0
@@ -196,6 +211,8 @@ export default function ProyectosPage() {
     setSelectedMacroregion("")
     setSelectedEje("")
     setSelectedEstado("")
+    setSelectedInstitucion("")
+    setSelectedAnio("")
     setCurrentPage(1)
   }
 
@@ -283,6 +300,36 @@ export default function ProyectosPage() {
                 </option>
               ))}
             </select>
+
+            <select
+              value={selectedInstitucion}
+              onChange={(e) => {
+                setSelectedInstitucion(e.target.value)
+                setCurrentPage(1)
+              }}
+              disabled={catalogosLoading}
+              className="h-10 rounded-lg border border-[#E0E0E0] bg-white px-3 text-sm text-[#1A1A1A] focus:border-[#FFD600] focus:outline-none focus:ring-1 focus:ring-[#FFD600] disabled:opacity-60"
+            >
+              <option value="">Institución</option>
+              {instituciones.map((inst) => (
+                <option key={inst.id} value={inst.id}>
+                  {inst.nombre}
+                </option>
+              ))}
+            </select>
+
+            <input
+              type="number"
+              min="2000"
+              max="2099"
+              placeholder="Año inicio"
+              value={selectedAnio}
+              onChange={(e) => {
+                setSelectedAnio(e.target.value)
+                setCurrentPage(1)
+              }}
+              className="h-10 w-28 rounded-lg border border-[#E0E0E0] bg-white px-3 text-sm text-[#1A1A1A] placeholder:text-[#5C5C5C] focus:border-[#FFD600] focus:outline-none focus:ring-1 focus:ring-[#FFD600]"
+            />
 
             {hasActiveFilters && (
               <button

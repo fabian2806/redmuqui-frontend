@@ -198,6 +198,28 @@ export interface ActividadCreate {
   idResponsables?: number[]
 }
 
+// ----- Hito -----
+
+export type EstadoHito = "PENDIENTE" | "EN_CURSO" | "FINALIZADO"
+
+export interface HitoResponse {
+  id: number
+  nombre: string
+  descripcion: string | null
+  fechaClave: string
+  estado: EstadoHito
+  idProyecto: number
+  fechaCreacion?: string | null
+  fechaModificacion?: string | null
+}
+
+export interface HitoCreate {
+  nombre: string
+  descripcion?: string | null
+  fechaClave: string
+  estado: EstadoHito
+}
+
 // ----- Bitacora -----
 
 export interface BitacoraResponse {

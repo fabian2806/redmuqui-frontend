@@ -4,23 +4,27 @@ import React, { useEffect, useMemo, useState, use } from "react"
 import { AppLayout } from "@/components/layout/app-layout"
 import { StatusBadge, MacroregionBadge, TypeBadge } from "@/components/ui/status-badge"
 import { ProgressBar } from "@/components/ui/progress-bar"
-import { 
-  getProyectoById, 
+import {
+  getProyectoById,
   getHitosByProyecto,
   getDocumentosByProyecto,
   getBitacoraByEntidad,
-  hitos as allHitos
+  hitos as allHitos,
+  actividades as allActividades
 } from "@/lib/data"
-import type { Proyecto as ProyectoMock } from "@/lib/data"
+import type { Hito as HitoMock, Proyecto as ProyectoMock } from "@/lib/data"
 import { api, ApiError } from "@/lib/api"
-import type { 
-  MacroregionRef, 
-  ProyectoResponse, 
-  ActividadResponse, 
+import type {
+  MacroregionRef,
+  ProyectoResponse,
+  ActividadResponse,
   UsuarioResponse,
-  PageResponse 
+  PageResponse,
+  HitoCreate,
+  HitoResponse,
+  EstadoHito
 } from "@/lib/types"
-import { 
+import {
   ChevronRight,
   Pencil,
   Download,
@@ -36,7 +40,6 @@ import {
   Clock,
   CheckCircle2,
   Circle,
-  XCircle,
   Trash2,
   UserPlus
 } from "lucide-react"
@@ -50,12 +53,104 @@ import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 
 type TabType = "resumen" | "actividades" | "hitos" | "informes" | "equipo" | "bitacora"
+type HitoEstadoUi = "Pendiente" | "En curso" | "Finalizado"
+type HitoDetalle = {
+  id: string
+  proyectoId: string
+  nombre: string
+  fecha: string
+  estado: HitoEstadoUi
+  descripcion: string
+  fuenteDatos: "api" | "mock" | "local"
+}
+type HitoForm = Omit<HitoDetalle, "id" | "proyectoId" | "fuenteDatos">
 type ProyectoDetalle = Omit<ProyectoMock, "macroregion" | "ejeTematico" | "estado"> & {
   macroregion: string
   macroregiones?: MacroregionRef[]
   ejeTematico: string
   estado: string
   fuenteDatos: "api" | "mixto" | "mock"
+}
+
+const DIAS_ALERTA_ACTIVIDAD = 15
+
+function parseLocalDate(date: string): Date {
+  return new Date(`${date}T00:00:00`)
+}
+
+function startOfToday(): Date {
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  return today
+}
+
+function getDiasHastaFecha(date: string, today = startOfToday()): number {
+  const fechaFin = parseLocalDate(date)
+  return Math.ceil((fechaFin.getTime() - today.getTime()) / (1000 * 60 * 60 * 24))
+}
+
+function getAlertaVencimientoActividad(actividad: {
+  fechaFin: string
+  estado: string
+}) {
+  if (actividad.estado === "Completada") return null
+
+  const diasRestantes = getDiasHastaFecha(actividad.fechaFin)
+
+  if (diasRestantes < 0) {
+    return {
+      tipo: "vencida" as const,
+      label: `Vencida hace ${Math.abs(diasRestantes)} día${Math.abs(diasRestantes) === 1 ? "" : "s"}`,
+    }
+  }
+
+  if (diasRestantes === 0) {
+    return {
+      tipo: "vence-hoy" as const,
+      label: "Vence hoy",
+    }
+  }
+
+  if (diasRestantes <= DIAS_ALERTA_ACTIVIDAD) {
+    return {
+      tipo: "proxima" as const,
+      label: `Vence en ${diasRestantes} día${diasRestantes === 1 ? "" : "s"}`,
+    }
+  }
+
+  return null
+}
+
+function getAlertaVencimientoHito(hito: {
+  fecha: string
+  estado: string
+}) {
+  if (hito.estado === "Completado") return null
+
+  const diasRestantes = getDiasHastaFecha(hito.fecha)
+
+  if (diasRestantes < 0) {
+    return {
+      tipo: "vencido" as const,
+      label: `Vencido hace ${Math.abs(diasRestantes)} día${Math.abs(diasRestantes) === 1 ? "" : "s"}`,
+    }
+  }
+
+  if (diasRestantes === 0) {
+    return {
+      tipo: "vence-hoy" as const,
+      label: "Vence hoy",
+    }
+  }
+
+  if (diasRestantes <= DIAS_ALERTA_ACTIVIDAD) {
+    return {
+      tipo: "proximo" as const,
+      label: `Vence en ${diasRestantes} día${diasRestantes === 1 ? "" : "s"}`,
+    }
+  }
+
+  return null
 }
 
 function apiMacroregiones(proyecto: ProyectoResponse): MacroregionRef[] {
@@ -132,6 +227,62 @@ function getApiErrorMessage(error: unknown): string {
   return "No se pudo cargar la API del proyecto."
 }
 
+const hitoFormInicial: HitoForm = {
+  nombre: "",
+  fecha: "",
+  estado: "Pendiente",
+  descripcion: "",
+}
+
+function estadoHitoDesdeApi(estado: EstadoHito): HitoEstadoUi {
+  if (estado === "FINALIZADO") return "Finalizado"
+  if (estado === "EN_CURSO") return "En curso"
+  return "Pendiente"
+}
+
+function estadoHitoParaApi(estado: HitoEstadoUi): EstadoHito {
+  if (estado === "Finalizado") return "FINALIZADO"
+  if (estado === "En curso") return "EN_CURSO"
+  return "PENDIENTE"
+}
+
+function hitoDesdeApi(hito: HitoResponse): HitoDetalle {
+  return {
+    id: String(hito.id),
+    proyectoId: String(hito.idProyecto),
+    nombre: hito.nombre,
+    fecha: hito.fechaClave,
+    estado: estadoHitoDesdeApi(hito.estado),
+    descripcion: hito.descripcion ?? "",
+    fuenteDatos: "api",
+  }
+}
+
+function hitoDesdeMock(hito: HitoMock): HitoDetalle {
+  const estado =
+    hito.estado === "Completado"
+      ? "Finalizado"
+      : hito.estado === "Vencido"
+        ? "En curso"
+        : "Pendiente"
+
+  return {
+    ...hito,
+    estado,
+    descripcion: "",
+    fuenteDatos: "mock",
+  }
+}
+
+function payloadHito(form: HitoForm): HitoCreate {
+  return {
+    nombre: form.nombre.trim(),
+    fechaClave: form.fecha,
+    estado: estadoHitoParaApi(form.estado),
+    descripcion: form.descripcion.trim() || null,
+  }
+}
+
 function MockDataTag() {
   return (
     <span className="inline-flex items-center rounded-full border border-[#E0E0E0] bg-[#F7F7F7] px-2 py-0.5 text-[10px] font-medium normal-case tracking-normal text-[#5C5C5C]">
@@ -186,12 +337,15 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
 
   // State for hitos
   const hitosData = getHitosByProyecto(id)
-  const [hitosState, setHitosState] = useState(
-    () => hitosData.map(h => ({ ...h }))
+  const [hitosState, setHitosState] = useState<HitoDetalle[]>(
+    () => hitosData.map(hitoDesdeMock)
   )
+  const [hitosLoading, setHitosLoading] = useState(true)
+  const [hitosError, setHitosError] = useState<string | null>(null)
+  const [hitoSubmitting, setHitoSubmitting] = useState(false)
   const [addHitoOpen, setAddHitoOpen] = useState(false)
-  const [editHito, setEditHito] = useState<typeof hitosState[0] | null>(null)
-  const [hitoForm, setHitoForm] = useState({ nombre: "", fecha: "", estado: "Pendiente" as "Completado" | "Pendiente" | "Vencido" })
+  const [editHito, setEditHito] = useState<HitoDetalle | null>(null)
+  const [hitoForm, setHitoForm] = useState<HitoForm>(hitoFormInicial)
 
   // ── Actividades desde API ──
   const [actividadesApi, setActividadesApi] = useState<ActividadResponse[]>([])
@@ -286,11 +440,107 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
       }
     }
 
+    async function cargarHitos() {
+      setHitosLoading(true)
+      setHitosError(null)
+      setHitosState(getHitosByProyecto(id).map(hitoDesdeMock))
+      try {
+        const data = await api.get<HitoResponse[] | { content: HitoResponse[] }>(`/proyectos/${id}/hitos`)
+        if (!cancelled) {
+          const hitosApi = Array.isArray(data) ? data : data.content
+          setHitosState(hitosApi.map(hitoDesdeApi))
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setHitosError(getApiErrorMessage(error))
+        }
+      } finally {
+        if (!cancelled) {
+          setHitosLoading(false)
+        }
+      }
+    }
+
     cargarActividades()
     cargarUsuarios()
+    cargarHitos()
 
     return () => { cancelled = true }
   }, [id])
+
+  const abrirNuevoHito = () => {
+    setHitoForm(hitoFormInicial)
+    setEditHito(null)
+    setHitosError(null)
+    setAddHitoOpen(true)
+  }
+
+  const abrirEditarHito = (hito: HitoDetalle) => {
+    setEditHito(hito)
+    setHitoForm({
+      nombre: hito.nombre,
+      fecha: hito.fecha,
+      estado: hito.estado,
+      descripcion: hito.descripcion,
+    })
+    setHitosError(null)
+    setAddHitoOpen(true)
+  }
+
+  const guardarHito = async () => {
+    if (!hitoForm.nombre.trim() || !hitoForm.fecha) {
+      setHitosError("Completa el nombre y la fecha programada del hito")
+      return
+    }
+
+    setHitoSubmitting(true)
+    setHitosError(null)
+
+    try {
+      if (editHito) {
+        if (editHito.fuenteDatos === "api") {
+          const actualizado = await api.put<HitoResponse>(
+            `/proyectos/${id}/hitos/${editHito.id}`,
+            payloadHito(hitoForm),
+          )
+          setHitosState(prev => prev.map(h => h.id === editHito.id ? hitoDesdeApi(actualizado) : h))
+        } else {
+          setHitosState(prev => prev.map(h => h.id === editHito.id ? { ...h, ...hitoForm, fuenteDatos: h.fuenteDatos } : h))
+        }
+      } else {
+        try {
+          const creado = await api.post<HitoResponse>(`/proyectos/${id}/hitos`, payloadHito(hitoForm))
+          setHitosState(prev => [...prev, hitoDesdeApi(creado)])
+        } catch (error) {
+          const newId = `hito-${Date.now()}`
+          setHitosState(prev => [...prev, { id: newId, proyectoId: id, ...hitoForm, fuenteDatos: "local" }])
+          setHitosError(`Hito guardado solo en esta sesion: ${getApiErrorMessage(error)}`)
+        }
+      }
+
+      setAddHitoOpen(false)
+      setEditHito(null)
+      setHitoForm(hitoFormInicial)
+    } catch (error) {
+      setHitosError(getApiErrorMessage(error))
+    } finally {
+      setHitoSubmitting(false)
+    }
+  }
+
+  const eliminarHito = async (hito: HitoDetalle) => {
+    const previous = hitosState
+    setHitosState(prev => prev.filter(item => item.id !== hito.id))
+
+    if (hito.fuenteDatos !== "api") return
+
+    try {
+      await api.delete<void>(`/proyectos/${id}/hitos/${hito.id}`)
+    } catch (error) {
+      setHitosState(previous)
+      setHitosError(getApiErrorMessage(error))
+    }
+  }
 
   if (!proyecto && apiLoading) {
     return (
@@ -316,7 +566,58 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
     [actividadesApi, usuariosMap]
   )
 
-  const hitos = hitosData
+  const actividadesBase = getActividadesByProyecto(id)
+  const actividades = actividadesBase.map(act => {
+    const cofinanciadasTargetingThisAct = allActividades
+      .flatMap(a => a.subactividades?.map(s => ({ ...s, parentActividad: a })) || [])
+      .filter(s => s.cofinanciadoPor?.some(c => c.actividadId === act.id))
+      .map(s => {
+         const cofundingData = s.cofinanciadoPor?.find(c => c.actividadId === act.id);
+         return {
+           ...s,
+           isCofinancedIncoming: true,
+           montoCofinanciado: cofundingData?.monto || 0
+         }
+      });
+
+    return {
+      ...act,
+      subactividades: [...(act.subactividades || []), ...cofinanciadasTargetingThisAct]
+    }
+  });
+
+  const actividadesConAlertas = actividades
+    .map((actividad) => ({
+      ...actividad,
+      alertaVencimiento: getAlertaVencimientoActividad(actividad),
+    })
+  )
+
+  const actividadesVencidas = actividadesConAlertas.filter(
+    (actividad) => actividad.alertaVencimiento?.tipo === "vencida",
+  )
+
+  const actividadesProximasAVencer = actividadesConAlertas.filter(
+    (actividad) =>
+      actividad.alertaVencimiento?.tipo === "proxima" ||
+      actividad.alertaVencimiento?.tipo === "vence-hoy",
+  )
+
+  const hitosConAlertas = hitosState.map((hito) => ({
+    ...hito,
+    alertaVencimiento: getAlertaVencimientoHito(hito),
+  }))
+
+  const hitosVencidos = hitosConAlertas.filter(
+    (hito) => hito.alertaVencimiento?.tipo === "vencido",
+  )
+
+  const hitosProximosAVencer = hitosConAlertas.filter(
+    (hito) =>
+      hito.alertaVencimiento?.tipo === "proximo" ||
+      hito.alertaVencimiento?.tipo === "vence-hoy",
+  )
+
   const documentos = getDocumentosByProyecto(id)
   const bitacora = getBitacoraByEntidad(id)
 
@@ -731,7 +1032,6 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                       </DialogContent>
                     </Dialog>
                   </div>
-
                   {actividadesLoading ? (
                     <div className="text-center py-8 text-sm text-[#5C5C5C]">Cargando actividades...</div>
                   ) : actividadesError ? (
@@ -739,6 +1039,38 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                       <p className="text-sm text-[#C8102E]">Error al cargar actividades: {actividadesError}</p>
                     </div>
                   ) : actividades.length > 0 ? (
+                  {actividadesConAlertas.length > 0 ? (
+                    <>
+                    {(actividadesVencidas.length > 0 || actividadesProximasAVencer.length > 0) && (
+                      <div className="mb-4 grid gap-3 md:grid-cols-2">
+                        {actividadesVencidas.length > 0 && (
+                          <div className="rounded-lg border border-[#C8102E]/20 bg-[#C8102E]/5 p-4">
+                            <div className="mb-1 flex items-center gap-2 text-[#C8102E]">
+                              <AlertTriangle className="h-4 w-4" />
+                              <p className="text-sm font-bold">
+                                {actividadesVencidas.length} actividad{actividadesVencidas.length === 1 ? "" : "es"} vencida{actividadesVencidas.length === 1 ? "" : "s"}
+                              </p>
+                            </div>
+                            <p className="text-xs text-[#C8102E]">
+                              Requiere seguimiento para regularizar el avance o actualizar la fecha de cierre.
+                            </p>
+                          </div>
+                        )}
+                        {actividadesProximasAVencer.length > 0 && (
+                          <div className="rounded-lg border border-[#F57C00]/20 bg-[#F57C00]/5 p-4">
+                            <div className="mb-1 flex items-center gap-2 text-[#F57C00]">
+                              <Clock className="h-4 w-4" />
+                              <p className="text-sm font-bold">
+                                {actividadesProximasAVencer.length} actividad{actividadesProximasAVencer.length === 1 ? "" : "es"} próxima{actividadesProximasAVencer.length === 1 ? "" : "s"} a vencer
+                              </p>
+                            </div>
+                            <p className="text-xs text-[#F57C00]">
+                              Vencen dentro de los próximos {DIAS_ALERTA_ACTIVIDAD} días o durante el día actual.
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    )}
                     <div className="overflow-x-auto">
                       <table className="w-full">
                         <thead>
@@ -752,11 +1084,38 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-[#E0E0E0]">
-                          {actividades.map(act => (
+                          {actividadesConAlertas.map(act => (
                             <React.Fragment key={act.id}>
                               <tr className="hover:bg-[#FFFDE7]">
                                 <td className="py-3 text-sm font-medium text-[#1A1A1A]">{act.nombre}</td>
                                 <td className="py-3 text-sm text-[#5C5C5C]">{act.responsableDisplay}</td>
+                              <tr className={
+                                act.alertaVencimiento?.tipo === "vencida"
+                                  ? "bg-[#C8102E]/5 hover:bg-[#C8102E]/10"
+                                  : act.alertaVencimiento
+                                    ? "bg-[#F57C00]/5 hover:bg-[#F57C00]/10"
+                                    : "hover:bg-[#FFFDE7]"
+                              }>
+                                <td className="py-3 text-sm font-medium text-[#1A1A1A]">
+                                  <div className="flex flex-col gap-1">
+                                    <span>{act.nombre}</span>
+                                    {act.alertaVencimiento && (
+                                      <span className={`inline-flex w-fit items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-semibold ${
+                                        act.alertaVencimiento.tipo === "vencida"
+                                          ? "border-[#C8102E]/20 bg-[#C8102E]/10 text-[#C8102E]"
+                                          : "border-[#F57C00]/20 bg-[#F57C00]/10 text-[#F57C00]"
+                                      }`}>
+                                        {act.alertaVencimiento.tipo === "vencida" ? (
+                                          <AlertTriangle className="h-3 w-3" />
+                                        ) : (
+                                          <Clock className="h-3 w-3" />
+                                        )}
+                                        {act.alertaVencimiento.label}
+                                      </span>
+                                    )}
+                                  </div>
+                                </td>
+                                <td className="py-3 text-sm text-[#5C5C5C]">{act.responsable}</td>
                                 <td className="py-3 text-xs text-[#5C5C5C]">
                                   {act.fechaFin ? act.fechaFin.split('-').reverse().join('/') : "—"}
                                 </td>
@@ -810,6 +1169,7 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                         </tbody>
                       </table>
                     </div>
+                    </>
                   ) : (
                     <div className="text-center py-8 text-sm text-[#5C5C5C]">
                       No hay actividades registradas para este proyecto.
@@ -826,24 +1186,28 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                       <h3 className="text-sm font-bold uppercase tracking-wide text-[#5C5C5C]">
                         Cronograma e Hitos
                       </h3>
-                      <MockDataTag />
+                      {hitosState.some(hito => hito.fuenteDatos !== "api") && <MockDataTag />}
+                      {hitosLoading && (
+                        <span className="text-xs text-[#5C5C5C]">Cargando hitos...</span>
+                      )}
                     </div>
                     <button
-                      onClick={() => {
-                        setHitoForm({ nombre: "", fecha: "", estado: "Pendiente" })
-                        setEditHito(null)
-                        setAddHitoOpen(true)
-                      }}
+                      onClick={abrirNuevoHito}
                       className="flex items-center gap-2 rounded-lg bg-[#FFD600] px-3 py-1.5 text-xs font-bold text-[#1A1A1A] hover:bg-[#C9A42B] transition-colors"
                     >
                       <Plus className="h-3.5 w-3.5" />
                       Agregar hito
                     </button>
                   </div>
+                  {hitosError && (
+                    <div className="mb-4 rounded-lg border border-[#C8102E]/20 bg-[#C8102E]/5 px-4 py-3 text-sm text-[#C8102E]">
+                      {hitosError}
+                    </div>
+                  )}
 
                   {/* Dialog agregar / editar hito */}
                   <Dialog open={addHitoOpen} onOpenChange={setAddHitoOpen}>
-                    <DialogContent className="sm:max-w-sm">
+                    <DialogContent className="overflow-y-auto sm:max-w-lg">
                       <DialogHeader>
                         <DialogTitle>{editHito ? "Editar Hito" : "Nuevo Hito"}</DialogTitle>
                         <DialogDescription>
@@ -861,7 +1225,18 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                           />
                         </div>
                         <div className="grid gap-2">
-                          <Label htmlFor="hito-fecha">Fecha</Label>
+                          <Label htmlFor="hito-descripcion">Descripcion</Label>
+                          <Textarea
+                            id="hito-descripcion"
+                            placeholder="Objetivo o alcance del hito"
+                            value={hitoForm.descripcion}
+                            onChange={e => setHitoForm(f => ({ ...f, descripcion: e.target.value }))}
+                            rows={3}
+                            className="resize-none"
+                          />
+                        </div>
+                        <div className="grid gap-2">
+                          <Label htmlFor="hito-fecha">Fecha clave</Label>
                           <Input
                             id="hito-fecha"
                             type="date"
@@ -873,57 +1248,86 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                           <Label htmlFor="hito-estado">Estado</Label>
                           <Select
                             value={hitoForm.estado}
-                            onValueChange={v => setHitoForm(f => ({ ...f, estado: v as "Completado" | "Pendiente" | "Vencido" }))}
+                            onValueChange={v => setHitoForm(f => ({ ...f, estado: v as HitoEstadoUi }))}
                           >
                             <SelectTrigger id="hito-estado"><SelectValue /></SelectTrigger>
                             <SelectContent>
                               <SelectItem value="Pendiente">Pendiente</SelectItem>
-                              <SelectItem value="Completado">Completado</SelectItem>
-                              <SelectItem value="Vencido">Vencido</SelectItem>
+                              <SelectItem value="En curso">En curso</SelectItem>
+                              <SelectItem value="Finalizado">Finalizado</SelectItem>
                             </SelectContent>
                           </Select>
                         </div>
                       </div>
                       <DialogFooter>
-                        <Button variant="outline" onClick={() => setAddHitoOpen(false)}>Cancelar</Button>
+                        <Button variant="outline" onClick={() => setAddHitoOpen(false)} disabled={hitoSubmitting}>Cancelar</Button>
                         <Button
                           className="bg-[#FFD600] text-[#1A1A1A] hover:bg-[#C9A42B]"
-                          onClick={() => {
-                            if (!hitoForm.nombre.trim() || !hitoForm.fecha) return
-                            if (editHito) {
-                              setHitosState(prev => prev.map(h => h.id === editHito.id ? { ...h, ...hitoForm } : h))
-                            } else {
-                              const newId = `hito-${Date.now()}`
-                              setHitosState(prev => [...prev, { id: newId, proyectoId: id, ...hitoForm }])
-                            }
-                            setAddHitoOpen(false)
-                          }}
+                          onClick={guardarHito}
+                          disabled={hitoSubmitting}
                         >
-                          {editHito ? "Guardar cambios" : "Crear hito"}
+                          {hitoSubmitting ? "Guardando..." : editHito ? "Guardar cambios" : "Crear hito"}
                         </Button>
                       </DialogFooter>
                     </DialogContent>
                   </Dialog>
 
-                  {hitosState.length > 0 ? (
+                  {hitosConAlertas.length > 0 ? (
+                    <>
+                    {(hitosVencidos.length > 0 || hitosProximosAVencer.length > 0) && (
+                      <div className="mb-6 grid gap-3 md:grid-cols-2">
+                        {hitosVencidos.length > 0 && (
+                          <div className="rounded-lg border border-[#C8102E]/20 bg-[#C8102E]/5 p-4">
+                            <div className="mb-1 flex items-center gap-2 text-[#C8102E]">
+                              <AlertTriangle className="h-4 w-4" />
+                              <p className="text-sm font-bold">
+                                {hitosVencidos.length} hito{hitosVencidos.length === 1 ? "" : "s"} vencido{hitosVencidos.length === 1 ? "" : "s"}
+                              </p>
+                            </div>
+                            <p className="text-xs text-[#C8102E]">
+                              Requiere revisar el cronograma o registrar el cumplimiento del hito.
+                            </p>
+                          </div>
+                        )}
+                        {hitosProximosAVencer.length > 0 && (
+                          <div className="rounded-lg border border-[#F57C00]/20 bg-[#F57C00]/5 p-4">
+                            <div className="mb-1 flex items-center gap-2 text-[#F57C00]">
+                              <Clock className="h-4 w-4" />
+                              <p className="text-sm font-bold">
+                                {hitosProximosAVencer.length} hito{hitosProximosAVencer.length === 1 ? "" : "s"} próximo{hitosProximosAVencer.length === 1 ? "" : "s"} a vencer
+                              </p>
+                            </div>
+                            <p className="text-xs text-[#F57C00]">
+                              Vencen dentro de los próximos {DIAS_ALERTA_ACTIVIDAD} días o durante el día actual.
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    )}
                     <div className="relative">
                       <div className="absolute left-4 top-0 bottom-0 w-0.5 bg-[#E0E0E0]" />
                       <div className="space-y-6">
-                        {hitosState.map((hito) => (
+                        {hitosConAlertas.map((hito) => (
                           <div key={hito.id} className="relative flex gap-4 pl-10 group">
                             <div className={`absolute left-2 top-1 flex h-5 w-5 items-center justify-center rounded-full ${
-                              hito.estado === "Completado" ? "bg-[#2E7D32]" :
-                              hito.estado === "Vencido" ? "bg-[#C8102E]" : "bg-[#E0E0E0]"
+                              hito.estado === "Finalizado" ? "bg-[#2E7D32]" :
+                              hito.estado === "En curso" ? "bg-[#F57C00]" : "bg-[#E0E0E0]"
                             }`}>
-                              {hito.estado === "Completado" ? (
+                              {hito.estado === "Finalizado" ? (
                                 <CheckCircle2 className="h-3 w-3 text-white" />
-                              ) : hito.estado === "Vencido" ? (
-                                <XCircle className="h-3 w-3 text-white" />
+                              ) : hito.estado === "En curso" ? (
+                                <Clock className="h-3 w-3 text-white" />
                               ) : (
                                 <Circle className="h-3 w-3 text-[#5C5C5C]" />
                               )}
                             </div>
-                            <div className="flex-1 rounded-lg border border-[#E0E0E0] p-4 hover:border-[#FFD600] transition-colors">
+                            <div className={`flex-1 rounded-lg border p-4 transition-colors ${
+                              hito.alertaVencimiento?.tipo === "vencido"
+                                ? "border-[#C8102E]/20 bg-[#C8102E]/5 hover:border-[#C8102E]/40"
+                                : hito.alertaVencimiento
+                                  ? "border-[#F57C00]/20 bg-[#F57C00]/5 hover:border-[#F57C00]/40"
+                                  : "border-[#E0E0E0] hover:border-[#FFD600]"
+                            }`}>
                               <div className="flex items-start justify-between gap-2">
                                 <div className="flex-1 min-w-0">
                                   <p className="text-sm font-medium text-[#1A1A1A]">{hito.nombre}</p>
@@ -934,22 +1338,30 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                                       day: "numeric"
                                     })}
                                   </p>
+                                  {hito.descripcion && (
+                                    <p className="mt-3 text-sm leading-relaxed text-[#5C5C5C]">
+                                      {hito.descripcion}
+                                    </p>
+                                  )}
+                                  <div className="mt-3 flex flex-wrap gap-2 text-xs text-[#5C5C5C]">
+                                    {hito.fuenteDatos !== "api" && (
+                                      <span className="inline-flex items-center rounded-full bg-[#F7F7F7] px-2.5 py-1">
+                                        {hito.fuenteDatos === "local" ? "Sesion local" : "Mock referencial"}
+                                      </span>
+                                    )}
+                                  </div>
                                 </div>
                                 <div className="flex items-center gap-2 shrink-0">
                                   <StatusBadge estado={hito.estado} />
                                   <button
-                                    onClick={() => {
-                                      setEditHito(hito)
-                                      setHitoForm({ nombre: hito.nombre, fecha: hito.fecha, estado: hito.estado })
-                                      setAddHitoOpen(true)
-                                    }}
+                                    onClick={() => abrirEditarHito(hito)}
                                     className="opacity-0 group-hover:opacity-100 transition-opacity flex h-7 w-7 items-center justify-center rounded-full text-[#5C5C5C] hover:bg-[#F7F7F7]"
                                     title="Editar hito"
                                   >
                                     <Pencil className="h-3.5 w-3.5" />
                                   </button>
                                   <button
-                                    onClick={() => setHitosState(prev => prev.filter(h => h.id !== hito.id))}
+                                    onClick={() => eliminarHito(hito)}
                                     className="opacity-0 group-hover:opacity-100 transition-opacity flex h-7 w-7 items-center justify-center rounded-full text-[#C8102E] hover:bg-[#C8102E]/10"
                                     title="Eliminar hito"
                                   >
@@ -962,6 +1374,7 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                         ))}
                       </div>
                     </div>
+                    </>
                   ) : (
                     <div className="text-center py-8 text-sm text-[#5C5C5C]">
                       No hay hitos registrados para este proyecto.
