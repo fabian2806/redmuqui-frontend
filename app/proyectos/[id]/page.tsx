@@ -380,6 +380,21 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
     idResponsables: [] as number[],
   })
 
+  // ── Crear Subactividad ──
+  const [createSubactOpen, setCreateSubactOpen] = useState(false)
+  const [creandoSubact, setCreandoSubact] = useState(false)
+  const [targetActividadId, setTargetActividadId] = useState<number | null>(null)
+  const [subactForm, setSubactForm] = useState({
+    nombre: "",
+    idResponsable: "",
+    presupuesto: "",
+    hombresInvolucrados: "",
+    mujeresInvolucradas: "",
+    fechaInicio: "",
+    fechaFin: "",
+    descripcion: "",
+  })
+
   useEffect(() => {
     let cancelled = false
 
@@ -972,7 +987,6 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                             {creandoActividad ? "Creando..." : "Crear actividad"}
                           </Button>
                         </DialogFooter>
-                      </form>
                     </DialogContent>
                   </Dialog>
 
@@ -1078,6 +1092,102 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                       </DialogFooter>
                     </DialogContent>
                   </Dialog>
+
+                  {/* ── CREAR SUBACTIVIDAD ── */}
+                  <Dialog open={createSubactOpen} onOpenChange={setCreateSubactOpen}>
+                    <DialogContent className="overflow-y-auto sm:max-w-lg">
+                      <DialogHeader>
+                        <DialogTitle>Nueva Subactividad</DialogTitle>
+                        <DialogDescription>Añadir una subactividad a la actividad seleccionada.</DialogDescription>
+                      </DialogHeader>
+                      <div className="grid gap-4 py-6">
+                        <div className="grid gap-2">
+                          <Label htmlFor="sub-nombre">Nombre de la subactividad</Label>
+                          <Input id="sub-nombre" placeholder="Ej. Sesión teórica" value={subactForm.nombre} onChange={e => setSubactForm(f => ({ ...f, nombre: e.target.value }))} />
+                        </div>
+                        <div className="grid gap-2">
+                          <Label htmlFor="sub-descripcion">Descripción</Label>
+                          <Textarea id="sub-descripcion" placeholder="Descripción..." value={subactForm.descripcion} onChange={e => setSubactForm(f => ({ ...f, descripcion: e.target.value }))} />
+                        </div>
+                        <div className="grid gap-2">
+                          <Label htmlFor="sub-resp">Responsable</Label>
+                          <Select value={subactForm.idResponsable} onValueChange={v => setSubactForm(f => ({ ...f, idResponsable: v }))}>
+                            <SelectTrigger id="sub-resp"><SelectValue placeholder="Seleccionar responsable" /></SelectTrigger>
+                            <SelectContent>
+                              {Array.from(usuariosMap.entries()).map(([id, nombre]) => (
+                                <SelectItem key={id} value={String(id)}>{nombre}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="grid gap-2">
+                            <Label htmlFor="sub-inicio">Fecha de Inicio</Label>
+                            <Input id="sub-inicio" type="date" value={subactForm.fechaInicio} onChange={e => setSubactForm(f => ({ ...f, fechaInicio: e.target.value }))} />
+                          </div>
+                          <div className="grid gap-2">
+                            <Label htmlFor="sub-fin">Fecha de Fin</Label>
+                            <Input id="sub-fin" type="date" value={subactForm.fechaFin} onChange={e => setSubactForm(f => ({ ...f, fechaFin: e.target.value }))} />
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-3 gap-4">
+                          <div className="grid gap-2">
+                            <Label htmlFor="sub-presu">Presupuesto (S/)</Label>
+                            <Input id="sub-presu" type="number" min="0" value={subactForm.presupuesto} onChange={e => setSubactForm(f => ({ ...f, presupuesto: e.target.value }))} />
+                          </div>
+                          <div className="grid gap-2">
+                            <Label htmlFor="sub-hombres">Hombres Involucrados</Label>
+                            <Input id="sub-hombres" type="number" min="0" value={subactForm.hombresInvolucrados} onChange={e => setSubactForm(f => ({ ...f, hombresInvolucrados: e.target.value }))} />
+                          </div>
+                          <div className="grid gap-2">
+                            <Label htmlFor="sub-mujeres">Mujeres Involucradas</Label>
+                            <Input id="sub-mujeres" type="number" min="0" value={subactForm.mujeresInvolucradas} onChange={e => setSubactForm(f => ({ ...f, mujeresInvolucradas: e.target.value }))} />
+                          </div>
+                        </div>
+                        {(() => {
+                          const invalida = subactForm.fechaInicio && subactForm.fechaFin && subactForm.fechaFin < subactForm.fechaInicio
+                          return invalida ? <p className="text-xs text-[#C8102E]">La fecha de fin no puede ser anterior a la fecha de inicio.</p> : null
+                        })()}
+                      </div>
+                      <DialogFooter>
+                        <Button variant="outline" onClick={() => setCreateSubactOpen(false)}>Cancelar</Button>
+                        <Button
+                          className="bg-[#FFD600] text-[#1A1A1A] hover:bg-[#C9A42B]"
+                          disabled={!!(creandoSubact || !subactForm.nombre.trim() || !subactForm.idResponsable || (subactForm.fechaInicio && subactForm.fechaFin && subactForm.fechaFin < subactForm.fechaInicio))}
+                          onClick={async () => {
+                            if (!subactForm.nombre.trim() || !subactForm.idResponsable || !targetActividadId) return
+                            if (subactForm.fechaInicio && subactForm.fechaFin && subactForm.fechaFin < subactForm.fechaInicio) return
+                            setCreandoSubact(true)
+                            try {
+                              const nuevaSub: SubactividadCreate = {
+                                nombre: subactForm.nombre,
+                                idResponsable: Number(subactForm.idResponsable),
+                                presupuesto: subactForm.presupuesto ? Number(subactForm.presupuesto) : undefined,
+                                hombresInvolucrados: subactForm.hombresInvolucrados ? Number(subactForm.hombresInvolucrados) : undefined,
+                                mujeresInvolucradas: subactForm.mujeresInvolucradas ? Number(subactForm.mujeresInvolucradas) : undefined,
+                                fechaInicio: subactForm.fechaInicio || undefined,
+                                fechaFin: subactForm.fechaFin || undefined,
+                                descripcion: subactForm.descripcion || undefined,
+                              }
+                              const creada = await api.post<SubactividadResponse>(`/actividades/${targetActividadId}/subactividades`, nuevaSub)
+                              setActividadesApi(prev => prev.map(a => a.id === targetActividadId ? { ...a, subactividades: [...(a.subactividades || []), creada] } : a))
+                              setCreateSubactOpen(false)
+                              setSubactForm({
+                                nombre: "", idResponsable: "", presupuesto: "", hombresInvolucrados: "", mujeresInvolucradas: "", fechaInicio: "", fechaFin: "", descripcion: ""
+                              })
+                            } catch (err) {
+                              console.error(err)
+                            } finally {
+                              setCreandoSubact(false)
+                            }
+                          }}
+                        >
+                          {creandoSubact ? "Guardando..." : "Crear subactividad"}
+                        </Button>
+                      </DialogFooter>
+                    </DialogContent>
+                  </Dialog>
+
                 </div>
                   {actividadesLoading ? (
                 <div className="text-center py-8 text-sm text-[#5C5C5C]">Cargando actividades...</div>
@@ -1191,19 +1301,46 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                                   </button>
                                 </td>
                               </tr>
-                              {/* Subactividades placeholder */}
+                              {/* Render Subactividades */}
+                              {act.subactividades?.map((sub) => (
+                                <tr key={`sub-${sub.id}`} className="bg-[#FAFAFA] border-none">
+                                  <td className="py-2 pl-8 text-xs font-medium text-[#5C5C5C] relative">
+                                    <div className="absolute left-4 top-0 bottom-0 w-px bg-[#E0E0E0]" />
+                                    <div className="flex flex-col gap-0.5">
+                                      <span className="text-[#1A1A1A] before:content-[''] before:absolute before:left-4 before:top-4 before:w-3 before:h-px before:bg-[#E0E0E0]">
+                                        {sub.nombre}
+                                      </span>
+                                    </div>
+                                  </td>
+                                  <td className="py-2 text-xs text-[#5C5C5C]">{sub.responsable || "—"}</td>
+                                  <td className="py-2 text-xs text-[#5C5C5C]">
+                                    {sub.fechaFin ? sub.fechaFin.split('-').reverse().join('/') : "—"}
+                                  </td>
+                                  <td className="py-2">
+                                    <span className="text-xs text-[#5C5C5C]">
+                                      {sub.presupuesto ? `S/ ${sub.presupuesto}` : "—"}
+                                    </span>
+                                  </td>
+                                  <td className="py-2" colSpan={2}>
+                                    {/* Action buttons o badge if needed */}
+                                  </td>
+                                </tr>
+                              ))}
+                              {/* Agregar subactividad */}
                               <tr className="bg-[#FAFAFA] border-none">
                                 <td colSpan={6} className="py-2 pl-8 relative">
-                                  <div className="flex items-center gap-2">
-                                    <div className="w-px h-4 bg-[#E0E0E0]" />
+                                  <div className="absolute left-4 top-0 bottom-1/2 w-px bg-[#E0E0E0]" />
+                                  <div className="flex items-center gap-2 relative before:content-[''] before:absolute before:-left-4 before:top-3 before:w-3 before:h-px before:bg-[#E0E0E0]">
                                     <button
                                       className="flex items-center gap-1 text-xs font-medium text-[#C9A42B] hover:text-[#1A1A1A] transition-colors"
-                                      title="Funcionalidad próximamente"
+                                      onClick={() => {
+                                        setTargetActividadId(act.id)
+                                        setCreateSubactOpen(true)
+                                      }}
                                     >
                                       <Plus className="h-3 w-3" />
                                       Agregar subactividad
                                     </button>
-                                    <span className="text-[10px] text-[#BDBDBD] italic">(próximamente)</span>
                                   </div>
                                 </td>
                               </tr>

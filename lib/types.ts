@@ -183,6 +183,17 @@ export interface SubactividadArchivoResponse {
   url: string
 }
 
+export interface SubactividadCreate {
+  nombre: string
+  idResponsable: number
+  presupuesto?: number
+  hombresInvolucrados?: number
+  mujeresInvolucradas?: number
+  fechaInicio?: string
+  fechaFin?: string
+  descripcion?: string
+}
+
 export interface SubactividadCofinanciamientoResponse {
   actividadId: number
   monto: number
