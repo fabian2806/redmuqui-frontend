@@ -542,6 +542,16 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
     }
   }
 
+  const actividades = useMemo(() =>
+    actividadesApi.map(act => ({
+      ...act,
+      responsableDisplay: act.idResponsables
+        .map(id => usuariosMap.get(id) ?? `Usuario #${id}`)
+        .join(", "),
+    })),
+    [actividadesApi, usuariosMap]
+  )
+
   if (!proyecto && apiLoading) {
     return (
       <AppLayout>
@@ -556,15 +566,6 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
     notFound()
   }
 
-  const actividades = useMemo(() =>
-    actividadesApi.map(act => ({
-      ...act,
-      responsableDisplay: act.idResponsables
-        .map(id => usuariosMap.get(id) ?? `Usuario #${id}`)
-        .join(", "),
-    })),
-    [actividadesApi, usuariosMap]
-  )
 
   const actividadesConAlertas = actividades
     .map((actividad) => ({
