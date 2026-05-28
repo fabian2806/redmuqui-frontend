@@ -9,8 +9,7 @@ import {
   getHitosByProyecto,
   getDocumentosByProyecto,
   getBitacoraByEntidad,
-  hitos as allHitos,
-  actividades as allActividades
+  hitos as allHitos
 } from "@/lib/data"
 import type { Hito as HitoMock, Proyecto as ProyectoMock } from "@/lib/data"
 import { api, ApiError } from "@/lib/api"
@@ -90,10 +89,11 @@ function getDiasHastaFecha(date: string, today = startOfToday()): number {
 }
 
 function getAlertaVencimientoActividad(actividad: {
-  fechaFin: string
+  fechaFin: string | null
   estado: string
 }) {
   if (actividad.estado === "Completada") return null
+  if (!actividad.fechaFin) return null
 
   const diasRestantes = getDiasHastaFecha(actividad.fechaFin)
 
@@ -566,26 +566,6 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
     [actividadesApi, usuariosMap]
   )
 
-  const actividadesBase = getActividadesByProyecto(id)
-  const actividades = actividadesBase.map(act => {
-    const cofinanciadasTargetingThisAct = allActividades
-      .flatMap(a => a.subactividades?.map(s => ({ ...s, parentActividad: a })) || [])
-      .filter(s => s.cofinanciadoPor?.some(c => c.actividadId === act.id))
-      .map(s => {
-         const cofundingData = s.cofinanciadoPor?.find(c => c.actividadId === act.id);
-         return {
-           ...s,
-           isCofinancedIncoming: true,
-           montoCofinanciado: cofundingData?.monto || 0
-         }
-      });
-
-    return {
-      ...act,
-      subactividades: [...(act.subactividades || []), ...cofinanciadasTargetingThisAct]
-    }
-  });
-
   const actividadesConAlertas = actividades
     .map((actividad) => ({
       ...actividad,
@@ -899,7 +879,7 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                           <Button variant="outline" onClick={() => setCreateActividadOpen(false)}>Cancelar</Button>
                           <Button
                             className="bg-[#FFD600] text-[#1A1A1A] hover:bg-[#C9A42B]"
-                            disabled={creandoActividad || !actForm.nombre.trim() || (actForm.fechaInicio && actForm.fechaFin && actForm.fechaFin < actForm.fechaInicio)}
+                            disabled={!!(creandoActividad || !actForm.nombre.trim() || (actForm.fechaInicio && actForm.fechaFin && actForm.fechaFin < actForm.fechaInicio))}
                             onClick={async () => {
                               if (!actForm.nombre.trim()) return
                               if (actForm.fechaInicio && actForm.fechaFin && actForm.fechaFin < actForm.fechaInicio) return
@@ -1001,7 +981,7 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                           <Button variant="outline" onClick={() => setEditActividadOpen(false)}>Cancelar</Button>
                           <Button
                             className="bg-[#FFD600] text-[#1A1A1A] hover:bg-[#C9A42B]"
-                            disabled={editandoActividad || !editForm.nombre.trim() || (editForm.fechaInicio && editForm.fechaFin && editForm.fechaFin < editForm.fechaInicio)}
+                            disabled={!!(editandoActividad || !editForm.nombre.trim() || (editForm.fechaInicio && editForm.fechaFin && editForm.fechaFin < editForm.fechaInicio))}
                             onClick={async () => {
                               if (!editForm.nombre.trim() || !editingActividad) return
                               if (editForm.fechaInicio && editForm.fechaFin && editForm.fechaFin < editForm.fechaInicio) return
@@ -1039,7 +1019,7 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                       <p className="text-sm text-[#C8102E]">Error al cargar actividades: {actividadesError}</p>
                     </div>
                   ) : actividades.length > 0 ? (
-                  {actividadesConAlertas.length > 0 ? (
+                    actividadesConAlertas.length > 0 ? (
                     <>
                     {(actividadesVencidas.length > 0 || actividadesProximasAVencer.length > 0) && (
                       <div className="mb-4 grid gap-3 md:grid-cols-2">
@@ -1086,9 +1066,6 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                         <tbody className="divide-y divide-[#E0E0E0]">
                           {actividadesConAlertas.map(act => (
                             <React.Fragment key={act.id}>
-                              <tr className="hover:bg-[#FFFDE7]">
-                                <td className="py-3 text-sm font-medium text-[#1A1A1A]">{act.nombre}</td>
-                                <td className="py-3 text-sm text-[#5C5C5C]">{act.responsableDisplay}</td>
                               <tr className={
                                 act.alertaVencimiento?.tipo === "vencida"
                                   ? "bg-[#C8102E]/5 hover:bg-[#C8102E]/10"
@@ -1115,7 +1092,7 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                                     )}
                                   </div>
                                 </td>
-                                <td className="py-3 text-sm text-[#5C5C5C]">{act.responsable}</td>
+                                <td className="py-3 text-sm text-[#5C5C5C]">{act.responsableDisplay}</td>
                                 <td className="py-3 text-xs text-[#5C5C5C]">
                                   {act.fechaFin ? act.fechaFin.split('-').reverse().join('/') : "—"}
                                 </td>
@@ -1174,7 +1151,8 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                     <div className="text-center py-8 text-sm text-[#5C5C5C]">
                       No hay actividades registradas para este proyecto.
                     </div>
-                  )}
+                  )
+                  ) : null }
                 </div>
               )}
 
