@@ -4,19 +4,26 @@ import React, { useEffect, useMemo, useState, use } from "react"
 import { AppLayout } from "@/components/layout/app-layout"
 import { StatusBadge, MacroregionBadge, TypeBadge } from "@/components/ui/status-badge"
 import { ProgressBar } from "@/components/ui/progress-bar"
-import { 
-  getProyectoById, 
-  getActividadesByProyecto, 
+import {
+  getProyectoById,
   getHitosByProyecto,
   getDocumentosByProyecto,
   getBitacoraByEntidad,
-  hitos as allHitos,
-  actividades as allActividades
+  hitos as allHitos
 } from "@/lib/data"
-import type { Proyecto as ProyectoMock } from "@/lib/data"
+import type { Hito as HitoMock, Proyecto as ProyectoMock } from "@/lib/data"
 import { api, ApiError } from "@/lib/api"
-import type { MacroregionRef, ProyectoResponse, ActividadResponse, PageResponse, UsuarioResponse } from "@/lib/types"
-import { 
+import type {
+  MacroregionRef,
+  ProyectoResponse,
+  ActividadResponse,
+  UsuarioResponse,
+  PageResponse,
+  HitoCreate,
+  HitoResponse,
+  EstadoHito
+} from "@/lib/types"
+import {
   ChevronRight,
   Pencil,
   Download,
@@ -32,7 +39,6 @@ import {
   Clock,
   CheckCircle2,
   Circle,
-  XCircle,
   Trash2,
   UserPlus
 } from "lucide-react"
@@ -46,12 +52,105 @@ import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 
 type TabType = "resumen" | "actividades" | "hitos" | "informes" | "equipo" | "bitacora"
+type HitoEstadoUi = "Pendiente" | "En curso" | "Finalizado"
+type HitoDetalle = {
+  id: string
+  proyectoId: string
+  nombre: string
+  fecha: string
+  estado: HitoEstadoUi
+  descripcion: string
+  fuenteDatos: "api" | "mock" | "local"
+}
+type HitoForm = Omit<HitoDetalle, "id" | "proyectoId" | "fuenteDatos">
 type ProyectoDetalle = Omit<ProyectoMock, "macroregion" | "ejeTematico" | "estado"> & {
   macroregion: string
   macroregiones?: MacroregionRef[]
   ejeTematico: string
   estado: string
   fuenteDatos: "api" | "mixto" | "mock"
+}
+
+const DIAS_ALERTA_ACTIVIDAD = 15
+
+function parseLocalDate(date: string): Date {
+  return new Date(`${date}T00:00:00`)
+}
+
+function startOfToday(): Date {
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  return today
+}
+
+function getDiasHastaFecha(date: string, today = startOfToday()): number {
+  const fechaFin = parseLocalDate(date)
+  return Math.ceil((fechaFin.getTime() - today.getTime()) / (1000 * 60 * 60 * 24))
+}
+
+function getAlertaVencimientoActividad(actividad: {
+  fechaFin: string | null
+  estado: string
+}) {
+  if (actividad.estado === "Completada") return null
+  if (!actividad.fechaFin) return null
+
+  const diasRestantes = getDiasHastaFecha(actividad.fechaFin)
+
+  if (diasRestantes < 0) {
+    return {
+      tipo: "vencida" as const,
+      label: `Vencida hace ${Math.abs(diasRestantes)} día${Math.abs(diasRestantes) === 1 ? "" : "s"}`,
+    }
+  }
+
+  if (diasRestantes === 0) {
+    return {
+      tipo: "vence-hoy" as const,
+      label: "Vence hoy",
+    }
+  }
+
+  if (diasRestantes <= DIAS_ALERTA_ACTIVIDAD) {
+    return {
+      tipo: "proxima" as const,
+      label: `Vence en ${diasRestantes} día${diasRestantes === 1 ? "" : "s"}`,
+    }
+  }
+
+  return null
+}
+
+function getAlertaVencimientoHito(hito: {
+  fecha: string
+  estado: string
+}) {
+  if (hito.estado === "Completado") return null
+
+  const diasRestantes = getDiasHastaFecha(hito.fecha)
+
+  if (diasRestantes < 0) {
+    return {
+      tipo: "vencido" as const,
+      label: `Vencido hace ${Math.abs(diasRestantes)} día${Math.abs(diasRestantes) === 1 ? "" : "s"}`,
+    }
+  }
+
+  if (diasRestantes === 0) {
+    return {
+      tipo: "vence-hoy" as const,
+      label: "Vence hoy",
+    }
+  }
+
+  if (diasRestantes <= DIAS_ALERTA_ACTIVIDAD) {
+    return {
+      tipo: "proximo" as const,
+      label: `Vence en ${diasRestantes} día${diasRestantes === 1 ? "" : "s"}`,
+    }
+  }
+
+  return null
 }
 
 function apiMacroregiones(proyecto: ProyectoResponse): MacroregionRef[] {
@@ -128,6 +227,62 @@ function getApiErrorMessage(error: unknown): string {
   return "No se pudo cargar la API del proyecto."
 }
 
+const hitoFormInicial: HitoForm = {
+  nombre: "",
+  fecha: "",
+  estado: "Pendiente",
+  descripcion: "",
+}
+
+function estadoHitoDesdeApi(estado: EstadoHito): HitoEstadoUi {
+  if (estado === "FINALIZADO") return "Finalizado"
+  if (estado === "EN_CURSO") return "En curso"
+  return "Pendiente"
+}
+
+function estadoHitoParaApi(estado: HitoEstadoUi): EstadoHito {
+  if (estado === "Finalizado") return "FINALIZADO"
+  if (estado === "En curso") return "EN_CURSO"
+  return "PENDIENTE"
+}
+
+function hitoDesdeApi(hito: HitoResponse): HitoDetalle {
+  return {
+    id: String(hito.id),
+    proyectoId: String(hito.idProyecto),
+    nombre: hito.nombre,
+    fecha: hito.fechaClave,
+    estado: estadoHitoDesdeApi(hito.estado),
+    descripcion: hito.descripcion ?? "",
+    fuenteDatos: "api",
+  }
+}
+
+function hitoDesdeMock(hito: HitoMock): HitoDetalle {
+  const estado =
+    hito.estado === "Completado"
+      ? "Finalizado"
+      : hito.estado === "Vencido"
+        ? "En curso"
+        : "Pendiente"
+
+  return {
+    ...hito,
+    estado,
+    descripcion: "",
+    fuenteDatos: "mock",
+  }
+}
+
+function payloadHito(form: HitoForm): HitoCreate {
+  return {
+    nombre: form.nombre.trim(),
+    fechaClave: form.fecha,
+    estado: estadoHitoParaApi(form.estado),
+    descripcion: form.descripcion.trim() || null,
+  }
+}
+
 function MockDataTag() {
   return (
     <span className="inline-flex items-center rounded-full border border-[#E0E0E0] bg-[#F7F7F7] px-2 py-0.5 text-[10px] font-medium normal-case tracking-normal text-[#5C5C5C]">
@@ -186,12 +341,44 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
 
   // State for hitos
   const hitosData = getHitosByProyecto(id)
-  const [hitosState, setHitosState] = useState(
-    () => hitosData.map(h => ({ ...h }))
+  const [hitosState, setHitosState] = useState<HitoDetalle[]>(
+    () => hitosData.map(hitoDesdeMock)
   )
+  const [hitosLoading, setHitosLoading] = useState(true)
+  const [hitosError, setHitosError] = useState<string | null>(null)
+  const [hitoSubmitting, setHitoSubmitting] = useState(false)
   const [addHitoOpen, setAddHitoOpen] = useState(false)
-  const [editHito, setEditHito] = useState<typeof hitosState[0] | null>(null)
-  const [hitoForm, setHitoForm] = useState({ nombre: "", fecha: "", estado: "Pendiente" as "Completado" | "Pendiente" | "Vencido" })
+  const [editHito, setEditHito] = useState<HitoDetalle | null>(null)
+  const [hitoForm, setHitoForm] = useState<HitoForm>(hitoFormInicial)
+
+  // ── Actividades desde API ──
+  const [actividadesApi, setActividadesApi] = useState<ActividadResponse[]>([])
+  const [actividadesLoading, setActividadesLoading] = useState(true)
+  const [actividadesError, setActividadesError] = useState<string | null>(null)
+  const [usuariosMap, setUsuariosMap] = useState<Map<number, string>>(new Map())
+
+  const [createActividadOpen, setCreateActividadOpen] = useState(false)
+  const [creandoActividad, setCreandoActividad] = useState(false)
+  const [actForm, setActForm] = useState({
+    nombre: "",
+    descripcion: "",
+    fechaInicio: "",
+    fechaFin: "",
+    idResponsables: [] as number[],
+  })
+
+  // ── Editar actividad ──
+  const [editActividadOpen, setEditActividadOpen] = useState(false)
+  const [editandoActividad, setEditandoActividad] = useState(false)
+  const [editingActividad, setEditingActividad] = useState<ActividadResponse | null>(null)
+  const [editForm, setEditForm] = useState({
+    nombre: "",
+    descripcion: "",
+    fechaInicio: "",
+    fechaFin: "",
+    estado: "PENDIENTE" as "PENDIENTE" | "EN_CURSO" | "FINALIZADA",
+    idResponsables: [] as number[],
+  })
 
   useEffect(() => {
     let cancelled = false
@@ -235,7 +422,153 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
       cancelled = true
     }
   }, [id])
-  
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function cargarActividades() {
+      setActividadesLoading(true)
+      setActividadesError(null)
+      try {
+        const data = await api.get<PageResponse<ActividadResponse>>(
+          "/actividades?proyectoId=" + id + "&size=100"
+        )
+        if (!cancelled) setActividadesApi(data.content)
+      } catch (error) {
+        if (!cancelled) {
+          setActividadesApi([])
+          setActividadesError(getApiErrorMessage(error))
+        }
+      } finally {
+        if (!cancelled) setActividadesLoading(false)
+      }
+    }
+
+    async function cargarUsuarios() {
+      try {
+        const data = await api.get<PageResponse<UsuarioResponse>>("/usuarios?page=0&size=100&sort=apellidos,asc")
+        if (!cancelled) {
+          const map = new Map<number, string>()
+          data.content.forEach(u => map.set(u.id, `${u.nombres} ${u.apellidos}`))
+          setUsuariosMap(map)
+        }
+      } catch {
+        // Silently fail — fallback a "Usuario #ID"
+      }
+    }
+
+    async function cargarHitos() {
+      setHitosLoading(true)
+      setHitosError(null)
+      setHitosState(getHitosByProyecto(id).map(hitoDesdeMock))
+      try {
+        const data = await api.get<HitoResponse[] | { content: HitoResponse[] }>(`/proyectos/${id}/hitos`)
+        if (!cancelled) {
+          const hitosApi = Array.isArray(data) ? data : data.content
+          setHitosState(hitosApi.map(hitoDesdeApi))
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setHitosError(getApiErrorMessage(error))
+        }
+      } finally {
+        if (!cancelled) {
+          setHitosLoading(false)
+        }
+      }
+    }
+
+    cargarActividades()
+    cargarUsuarios()
+    cargarHitos()
+
+    return () => { cancelled = true }
+  }, [id])
+
+  const abrirNuevoHito = () => {
+    setHitoForm(hitoFormInicial)
+    setEditHito(null)
+    setHitosError(null)
+    setAddHitoOpen(true)
+  }
+
+  const abrirEditarHito = (hito: HitoDetalle) => {
+    setEditHito(hito)
+    setHitoForm({
+      nombre: hito.nombre,
+      fecha: hito.fecha,
+      estado: hito.estado,
+      descripcion: hito.descripcion,
+    })
+    setHitosError(null)
+    setAddHitoOpen(true)
+  }
+
+  const guardarHito = async () => {
+    if (!hitoForm.nombre.trim() || !hitoForm.fecha) {
+      setHitosError("Completa el nombre y la fecha programada del hito")
+      return
+    }
+
+    setHitoSubmitting(true)
+    setHitosError(null)
+
+    try {
+      if (editHito) {
+        if (editHito.fuenteDatos === "api") {
+          const actualizado = await api.put<HitoResponse>(
+            `/proyectos/${id}/hitos/${editHito.id}`,
+            payloadHito(hitoForm),
+          )
+          setHitosState(prev => prev.map(h => h.id === editHito.id ? hitoDesdeApi(actualizado) : h))
+        } else {
+          setHitosState(prev => prev.map(h => h.id === editHito.id ? { ...h, ...hitoForm, fuenteDatos: h.fuenteDatos } : h))
+        }
+      } else {
+        try {
+          const creado = await api.post<HitoResponse>(`/proyectos/${id}/hitos`, payloadHito(hitoForm))
+          setHitosState(prev => [...prev, hitoDesdeApi(creado)])
+        } catch (error) {
+          const newId = `hito-${Date.now()}`
+          setHitosState(prev => [...prev, { id: newId, proyectoId: id, ...hitoForm, fuenteDatos: "local" }])
+          setHitosError(`Hito guardado solo en esta sesion: ${getApiErrorMessage(error)}`)
+        }
+      }
+
+      setAddHitoOpen(false)
+      setEditHito(null)
+      setHitoForm(hitoFormInicial)
+    } catch (error) {
+      setHitosError(getApiErrorMessage(error))
+    } finally {
+      setHitoSubmitting(false)
+    }
+  }
+
+  const eliminarHito = async (hito: HitoDetalle) => {
+    const previous = hitosState
+    setHitosState(prev => prev.filter(item => item.id !== hito.id))
+
+    if (hito.fuenteDatos !== "api") return
+
+    try {
+      await api.delete<void>(`/proyectos/${id}/hitos/${hito.id}`)
+    } catch (error) {
+      setHitosState(previous)
+      setHitosError(getApiErrorMessage(error))
+    }
+  }
+
+  const actividades = useMemo(() =>
+    actividadesApi.map(act => ({
+      ...act,
+      responsableDisplay: act.idResponsables
+        .map(id => usuariosMap.get(id) ?? `Usuario #${id}`)
+        .join(", "),
+    })),
+    [actividadesApi, usuariosMap]
+  )
+
   if (!proyecto && apiLoading) {
     return (
       <AppLayout>
@@ -250,58 +583,51 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
     notFound()
   }
 
-  const actividadesBase = apiProyecto ? apiActividades.map(a => ({
-    id: String(a.id),
-    proyectoId: String(a.idProyecto),
-    nombre: a.nombre,
-    responsable: a.idResponsables.length > 0 ? "Varios" : "Sin asignar",
-    fechaInicio: a.fechaInicio || "",
-    fechaFin: a.fechaFin || "",
-    estado: a.estado === "PENDIENTE" ? "Pendiente" : a.estado === "EN_CURSO" ? "En progreso" : a.estado === "COMPLETADA" ? "Completada" : "Vencida",
-    avance: a.porcentajeAvance || 0,
-    subactividades: a.subactividades?.map(s => ({
-      id: String(s.id),
-      nombre: s.nombre,
-      responsable: s.responsable,
-      presupuesto: s.presupuesto,
-      hombresInvolucrados: s.hombresInvolucrados,
-      mujeresInvolucradas: s.mujeresInvolucradas,
-      archivosEvidencia: s.archivosEvidencia?.map(ar => ({ id: String(ar.id), nombre: ar.nombre, url: ar.url })),
-      cofinanciadoPor: s.cofinanciadoPor?.map(c => ({ actividadId: String(c.actividadId), monto: c.monto }))
-    }))
-  } as any)) : getActividadesByProyecto(id)
-  
-  const actividades = actividadesBase.map(act => {
-    const cofinanciadasTargetingThisAct = allActividades
-      .flatMap(a => a.subactividades?.map(s => ({ ...s, parentActividad: a })) || [])
-      .filter(s => s.cofinanciadoPor?.some(c => c.actividadId === act.id))
-      .map(s => {
-         const cofundingData = s.cofinanciadoPor?.find(c => c.actividadId === act.id);
-         return {
-           ...s,
-           isCofinancedIncoming: true,
-           montoCofinanciado: cofundingData?.monto || 0
-         }
-      });
-      
-    return {
-      ...act,
-      subactividades: [...(act.subactividades || []), ...cofinanciadasTargetingThisAct]
-    }
-  });
+
+  const actividadesConAlertas = actividades
+    .map((actividad) => ({
+      ...actividad,
+      alertaVencimiento: getAlertaVencimientoActividad(actividad),
+    })
+    )
+
+  const actividadesVencidas = actividadesConAlertas.filter(
+    (actividad) => actividad.alertaVencimiento?.tipo === "vencida",
+  )
+
+  const actividadesProximasAVencer = actividadesConAlertas.filter(
+    (actividad) =>
+      actividad.alertaVencimiento?.tipo === "proxima" ||
+      actividad.alertaVencimiento?.tipo === "vence-hoy",
+  )
+
+  const hitosConAlertas = hitosState.map((hito) => ({
+    ...hito,
+    alertaVencimiento: getAlertaVencimientoHito(hito),
+  }))
+
+  const hitosVencidos = hitosConAlertas.filter(
+    (hito) => hito.alertaVencimiento?.tipo === "vencido",
+  )
+
+  const hitosProximosAVencer = hitosConAlertas.filter(
+    (hito) =>
+      hito.alertaVencimiento?.tipo === "proximo" ||
+      hito.alertaVencimiento?.tipo === "vence-hoy",
+  )
 
   const documentos = getDocumentosByProyecto(id)
   const bitacora = getBitacoraByEntidad(id)
 
-  const equipoVisual = apiProyecto 
+  const equipoVisual = apiProyecto
     ? apiEquipo.map(miembro => {
-        const user = usuariosSistema.find(u => u.id === miembro.idUsuario)
-        return { 
-          id: miembro.idUsuario,
-          nombre: user ? `${user.nombres} ${user.apellidos}` : `Usuario ${miembro.idUsuario}`, 
-          rol: miembro.rolEnProyecto 
-        }
-      })
+      const user = usuariosSistema.find(u => u.id === miembro.idUsuario)
+      return {
+        id: miembro.idUsuario,
+        nombre: user ? `${user.nombres} ${user.apellidos}` : `Usuario ${miembro.idUsuario}`,
+        rol: miembro.rolEnProyecto
+      }
+    })
     : equipo.map((e, idx) => ({ id: idx, nombre: e.nombre, rol: e.rol }))
 
   // Calculate days remaining
@@ -365,7 +691,7 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                   };
                   const rawEstado = formData.get("estado") as string;
                   const estadoValue = statusMap[rawEstado] || "PENDIENTE";
-                  
+
                   const payload = {
                     nombre: formData.get("nombre"),
                     descripcion: formData.get("descripcion"),
@@ -391,68 +717,68 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                     console.error("Error updating project", err);
                   }
                 }}>
-                <DialogHeader>
-                  <DialogTitle>Editar Proyecto</DialogTitle>
-                  <DialogDescription>
-                    Modifica los datos generales del proyecto aquí. Haz clic en guardar al finalizar.
-                  </DialogDescription>
-                </DialogHeader>
-                <div className="grid gap-4 py-6">
-                  <div className="grid gap-2">
-                    <Label htmlFor="nombre">Nombre del Proyecto</Label>
-                    <Input id="nombre" defaultValue={proyecto.nombre} />
-                  </div>
-                  <div className="grid grid-cols-2 gap-4">
+                  <DialogHeader>
+                    <DialogTitle>Editar Proyecto</DialogTitle>
+                    <DialogDescription>
+                      Modifica los datos generales del proyecto aquí. Haz clic en guardar al finalizar.
+                    </DialogDescription>
+                  </DialogHeader>
+                  <div className="grid gap-4 py-6">
                     <div className="grid gap-2">
-                      <Label htmlFor="codigo">Código</Label>
-                      <Input id="codigo" defaultValue={proyecto.codigo} />
+                      <Label htmlFor="nombre">Nombre del Proyecto</Label>
+                      <Input id="nombre" defaultValue={proyecto.nombre} />
                     </div>
-                    <div className="grid gap-2">
-                      <Label htmlFor="presupuesto">Presupuesto (S/)</Label>
-                      <Input id="presupuesto" type="number" defaultValue={proyecto.presupuesto} />
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="grid gap-2">
+                        <Label htmlFor="codigo">Código</Label>
+                        <Input id="codigo" defaultValue={proyecto.codigo} />
+                      </div>
+                      <div className="grid gap-2">
+                        <Label htmlFor="presupuesto">Presupuesto (S/)</Label>
+                        <Input id="presupuesto" type="number" defaultValue={proyecto.presupuesto} />
+                      </div>
                     </div>
-                  </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="grid gap-2">
-                      <Label>Macroregión</Label>
-                      <div className="flex flex-col gap-2 rounded-md border border-[#E0E0E0] bg-[#FAFAFA] p-3">
-                        {(["Todas", "Norte", "Centro", "Sur"] as const).map((region) => (
-                          <label key={region} className="flex items-center gap-2 cursor-pointer">
-                            <input
-                              type="checkbox"
-                              className="h-4 w-4 rounded border-[#E0E0E0] accent-[#FFD600]"
-                              defaultChecked={
-                                region === "Todas" ||
-                                (proyecto.macroregiones?.some(m => m.nombre === region) ?? proyecto.macroregion === region)
-                              }
-                            />
-                            <span className="text-sm text-[#1A1A1A]">{region}</span>
-                          </label>
-                        ))}
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="grid gap-2">
+                        <Label>Macroregión</Label>
+                        <div className="flex flex-col gap-2 rounded-md border border-[#E0E0E0] bg-[#FAFAFA] p-3">
+                          {(["Todas", "Norte", "Centro", "Sur"] as const).map((region) => (
+                            <label key={region} className="flex items-center gap-2 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                className="h-4 w-4 rounded border-[#E0E0E0] accent-[#FFD600]"
+                                defaultChecked={
+                                  region === "Todas" ||
+                                  (proyecto.macroregiones?.some(m => m.nombre === region) ?? proyecto.macroregion === region)
+                                }
+                              />
+                              <span className="text-sm text-[#1A1A1A]">{region}</span>
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="grid gap-2">
+                        <Label>Estado</Label>
+                        <Select name="estado" defaultValue={proyecto.estado}>
+                          <SelectTrigger><SelectValue placeholder="Seleccione" /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="Activo">Activo</SelectItem>
+                            <SelectItem value="En riesgo">En riesgo</SelectItem>
+                            <SelectItem value="Suspendido">Suspendido</SelectItem>
+                            <SelectItem value="Cerrado">Cerrado</SelectItem>
+                          </SelectContent>
+                        </Select>
                       </div>
                     </div>
                     <div className="grid gap-2">
-                      <Label>Estado</Label>
-                      <Select name="estado" defaultValue={proyecto.estado}>
-                        <SelectTrigger><SelectValue placeholder="Seleccione" /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="Activo">Activo</SelectItem>
-                          <SelectItem value="En riesgo">En riesgo</SelectItem>
-                          <SelectItem value="Suspendido">Suspendido</SelectItem>
-                          <SelectItem value="Cerrado">Cerrado</SelectItem>
-                        </SelectContent>
-                      </Select>
+                      <Label htmlFor="desc">Descripción</Label>
+                      <Textarea id="desc" name="descripcion" defaultValue={proyecto.descripcion} rows={4} className="resize-none" />
                     </div>
                   </div>
-                  <div className="grid gap-2">
-                    <Label htmlFor="desc">Descripción</Label>
-                    <Textarea id="desc" name="descripcion" defaultValue={proyecto.descripcion} rows={4} className="resize-none" />
-                  </div>
-                </div>
-                <DialogFooter>
-                  <Button variant="outline" type="button" onClick={() => setEditModalOpen(false)}>Cancelar</Button>
-                  <Button type="submit" className="bg-[#FFD600] text-[#1A1A1A] hover:bg-[#C9A42B]">Guardar</Button>
-                </DialogFooter>
+                  <DialogFooter>
+                    <Button variant="outline" type="button" onClick={() => setEditModalOpen(false)}>Cancelar</Button>
+                    <Button type="submit" className="bg-[#FFD600] text-[#1A1A1A] hover:bg-[#C9A42B]">Guardar</Button>
+                  </DialogFooter>
                 </form>
               </DialogContent>
             </Dialog>
@@ -476,11 +802,10 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                 <button
                   key={tab.id}
                   onClick={() => setActiveTab(tab.id)}
-                  className={`rounded-md px-4 py-2 text-sm font-medium transition-colors ${
-                    activeTab === tab.id
+                  className={`rounded-md px-4 py-2 text-sm font-medium transition-colors ${activeTab === tab.id
                       ? "bg-[#FFD600] text-[#1A1A1A]"
                       : "text-[#5C5C5C] hover:text-[#1A1A1A]"
-                  }`}
+                    }`}
                 >
                   {tab.label}
                 </button>
@@ -550,393 +875,335 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                       <h3 className="text-sm font-bold uppercase tracking-wide text-[#5C5C5C]">
                         Actividades del Proyecto
                       </h3>
+                      {actividadesLoading && (
+                        <span className="text-xs text-[#5C5C5C]">Sincronizando...</span>
+                      )}
                     </div>
-                    <Dialog>
+                    <Dialog open={createActividadOpen} onOpenChange={setCreateActividadOpen}>
                       <DialogTrigger asChild>
                         <button className="flex items-center gap-2 rounded-lg bg-[#FFD600] px-3 py-1.5 text-xs font-bold text-[#1A1A1A] hover:bg-[#C9A42B]">
                           <Plus className="h-3.5 w-3.5" />
                           Agregar actividad
                         </button>
                       </DialogTrigger>
-                      <DialogContent className="overflow-y-auto sm:max-w-md">
-                        <form onSubmit={async (e) => {
-                          e.preventDefault();
-                          const form = e.currentTarget;
-                          const formData = new FormData(form);
-                          const payload = {
-                            nombre: formData.get('nombre'),
-                            idProyecto: parseInt(id, 10),
-                            idResponsables: [parseInt(formData.get('idResponsable') as string, 10)],
-                            fechaInicio: formData.get('fechaInicio') || null,
-                            fechaFin: formData.get('fechaFin') || null,
-                            estado: 'PENDIENTE'
-                          };
-                          try {
-                            await api.post('/actividades', payload);
-                            const acts = await api.get<ActividadResponse[]>(`/proyectos/${id}/actividades`);
-                            setApiActividades(acts);
-                          } catch (err) {
-                            console.error(err);
-                          }
-                        }}>
+                      <DialogContent className="overflow-y-auto sm:max-w-lg">
                         <DialogHeader>
                           <DialogTitle>Nueva Actividad</DialogTitle>
-                          <DialogDescription>Deltalle la nueva actividad a registrar para este proyecto.</DialogDescription>
+                          <DialogDescription>Detalle la nueva actividad a registrar para este proyecto.</DialogDescription>
                         </DialogHeader>
                         <div className="grid gap-4 py-6">
                           <div className="grid gap-2">
                             <Label htmlFor="act-nombre">Nombre de la actividad</Label>
-                            <Input id="act-nombre" name="nombre" placeholder="Ej. Taller de sensibilización" required />
+                            <Input id="act-nombre" placeholder="Ej. Taller de sensibilización" value={actForm.nombre} onChange={e => setActForm(f => ({ ...f, nombre: e.target.value }))} />
                           </div>
                           <div className="grid gap-2">
-                            <Label htmlFor="act-responsable">Responsable</Label>
-                            <Select name="idResponsable" required>
-                              <SelectTrigger id="act-responsable"><SelectValue placeholder="Seleccione un responsable" /></SelectTrigger>
-                              <SelectContent>
-                                {usuariosSistema.map(u => (
-                                  <SelectItem key={u.id} value={String(u.id)}>{u.nombres} {u.apellidos}</SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
+                            <Label htmlFor="act-descripcion">Descripción</Label>
+                            <Textarea id="act-descripcion" placeholder="Descripción de la actividad..." value={actForm.descripcion} onChange={e => setActForm(f => ({ ...f, descripcion: e.target.value }))} />
+                          </div>
+                          <div className="grid gap-2">
+                            <Label>Responsable(s)</Label>
+                            <div className="flex flex-wrap gap-2 rounded-md border border-[#E0E0E0] bg-white p-3 max-h-40 overflow-y-auto">
+                              {Array.from(usuariosMap.entries()).length > 0 ? (
+                                Array.from(usuariosMap.entries()).map(([id, nombre]) => (
+                                  <label key={id} className="flex items-center gap-2 cursor-pointer">
+                                    <input
+                                      type="checkbox"
+                                      className="h-4 w-4 rounded border-[#E0E0E0] accent-[#FFD600]"
+                                      checked={actForm.idResponsables.includes(id)}
+                                      onChange={e => {
+                                        if (e.target.checked) {
+                                          setActForm(f => ({ ...f, idResponsables: [...f.idResponsables, id] }))
+                                        } else {
+                                          setActForm(f => ({ ...f, idResponsables: f.idResponsables.filter(i => i !== id) }))
+                                        }
+                                      }}
+                                    />
+                                    <span className="text-sm text-[#1A1A1A]">{nombre}</span>
+                                  </label>
+                                ))
+                              ) : (
+                                <span className="text-sm text-[#5C5C5C]">Cargando usuarios...</span>
+                              )}
+                            </div>
                           </div>
                           <div className="grid grid-cols-2 gap-4">
                             <div className="grid gap-2">
                               <Label htmlFor="act-inicio">Fecha de Inicio</Label>
-                              <Input id="act-inicio" name="fechaInicio" type="date" required />
+                              <Input id="act-inicio" type="date" value={actForm.fechaInicio} onChange={e => setActForm(f => ({ ...f, fechaInicio: e.target.value }))} />
                             </div>
                             <div className="grid gap-2">
                               <Label htmlFor="act-fin">Fecha de Fin</Label>
-                              <Input id="act-fin" name="fechaFin" type="date" />
+                              <Input id="act-fin" type="date" value={actForm.fechaFin} onChange={e => setActForm(f => ({ ...f, fechaFin: e.target.value }))} />
                             </div>
                           </div>
+                          {(() => {
+                            const invalida = actForm.fechaInicio && actForm.fechaFin && actForm.fechaFin < actForm.fechaInicio
+                            return invalida ? <p className="text-xs text-[#C8102E]">La fecha de fin no puede ser anterior a la fecha de inicio.</p> : null
+                          })()}
                         </div>
                         <DialogFooter>
-                          <DialogClose asChild>
-                            <Button variant="outline" type="button">Cancelar</Button>
-                          </DialogClose>
-                          <DialogClose asChild>
-                            <Button type="submit" className="bg-[#FFD600] text-[#1A1A1A] hover:bg-[#C9A42B]">Crear actividad</Button>
-                          </DialogClose>
+                          <Button variant="outline" onClick={() => setCreateActividadOpen(false)}>Cancelar</Button>
+                          <Button
+                            className="bg-[#FFD600] text-[#1A1A1A] hover:bg-[#C9A42B]"
+                            disabled={!!(creandoActividad || !actForm.nombre.trim() || (actForm.fechaInicio && actForm.fechaFin && actForm.fechaFin < actForm.fechaInicio))}
+                            onClick={async () => {
+                              if (!actForm.nombre.trim()) return
+                              if (actForm.fechaInicio && actForm.fechaFin && actForm.fechaFin < actForm.fechaInicio) return
+                              setCreandoActividad(true)
+                              try {
+                                const creada = await api.post<ActividadResponse>("/actividades", {
+                                  nombre: actForm.nombre,
+                                  descripcion: actForm.descripcion || undefined,
+                                  fechaInicio: actForm.fechaInicio || undefined,
+                                  fechaFin: actForm.fechaFin || undefined,
+                                  idProyecto: Number(id),
+                                  idResponsables: actForm.idResponsables.length > 0 ? actForm.idResponsables : undefined,
+                                })
+                                setActividadesApi(prev => [...prev, creada])
+                                setActForm({ nombre: "", descripcion: "", fechaInicio: "", fechaFin: "", idResponsables: [] })
+                                setCreateActividadOpen(false)
+                              } catch (err) {
+                                console.error(err)
+                              } finally {
+                                setCreandoActividad(false)
+                              }
+                            }}
+                          >
+                            {creandoActividad ? "Creando..." : "Crear actividad"}
+                          </Button>
                         </DialogFooter>
-                        </form>
-                      </DialogContent>
-                    </Dialog>
-                  </div>
-                  {actividades.length > 0 ? (
+                      </form>
+                    </DialogContent>
+                  </Dialog>
+
+                  {/* ── EDITAR ACTIVIDAD ── */}
+                  <Dialog open={editActividadOpen} onOpenChange={setEditActividadOpen}>
+                    <DialogContent className="overflow-y-auto sm:max-w-lg">
+                      <DialogHeader>
+                        <DialogTitle>Editar Actividad</DialogTitle>
+                        <DialogDescription>Modifica los datos de la actividad seleccionada.</DialogDescription>
+                      </DialogHeader>
+                      <div className="grid gap-4 py-6">
+                        <div className="grid gap-2">
+                          <Label htmlFor="edit-nombre">Nombre de la actividad</Label>
+                          <Input id="edit-nombre" placeholder="Ej. Taller de sensibilización" value={editForm.nombre} onChange={e => setEditForm(f => ({ ...f, nombre: e.target.value }))} />
+                        </div>
+                        <div className="grid gap-2">
+                          <Label htmlFor="edit-descripcion">Descripción</Label>
+                          <Textarea id="edit-descripcion" placeholder="Descripción de la actividad..." value={editForm.descripcion} onChange={e => setEditForm(f => ({ ...f, descripcion: e.target.value }))} />
+                        </div>
+                        <div className="grid gap-2">
+                          <Label>Responsable(s)</Label>
+                          <div className="flex flex-wrap gap-2 rounded-md border border-[#E0E0E0] bg-white p-3 max-h-40 overflow-y-auto">
+                            {Array.from(usuariosMap.entries()).length > 0 ? (
+                              Array.from(usuariosMap.entries()).map(([id, nombre]) => (
+                                <label key={id} className="flex items-center gap-2 cursor-pointer">
+                                  <input
+                                    type="checkbox"
+                                    className="h-4 w-4 rounded border-[#E0E0E0] accent-[#FFD600]"
+                                    checked={editForm.idResponsables.includes(id)}
+                                    onChange={e => {
+                                      if (e.target.checked) {
+                                        setEditForm(f => ({ ...f, idResponsables: [...f.idResponsables, id] }))
+                                      } else {
+                                        setEditForm(f => ({ ...f, idResponsables: f.idResponsables.filter(i => i !== id) }))
+                                      }
+                                    }}
+                                  />
+                                  <span className="text-sm text-[#1A1A1A]">{nombre}</span>
+                                </label>
+                              ))
+                            ) : (
+                              <span className="text-sm text-[#5C5C5C]">Cargando usuarios...</span>
+                            )}
+                          </div>
+                        </div>
+                        <div className="grid gap-2">
+                          <Label htmlFor="edit-estado">Estado</Label>
+                          <Select value={editForm.estado} onValueChange={v => setEditForm(f => ({ ...f, estado: v as "PENDIENTE" | "EN_CURSO" | "FINALIZADA" }))}>
+                            <SelectTrigger id="edit-estado"><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="PENDIENTE">Pendiente</SelectItem>
+                              <SelectItem value="EN_CURSO">En curso</SelectItem>
+                              <SelectItem value="FINALIZADA">Finalizada</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="grid gap-2">
+                            <Label htmlFor="edit-inicio">Fecha de Inicio</Label>
+                            <Input id="edit-inicio" type="date" value={editForm.fechaInicio} onChange={e => setEditForm(f => ({ ...f, fechaInicio: e.target.value }))} />
+                          </div>
+                          <div className="grid gap-2">
+                            <Label htmlFor="edit-fin">Fecha de Fin</Label>
+                            <Input id="edit-fin" type="date" value={editForm.fechaFin} onChange={e => setEditForm(f => ({ ...f, fechaFin: e.target.value }))} />
+                          </div>
+                        </div>
+                        {(() => {
+                          const invalida = editForm.fechaInicio && editForm.fechaFin && editForm.fechaFin < editForm.fechaInicio
+                          return invalida ? <p className="text-xs text-[#C8102E]">La fecha de fin no puede ser anterior a la fecha de inicio.</p> : null
+                        })()}
+                      </div>
+                      <DialogFooter>
+                        <Button variant="outline" onClick={() => setEditActividadOpen(false)}>Cancelar</Button>
+                        <Button
+                          className="bg-[#FFD600] text-[#1A1A1A] hover:bg-[#C9A42B]"
+                          disabled={!!(editandoActividad || !editForm.nombre.trim() || (editForm.fechaInicio && editForm.fechaFin && editForm.fechaFin < editForm.fechaInicio))}
+                          onClick={async () => {
+                            if (!editForm.nombre.trim() || !editingActividad) return
+                            if (editForm.fechaInicio && editForm.fechaFin && editForm.fechaFin < editForm.fechaInicio) return
+                            setEditandoActividad(true)
+                            try {
+                              const actualizada = await api.put<ActividadResponse>("/actividades/" + editingActividad.id, {
+                                nombre: editForm.nombre,
+                                descripcion: editForm.descripcion || undefined,
+                                fechaInicio: editForm.fechaInicio || undefined,
+                                fechaFin: editForm.fechaFin || undefined,
+                                estado: editForm.estado,
+                                idProyecto: editingActividad.idProyecto,
+                                idResponsables: editForm.idResponsables.length > 0 ? editForm.idResponsables : undefined,
+                              })
+                              setActividadesApi(prev => prev.map(a => a.id === actualizada.id ? actualizada : a))
+                              setEditActividadOpen(false)
+                              setEditingActividad(null)
+                            } catch (err) {
+                              console.error(err)
+                            } finally {
+                              setEditandoActividad(false)
+                            }
+                          }}
+                        >
+                          {editandoActividad ? "Guardando..." : "Guardar cambios"}
+                        </Button>
+                      </DialogFooter>
+                    </DialogContent>
+                  </Dialog>
+                </div>
+                  {actividadesLoading ? (
+                <div className="text-center py-8 text-sm text-[#5C5C5C]">Cargando actividades...</div>
+              ) : actividadesError ? (
+                <div className="text-center py-8">
+                  <p className="text-sm text-[#C8102E]">Error al cargar actividades: {actividadesError}</p>
+                </div>
+              ) : actividades.length > 0 ? (
+                actividadesConAlertas.length > 0 ? (
+                  <>
+                    {(actividadesVencidas.length > 0 || actividadesProximasAVencer.length > 0) && (
+                      <div className="mb-4 grid gap-3 md:grid-cols-2">
+                        {actividadesVencidas.length > 0 && (
+                          <div className="rounded-lg border border-[#C8102E]/20 bg-[#C8102E]/5 p-4">
+                            <div className="mb-1 flex items-center gap-2 text-[#C8102E]">
+                              <AlertTriangle className="h-4 w-4" />
+                              <p className="text-sm font-bold">
+                                {actividadesVencidas.length} actividad{actividadesVencidas.length === 1 ? "" : "es"} vencida{actividadesVencidas.length === 1 ? "" : "s"}
+                              </p>
+                            </div>
+                            <p className="text-xs text-[#C8102E]">
+                              Requiere seguimiento para regularizar el avance o actualizar la fecha de cierre.
+                            </p>
+                          </div>
+                        )}
+                        {actividadesProximasAVencer.length > 0 && (
+                          <div className="rounded-lg border border-[#F57C00]/20 bg-[#F57C00]/5 p-4">
+                            <div className="mb-1 flex items-center gap-2 text-[#F57C00]">
+                              <Clock className="h-4 w-4" />
+                              <p className="text-sm font-bold">
+                                {actividadesProximasAVencer.length} actividad{actividadesProximasAVencer.length === 1 ? "" : "es"} próxima{actividadesProximasAVencer.length === 1 ? "" : "s"} a vencer
+                              </p>
+                            </div>
+                            <p className="text-xs text-[#F57C00]">
+                              Vencen dentro de los próximos {DIAS_ALERTA_ACTIVIDAD} días o durante el día actual.
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    )}
                     <div className="overflow-x-auto">
                       <table className="w-full">
                         <thead>
                           <tr className="border-b border-[#E0E0E0]">
-                            <th className="pb-3 text-left text-xs font-semibold uppercase tracking-wide text-[#5C5C5C]">
-                              Actividad
-                            </th>
-                            <th className="pb-3 text-left text-xs font-semibold uppercase tracking-wide text-[#5C5C5C]">
-                              Responsable
-                            </th>
-                            <th className="pb-3 text-left text-xs font-semibold uppercase tracking-wide text-[#5C5C5C]">
-                              Fecha
-                            </th>
-                            <th className="pb-3 text-left text-xs font-semibold uppercase tracking-wide text-[#5C5C5C]">
-                              Avance
-                            </th>
-                            <th className="pb-3 text-left text-xs font-semibold uppercase tracking-wide text-[#5C5C5C]">
-                              Estado
-                            </th>
+                            <th className="pb-3 text-left text-xs font-semibold uppercase tracking-wide text-[#5C5C5C]">Actividad</th>
+                            <th className="pb-3 text-left text-xs font-semibold uppercase tracking-wide text-[#5C5C5C]">Responsable</th>
+                            <th className="pb-3 text-left text-xs font-semibold uppercase tracking-wide text-[#5C5C5C]">Fecha</th>
+                            <th className="pb-3 text-left text-xs font-semibold uppercase tracking-wide text-[#5C5C5C]">Avance</th>
+                            <th className="pb-3 text-left text-xs font-semibold uppercase tracking-wide text-[#5C5C5C]">Estado</th>
+                            <th className="pb-3 text-left text-xs font-semibold uppercase tracking-wide text-[#5C5C5C]">Acciones</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-[#E0E0E0]">
-                          {actividades.map(act => (
+                          {actividadesConAlertas.map(act => (
                             <React.Fragment key={act.id}>
-                              <tr className="hover:bg-[#FFFDE7]">
-                                <td className="py-3 text-sm font-medium text-[#1A1A1A]">{act.nombre}</td>
-                                <td className="py-3 text-sm text-[#5C5C5C]">{act.responsable}</td>
+                              <tr className={
+                                act.alertaVencimiento?.tipo === "vencida"
+                                  ? "bg-[#C8102E]/5 hover:bg-[#C8102E]/10"
+                                  : act.alertaVencimiento
+                                    ? "bg-[#F57C00]/5 hover:bg-[#F57C00]/10"
+                                    : "hover:bg-[#FFFDE7]"
+                              }>
+                                <td className="py-3 text-sm font-medium text-[#1A1A1A]">
+                                  <div className="flex flex-col gap-1">
+                                    <span>{act.nombre}</span>
+                                    {act.alertaVencimiento && (
+                                      <span className={`inline-flex w-fit items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-semibold ${act.alertaVencimiento.tipo === "vencida"
+                                          ? "border-[#C8102E]/20 bg-[#C8102E]/10 text-[#C8102E]"
+                                          : "border-[#F57C00]/20 bg-[#F57C00]/10 text-[#F57C00]"
+                                        }`}>
+                                        {act.alertaVencimiento.tipo === "vencida" ? (
+                                          <AlertTriangle className="h-3 w-3" />
+                                        ) : (
+                                          <Clock className="h-3 w-3" />
+                                        )}
+                                        {act.alertaVencimiento.label}
+                                      </span>
+                                    )}
+                                  </div>
+                                </td>
+                                <td className="py-3 text-sm text-[#5C5C5C]">{act.responsableDisplay}</td>
                                 <td className="py-3 text-xs text-[#5C5C5C]">
-                                  {new Date(act.fechaFin).toLocaleDateString("es-PE")}
+                                  {act.fechaFin ? act.fechaFin.split('-').reverse().join('/') : "—"}
                                 </td>
                                 <td className="py-3">
                                   <div className="w-20">
-                                    <ProgressBar value={act.avance} size="sm" />
+                                    <ProgressBar value={0} size="sm" />
                                   </div>
                                 </td>
                                 <td className="py-3">
                                   <StatusBadge estado={act.estado} />
                                 </td>
+                                <td className="py-3">
+                                  <button
+                                    className="flex items-center gap-1 rounded-lg border border-[#E0E0E0] bg-white px-2 py-1 text-xs font-medium text-[#5C5C5C] hover:bg-[#F7F7F7]"
+                                    onClick={() => {
+                                      setEditingActividad(act)
+                                      setEditForm({
+                                        nombre: act.nombre,
+                                        descripcion: act.descripcion ?? "",
+                                        fechaInicio: act.fechaInicio ?? "",
+                                        fechaFin: act.fechaFin ?? "",
+                                        estado: act.estado,
+                                        idResponsables: [...act.idResponsables],
+                                      })
+                                      setEditActividadOpen(true)
+                                    }}
+                                  >
+                                    <Pencil className="h-3 w-3" />
+                                    Editar
+                                  </button>
+                                </td>
                               </tr>
-                              {act.subactividades && act.subactividades.map(sub => (
-                                <tr key={sub.id} className="bg-[#FAFAFA] border-none group">
-                                  <td className="py-3 pl-8 text-sm text-[#5C5C5C] relative">
-                                     <div className="absolute left-3 top-0 bottom-0 w-px bg-[#E0E0E0] group-last:bottom-1/2"></div>
-                                     <div className="absolute left-3 top-1/2 w-4 h-px bg-[#E0E0E0]"></div>
-                                     <div className="flex items-center gap-2 relative z-10 bg-[#FAFAFA] pr-2">
-                                       <Circle className="h-2 w-2 fill-[#C9A42B] text-[#C9A42B]" />
-                                       <span className="truncate max-w-[200px]" title={sub.nombre}>{sub.nombre}</span>
-                                       {(sub as any).isCofinancedIncoming ? (
-                                         <span className="ml-2 inline-flex shrink-0 items-center rounded-sm bg-[#F7F7F7] px-2 py-0.5 text-[10px] font-bold text-[#5C5C5C] border border-[#E0E0E0]" title={`Originario de: ${(sub as any).parentActividad.nombre}`}>
-                                           Compartido (S/ {(sub as any).montoCofinanciado.toLocaleString()})
-                                         </span>
-                                       ) : (() => {
-                                         const propioRaw = sub.presupuesto ?? 0
-                                         const cofinanciado = (sub.cofinanciadoPor ?? []).reduce((acc, c) => acc + c.monto, 0)
-                                         const total = propioRaw + cofinanciado
-                                         return total > 0 ? (
-                                           <span
-                                             className="ml-2 inline-flex shrink-0 items-center gap-1 rounded-sm bg-[#FFFDE7] px-2 py-0.5 text-[10px] font-bold text-[#C9A42B] border border-[#FFD600]"
-                                             title={`Presupuesto propio: S/ ${propioRaw.toLocaleString()} | Cofinanciado: S/ ${cofinanciado.toLocaleString()}`}
-                                           >
-                                             <svg xmlns="http://www.w3.org/2000/svg" className="w-2.5 h-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
-                                             S/ {total.toLocaleString()}
-                                             {cofinanciado > 0 && <span className="opacity-60 font-normal">(+{cofinanciado.toLocaleString()} cofinac.)</span>}
-                                           </span>
-                                         ) : null
-                                       })()}
-                                     </div>
-                                  </td>
-                                  <td className="py-3 text-sm text-[#5C5C5C]">{sub.responsable}</td>
-                                  <td colSpan={3} className="py-2 px-2">
-                                    <div className="flex items-center justify-between gap-4">
-                                      <div className="flex-1">
-                                        {sub.archivosEvidencia && sub.archivosEvidencia.length > 0 ? (
-                                          <div className="flex items-center gap-4">
-                                            <Dialog>
-                                              <DialogTrigger asChild>
-                                                <button className="flex items-center gap-1.5 text-xs font-medium text-[#2E7D32] bg-[#2E7D32]/10 border border-[#2E7D32]/20 shadow-sm rounded-md px-3 py-1.5 hover:bg-[#2E7D32]/20 transition-colors">
-                                                  <CheckCircle2 className="w-3.5 h-3.5"/> Archivos anexados ({sub.archivosEvidencia.length})
-                                                </button>
-                                              </DialogTrigger>
-                                              <DialogContent className="overflow-y-auto sm:max-w-md">
-                                                <DialogHeader>
-                                                  <DialogTitle>Gestionar Evidencias</DialogTitle>
-                                                  <DialogDescription>Archivos cargados en esta subactividad.</DialogDescription>
-                                                </DialogHeader>
-                                                <div className="flex flex-col gap-3 py-2">
-                                                  {(sub as any).archivosEvidencia.map((file: any) => (
-                                                    <div key={file.id} className="flex items-center justify-between p-2 rounded border border-[#E0E0E0] bg-[#FAFAFA]">
-                                                      <span className="text-sm text-[#1A1A1A] truncate w-64" title={file.nombre}>{file.nombre}</span>
-                                                      <button className="text-[#C9A42B] hover:text-[#FFD600] text-xs font-semibold px-2">Descargar</button>
-                                                    </div>
-                                                  ))}
-                                                </div>
-                                                <div className="border-t border-[#E0E0E0] pt-4 mt-2">
-                                                  <h4 className="text-sm font-semibold text-[#1A1A1A] mb-3">Anexar nuevo archivo</h4>
-                                                  <div className="grid gap-2">
-                                                    <Input type="file" />
-                                                  </div>
-                                                </div>
-                                                <DialogFooter className="mt-4">
-                                                  <DialogClose asChild><Button variant="outline">Cerrar</Button></DialogClose>
-                                                  <DialogClose asChild><Button className="bg-[#FFD600] text-[#1A1A1A] hover:bg-[#C9A42B]">Guardar</Button></DialogClose>
-                                                </DialogFooter>
-                                              </DialogContent>
-                                            </Dialog>
-                                            <div className="flex gap-3 text-xs text-[#5C5C5C] bg-white px-2 py-1.5 rounded border border-[#E0E0E0] shadow-sm">
-                                                <span title="Hombres involucrados" className="flex items-center gap-1 font-medium"><User className="w-3 h-3 text-[#1A1A1A]"/> {sub.hombresInvolucrados || 0} H</span>
-                                                <span className="text-[#E0E0E0]">|</span>
-                                                <span title="Mujeres involucradas" className="flex items-center gap-1 font-medium"><User className="w-3 h-3 text-[#1A1A1A]"/> {sub.mujeresInvolucradas || 0} M</span>
-                                            </div>
-                                          </div>
-                                        ) : (
-                                          <div className="flex items-center gap-2">
-                                            <Dialog>
-                                              <DialogTrigger asChild>
-                                                <button className="flex items-center gap-1.5 text-xs font-medium text-[#1A1A1A] bg-white border border-[#E0E0E0] shadow-sm rounded-md px-3 py-1.5 hover:bg-[#F7F7F7] hover:border-[#1A1A1A] transition-colors">
-                                                  <Download className="w-3.5 h-3.5 rotate-180"/> Anexar evidencia
-                                                </button>
-                                              </DialogTrigger>
-                                              <DialogContent className="overflow-y-auto sm:max-w-md">
-                                                <DialogHeader>
-                                                  <DialogTitle>Anexar Evidencia</DialogTitle>
-                                                  <DialogDescription>Suba documentos o reporte asistencia relacionados a esta subactividad.</DialogDescription>
-                                                </DialogHeader>
-                                                <div className="grid gap-4 py-6">
-                                                  <div className="grid gap-2">
-                                                    <Label htmlFor={`file-new-${sub.id}`}>Archivo de soporte (PDF, Docx)</Label>
-                                                    <Input id={`file-new-${sub.id}`} type="file" multiple />
-                                                  </div>
-                                                  <div className="grid grid-cols-2 gap-4">
-                                                    <div className="grid gap-2">
-                                                      <Label htmlFor={`hombres-${sub.id}`}>Hombres Asistentes</Label>
-                                                      <Input id={`hombres-${sub.id}`} type="number" placeholder="Ej. 15" />
-                                                    </div>
-                                                    <div className="grid gap-2">
-                                                      <Label htmlFor={`mujeres-${sub.id}`}>Mujeres Asistentes</Label>
-                                                      <Input id={`mujeres-${sub.id}`} type="number" placeholder="Ej. 20" />
-                                                    </div>
-                                                  </div>
-                                                </div>
-                                                <DialogFooter>
-                                                  <DialogClose asChild>
-                                                    <Button variant="outline">Cancelar</Button>
-                                                  </DialogClose>
-                                                  <DialogClose asChild>
-                                                    <Button className="bg-[#FFD600] text-[#1A1A1A] hover:bg-[#C9A42B]">Guardar</Button>
-                                                  </DialogClose>
-                                                </DialogFooter>
-                                              </DialogContent>
-                                            </Dialog>
-                                            <div className="flex gap-2">
-                                              <div className="relative">
-                                                <User className="w-3 h-3 absolute left-2 top-1/2 -translate-y-1/2 text-[#5C5C5C]" />
-                                                <input type="number" placeholder="H" className="w-16 h-7 text-xs border border-[#E0E0E0] shadow-sm rounded-md pl-6 pr-2 outline-none focus:border-[#FFD600]" title="Cantidad de Hombres" />
-                                              </div>
-                                              <div className="relative">
-                                                <User className="w-3 h-3 absolute left-2 top-1/2 -translate-y-1/2 text-[#5C5C5C]" />
-                                                <input type="number" placeholder="M" className="w-16 h-7 text-xs border border-[#E0E0E0] shadow-sm rounded-md pl-6 pr-2 outline-none focus:border-[#FFD600]" title="Cantidad de Mujeres" />
-                                              </div>
-                                            </div>
-                                          </div>
-                                        )}
-                                      </div>
-                                      <div className="flex shrink-0 items-center justify-end">
-                                        {!(sub as any).isCofinancedIncoming && (
-                                          <Dialog>
-                                            <DialogTrigger asChild>
-                                              <button className="flex items-center gap-1 text-xs font-medium text-[#C9A42B] bg-white border border-[#E0E0E0] shadow-sm rounded-md px-2 py-1 hover:bg-[#FFFDE7] hover:border-[#FFD600] transition-colors" title="Gestionar Cofinanciamiento">
-                                                <DollarSign className="w-3.5 h-3.5" />
-                                                Cofinanciar
-                                              </button>
-                                            </DialogTrigger>
-                                            <DialogContent className="overflow-y-auto sm:max-w-md">
-                                              <DialogHeader>
-                                                <DialogTitle>Cofinanciar Subactividad</DialogTitle>
-                                                <DialogDescription>
-                                                  Asigna presupuesto proveniente de otras actividades institucionales vinculadas.
-                                                </DialogDescription>
-                                              </DialogHeader>
-                                              <div className="grid gap-4 py-6">
-                                                <div className="grid gap-2">
-                                                  <Label>Actividad Origen (Fondo)</Label>
-                                                  <Select>
-                                                    <SelectTrigger><SelectValue placeholder="Seleccione la actividad matriz" /></SelectTrigger>
-                                                    <SelectContent>
-                                                      <SelectItem value="6">Mapeo de actores - Partida 3</SelectItem>
-                                                      <SelectItem value="8">Incidencia Política - Partida 4</SelectItem>
-                                                    </SelectContent>
-                                                  </Select>
-                                                </div>
-                                                <div className="grid gap-2">
-                                                  <Label htmlFor="monto">Monto asignado (S/)</Label>
-                                                  <Input id="monto" type="number" placeholder="Ej. 2500" />
-                                                </div>
-                                              </div>
-                                              <DialogFooter>
-                                                <DialogClose asChild>
-                                                  <Button variant="outline">Cancelar</Button>
-                                                </DialogClose>
-                                                <DialogClose asChild>
-                                                  <Button className="bg-[#FFD600] text-[#1A1A1A] hover:bg-[#C9A42B]">Guardar</Button>
-                                                </DialogClose>
-                                              </DialogFooter>
-                                            </DialogContent>
-                                          </Dialog>
-                                        )}
-                                      </div>
-                                    </div>
-                                  </td>
-                                </tr>
-                              ))}
-                              <tr className="bg-[#FAFAFA] border-none group">
-                                <td colSpan={5} className="py-3 pl-8 relative">
-                                  <div className="absolute left-3 top-0 bottom-1/2 w-px bg-[#E0E0E0]"></div>
-                                  <div className="absolute left-3 top-1/2 w-4 h-px bg-[#E0E0E0]"></div>
-                                  <div className="flex items-center relative z-10 bg-[#FAFAFA] pr-2">
-                                    <Dialog>
-                                      <DialogTrigger asChild>
-                                        <button className="flex items-center gap-1.5 text-xs font-bold text-[#C9A42B] hover:text-[#1A1A1A] transition-colors py-1 pl-2 ml-1">
-                                          <Plus className="h-3 w-3" /> Agregar subactividad
-                                        </button>
-                                      </DialogTrigger>
-                                      <DialogContent className="sm:max-w-lg overflow-y-auto max-h-[90vh]">
-                                          <form onSubmit={async (e) => {
-                                            e.preventDefault();
-                                            const form = e.currentTarget;
-                                            const formData = new FormData(form);
-                                            const payload = {
-                                              nombre: formData.get('nombre'),
-                                              idResponsable: parseInt(formData.get('idResponsable') as string, 10),
-                                              fechaInicio: formData.get('fechaInicio') || null,
-                                              fechaFin: formData.get('fechaFin') || null,
-                                              presupuesto: parseFloat(formData.get('presupuesto') as string) || 0,
-                                              hombresInvolucrados: parseInt(formData.get('hombres') as string) || 0,
-                                              mujeresInvolucradas: parseInt(formData.get('mujeres') as string) || 0,
-                                              descripcion: formData.get('descripcion')
-                                            };
-                                            try {
-                                              await api.post(`/actividades/${act.id}/subactividades`, payload);
-                                              const acts = await api.get<ActividadResponse[]>(`/proyectos/${id}/actividades`);
-                                              setApiActividades(acts);
-                                            } catch (err) {
-                                              console.error(err);
-                                            }
-                                          }}>
-                                          <DialogHeader>
-                                            <DialogTitle>Nueva Subactividad</DialogTitle>
-                                            <DialogDescription>Añada una subactividad a '{act.nombre}'.</DialogDescription>
-                                          </DialogHeader>
-                                          <div className="grid gap-4 py-4">
-                                            {/* Nombre */}
-                                            <div className="grid gap-2">
-                                              <Label>Nombre de la Subactividad <span className="text-red-500">*</span></Label>
-                                              <Input name="nombre" placeholder="Ej. Taller grupal de sensibilización" required />
-                                            </div>
-                                            {/* Responsable */}
-                                            <div className="grid gap-2">
-                                              <Label>Responsable <span className="text-red-500">*</span></Label>
-                                              <Select name="idResponsable" required>
-                                                <SelectTrigger><SelectValue placeholder="Seleccione un responsable" /></SelectTrigger>
-                                                <SelectContent>
-                                                  {usuariosSistema.map(u => (
-                                                    <SelectItem key={u.id} value={String(u.id)}>{u.nombres} {u.apellidos}</SelectItem>
-                                                  ))}
-                                                </SelectContent>
-                                              </Select>
-                                            </div>
-                                            {/* Fechas */}
-                                            <div className="grid grid-cols-2 gap-4">
-                                              <div className="grid gap-2">
-                                                <Label>Fecha de Inicio</Label>
-                                                <Input name="fechaInicio" type="date" />
-                                              </div>
-                                              <div className="grid gap-2">
-                                                <Label>Fecha de Fin</Label>
-                                                <Input name="fechaFin" type="date" />
-                                              </div>
-                                            </div>
-                                            {/* Presupuesto */}
-                                            <div className="grid gap-2">
-                                              <Label>Presupuesto Asignado (S/)</Label>
-                                              <Input name="presupuesto" type="number" placeholder="Ej. 2500" step="0.01" />
-                                            </div>
-                                            {/* Participantes */}
-                                            <div className="grid gap-1.5">
-                                              <Label>Participantes estimados</Label>
-                                              <div className="grid grid-cols-2 gap-4">
-                                                <div className="grid gap-2">
-                                                  <Label className="text-xs text-[#5C5C5C] font-normal">Hombres</Label>
-                                                  <Input name="hombres" type="number" placeholder="Ej. 10" min="0" />
-                                                </div>
-                                                <div className="grid gap-2">
-                                                  <Label className="text-xs text-[#5C5C5C] font-normal">Mujeres</Label>
-                                                  <Input name="mujeres" type="number" placeholder="Ej. 15" min="0" />
-                                                </div>
-                                              </div>
-                                            </div>
-                                            {/* Descripcion */}
-                                            <div className="grid gap-2">
-                                              <Label>Descripción / Observaciones</Label>
-                                              <textarea
-                                                name="descripcion"
-                                                className="min-h-[80px] w-full rounded-md border border-[#E0E0E0] bg-white px-3 py-2 text-sm outline-none focus:border-[#FFD600] resize-none"
-                                                placeholder="Descripción corta de la subactividad, objetivos o contexto..."
-                                              />
-                                            </div>
-                                          </div>
-                                          <DialogFooter>
-                                            <DialogClose asChild><Button variant="outline" type="button">Cancelar</Button></DialogClose>
-                                            <Button type="submit" className="bg-[#FFD600] text-[#1A1A1A] hover:bg-[#C9A42B]">Guardar</Button>
-                                          </DialogFooter>
-                                          </form>
-                                      </DialogContent>
-                                    </Dialog>
+                              {/* Subactividades placeholder */}
+                              <tr className="bg-[#FAFAFA] border-none">
+                                <td colSpan={6} className="py-2 pl-8 relative">
+                                  <div className="flex items-center gap-2">
+                                    <div className="w-px h-4 bg-[#E0E0E0]" />
+                                    <button
+                                      className="flex items-center gap-1 text-xs font-medium text-[#C9A42B] hover:text-[#1A1A1A] transition-colors"
+                                      title="Funcionalidad próximamente"
+                                    >
+                                      <Plus className="h-3 w-3" />
+                                      Agregar subactividad
+                                    </button>
+                                    <span className="text-[10px] text-[#BDBDBD] italic">(próximamente)</span>
                                   </div>
                                 </td>
                               </tr>
@@ -945,120 +1212,164 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                         </tbody>
                       </table>
                     </div>
-                  ) : (
-                    <div className="text-center py-8 text-sm text-[#5C5C5C]">
-                      No hay actividades registradas para este proyecto.
-                    </div>
-                  )}
-                </div>
+                  </>
+                ) : (
+                  <div className="text-center py-8 text-sm text-[#5C5C5C]">
+                    No hay actividades registradas para este proyecto.
+                  </div>
+                )
+              ) : null}
+            </div>
               )}
 
-              {/* Hitos Tab */}
-              {activeTab === "hitos" && (
-                <div className="p-6">
-                  <div className="flex items-center justify-between mb-6">
-                    <div className="flex items-center gap-2">
-                      <h3 className="text-sm font-bold uppercase tracking-wide text-[#5C5C5C]">
-                        Cronograma e Hitos
-                      </h3>
-                      <MockDataTag />
-                    </div>
-                    <button
-                      onClick={() => {
-                        setHitoForm({ nombre: "", fecha: "", estado: "Pendiente" })
-                        setEditHito(null)
-                        setAddHitoOpen(true)
-                      }}
-                      className="flex items-center gap-2 rounded-lg bg-[#FFD600] px-3 py-1.5 text-xs font-bold text-[#1A1A1A] hover:bg-[#C9A42B] transition-colors"
-                    >
-                      <Plus className="h-3.5 w-3.5" />
-                      Agregar hito
-                    </button>
+            {/* Hitos Tab */}
+            {activeTab === "hitos" && (
+              <div className="p-6">
+                <div className="flex items-center justify-between mb-6">
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-sm font-bold uppercase tracking-wide text-[#5C5C5C]">
+                      Cronograma e Hitos
+                    </h3>
+                    {hitosState.some(hito => hito.fuenteDatos !== "api") && <MockDataTag />}
+                    {hitosLoading && (
+                      <span className="text-xs text-[#5C5C5C]">Cargando hitos...</span>
+                    )}
                   </div>
+                  <button
+                    onClick={abrirNuevoHito}
+                    className="flex items-center gap-2 rounded-lg bg-[#FFD600] px-3 py-1.5 text-xs font-bold text-[#1A1A1A] hover:bg-[#C9A42B] transition-colors"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    Agregar hito
+                  </button>
+                </div>
+                {hitosError && (
+                  <div className="mb-4 rounded-lg border border-[#C8102E]/20 bg-[#C8102E]/5 px-4 py-3 text-sm text-[#C8102E]">
+                    {hitosError}
+                  </div>
+                )}
 
-                  {/* Dialog agregar / editar hito */}
-                  <Dialog open={addHitoOpen} onOpenChange={setAddHitoOpen}>
-                    <DialogContent className="sm:max-w-sm">
-                      <DialogHeader>
-                        <DialogTitle>{editHito ? "Editar Hito" : "Nuevo Hito"}</DialogTitle>
-                        <DialogDescription>
-                          {editHito ? "Modifica los datos del hito seleccionado." : "Registra un nuevo hito para el cronograma."}
-                        </DialogDescription>
-                      </DialogHeader>
-                      <div className="grid gap-4 py-4">
-                        <div className="grid gap-2">
-                          <Label htmlFor="hito-nombre">Nombre del hito</Label>
-                          <Input
-                            id="hito-nombre"
-                            placeholder="Ej. Entrega de informe final"
-                            value={hitoForm.nombre}
-                            onChange={e => setHitoForm(f => ({ ...f, nombre: e.target.value }))}
-                          />
-                        </div>
-                        <div className="grid gap-2">
-                          <Label htmlFor="hito-fecha">Fecha</Label>
-                          <Input
-                            id="hito-fecha"
-                            type="date"
-                            value={hitoForm.fecha}
-                            onChange={e => setHitoForm(f => ({ ...f, fecha: e.target.value }))}
-                          />
-                        </div>
-                        <div className="grid gap-2">
-                          <Label htmlFor="hito-estado">Estado</Label>
-                          <Select
-                            value={hitoForm.estado}
-                            onValueChange={v => setHitoForm(f => ({ ...f, estado: v as "Completado" | "Pendiente" | "Vencido" }))}
-                          >
-                            <SelectTrigger id="hito-estado"><SelectValue /></SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="Pendiente">Pendiente</SelectItem>
-                              <SelectItem value="Completado">Completado</SelectItem>
-                              <SelectItem value="Vencido">Vencido</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
+                {/* Dialog agregar / editar hito */}
+                <Dialog open={addHitoOpen} onOpenChange={setAddHitoOpen}>
+                  <DialogContent className="overflow-y-auto sm:max-w-lg">
+                    <DialogHeader>
+                      <DialogTitle>{editHito ? "Editar Hito" : "Nuevo Hito"}</DialogTitle>
+                      <DialogDescription>
+                        {editHito ? "Modifica los datos del hito seleccionado." : "Registra un nuevo hito para el cronograma."}
+                      </DialogDescription>
+                    </DialogHeader>
+                    <div className="grid gap-4 py-4">
+                      <div className="grid gap-2">
+                        <Label htmlFor="hito-nombre">Nombre del hito</Label>
+                        <Input
+                          id="hito-nombre"
+                          placeholder="Ej. Entrega de informe final"
+                          value={hitoForm.nombre}
+                          onChange={e => setHitoForm(f => ({ ...f, nombre: e.target.value }))}
+                        />
                       </div>
-                      <DialogFooter>
-                        <Button variant="outline" onClick={() => setAddHitoOpen(false)}>Cancelar</Button>
-                        <Button
-                          className="bg-[#FFD600] text-[#1A1A1A] hover:bg-[#C9A42B]"
-                          onClick={() => {
-                            if (!hitoForm.nombre.trim() || !hitoForm.fecha) return
-                            if (editHito) {
-                              setHitosState(prev => prev.map(h => h.id === editHito.id ? { ...h, ...hitoForm } : h))
-                            } else {
-                              const newId = `hito-${Date.now()}`
-                              setHitosState(prev => [...prev, { id: newId, proyectoId: id, ...hitoForm }])
-                            }
-                            setAddHitoOpen(false)
-                          }}
+                      <div className="grid gap-2">
+                        <Label htmlFor="hito-descripcion">Descripcion</Label>
+                        <Textarea
+                          id="hito-descripcion"
+                          placeholder="Objetivo o alcance del hito"
+                          value={hitoForm.descripcion}
+                          onChange={e => setHitoForm(f => ({ ...f, descripcion: e.target.value }))}
+                          rows={3}
+                          className="resize-none"
+                        />
+                      </div>
+                      <div className="grid gap-2">
+                        <Label htmlFor="hito-fecha">Fecha clave</Label>
+                        <Input
+                          id="hito-fecha"
+                          type="date"
+                          value={hitoForm.fecha}
+                          onChange={e => setHitoForm(f => ({ ...f, fecha: e.target.value }))}
+                        />
+                      </div>
+                      <div className="grid gap-2">
+                        <Label htmlFor="hito-estado">Estado</Label>
+                        <Select
+                          value={hitoForm.estado}
+                          onValueChange={v => setHitoForm(f => ({ ...f, estado: v as HitoEstadoUi }))}
                         >
-                          {editHito ? "Guardar cambios" : "Crear hito"}
-                        </Button>
-                      </DialogFooter>
-                    </DialogContent>
-                  </Dialog>
+                          <SelectTrigger id="hito-estado"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="Pendiente">Pendiente</SelectItem>
+                            <SelectItem value="En curso">En curso</SelectItem>
+                            <SelectItem value="Finalizado">Finalizado</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                    <DialogFooter>
+                      <Button variant="outline" onClick={() => setAddHitoOpen(false)} disabled={hitoSubmitting}>Cancelar</Button>
+                      <Button
+                        className="bg-[#FFD600] text-[#1A1A1A] hover:bg-[#C9A42B]"
+                        onClick={guardarHito}
+                        disabled={hitoSubmitting}
+                      >
+                        {hitoSubmitting ? "Guardando..." : editHito ? "Guardar cambios" : "Crear hito"}
+                      </Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
 
-                  {hitosState.length > 0 ? (
+                {hitosConAlertas.length > 0 ? (
+                  <>
+                    {(hitosVencidos.length > 0 || hitosProximosAVencer.length > 0) && (
+                      <div className="mb-6 grid gap-3 md:grid-cols-2">
+                        {hitosVencidos.length > 0 && (
+                          <div className="rounded-lg border border-[#C8102E]/20 bg-[#C8102E]/5 p-4">
+                            <div className="mb-1 flex items-center gap-2 text-[#C8102E]">
+                              <AlertTriangle className="h-4 w-4" />
+                              <p className="text-sm font-bold">
+                                {hitosVencidos.length} hito{hitosVencidos.length === 1 ? "" : "s"} vencido{hitosVencidos.length === 1 ? "" : "s"}
+                              </p>
+                            </div>
+                            <p className="text-xs text-[#C8102E]">
+                              Requiere revisar el cronograma o registrar el cumplimiento del hito.
+                            </p>
+                          </div>
+                        )}
+                        {hitosProximosAVencer.length > 0 && (
+                          <div className="rounded-lg border border-[#F57C00]/20 bg-[#F57C00]/5 p-4">
+                            <div className="mb-1 flex items-center gap-2 text-[#F57C00]">
+                              <Clock className="h-4 w-4" />
+                              <p className="text-sm font-bold">
+                                {hitosProximosAVencer.length} hito{hitosProximosAVencer.length === 1 ? "" : "s"} próximo{hitosProximosAVencer.length === 1 ? "" : "s"} a vencer
+                              </p>
+                            </div>
+                            <p className="text-xs text-[#F57C00]">
+                              Vencen dentro de los próximos {DIAS_ALERTA_ACTIVIDAD} días o durante el día actual.
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    )}
                     <div className="relative">
                       <div className="absolute left-4 top-0 bottom-0 w-0.5 bg-[#E0E0E0]" />
                       <div className="space-y-6">
-                        {hitosState.map((hito) => (
+                        {hitosConAlertas.map((hito) => (
                           <div key={hito.id} className="relative flex gap-4 pl-10 group">
-                            <div className={`absolute left-2 top-1 flex h-5 w-5 items-center justify-center rounded-full ${
-                              hito.estado === "Completado" ? "bg-[#2E7D32]" :
-                              hito.estado === "Vencido" ? "bg-[#C8102E]" : "bg-[#E0E0E0]"
-                            }`}>
-                              {hito.estado === "Completado" ? (
+                            <div className={`absolute left-2 top-1 flex h-5 w-5 items-center justify-center rounded-full ${hito.estado === "Finalizado" ? "bg-[#2E7D32]" :
+                                hito.estado === "En curso" ? "bg-[#F57C00]" : "bg-[#E0E0E0]"
+                              }`}>
+                              {hito.estado === "Finalizado" ? (
                                 <CheckCircle2 className="h-3 w-3 text-white" />
-                              ) : hito.estado === "Vencido" ? (
-                                <XCircle className="h-3 w-3 text-white" />
+                              ) : hito.estado === "En curso" ? (
+                                <Clock className="h-3 w-3 text-white" />
                               ) : (
                                 <Circle className="h-3 w-3 text-[#5C5C5C]" />
                               )}
                             </div>
-                            <div className="flex-1 rounded-lg border border-[#E0E0E0] p-4 hover:border-[#FFD600] transition-colors">
+                            <div className={`flex-1 rounded-lg border p-4 transition-colors ${hito.alertaVencimiento?.tipo === "vencido"
+                                ? "border-[#C8102E]/20 bg-[#C8102E]/5 hover:border-[#C8102E]/40"
+                                : hito.alertaVencimiento
+                                  ? "border-[#F57C00]/20 bg-[#F57C00]/5 hover:border-[#F57C00]/40"
+                                  : "border-[#E0E0E0] hover:border-[#FFD600]"
+                              }`}>
                               <div className="flex items-start justify-between gap-2">
                                 <div className="flex-1 min-w-0">
                                   <p className="text-sm font-medium text-[#1A1A1A]">{hito.nombre}</p>
@@ -1069,22 +1380,30 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                                       day: "numeric"
                                     })}
                                   </p>
+                                  {hito.descripcion && (
+                                    <p className="mt-3 text-sm leading-relaxed text-[#5C5C5C]">
+                                      {hito.descripcion}
+                                    </p>
+                                  )}
+                                  <div className="mt-3 flex flex-wrap gap-2 text-xs text-[#5C5C5C]">
+                                    {hito.fuenteDatos !== "api" && (
+                                      <span className="inline-flex items-center rounded-full bg-[#F7F7F7] px-2.5 py-1">
+                                        {hito.fuenteDatos === "local" ? "Sesion local" : "Mock referencial"}
+                                      </span>
+                                    )}
+                                  </div>
                                 </div>
                                 <div className="flex items-center gap-2 shrink-0">
                                   <StatusBadge estado={hito.estado} />
                                   <button
-                                    onClick={() => {
-                                      setEditHito(hito)
-                                      setHitoForm({ nombre: hito.nombre, fecha: hito.fecha, estado: hito.estado })
-                                      setAddHitoOpen(true)
-                                    }}
+                                    onClick={() => abrirEditarHito(hito)}
                                     className="opacity-0 group-hover:opacity-100 transition-opacity flex h-7 w-7 items-center justify-center rounded-full text-[#5C5C5C] hover:bg-[#F7F7F7]"
                                     title="Editar hito"
                                   >
                                     <Pencil className="h-3.5 w-3.5" />
                                   </button>
                                   <button
-                                    onClick={() => setHitosState(prev => prev.filter(h => h.id !== hito.id))}
+                                    onClick={() => eliminarHito(hito)}
                                     className="opacity-0 group-hover:opacity-100 transition-opacity flex h-7 w-7 items-center justify-center rounded-full text-[#C8102E] hover:bg-[#C8102E]/10"
                                     title="Eliminar hito"
                                   >
@@ -1097,103 +1416,104 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                         ))}
                       </div>
                     </div>
-                  ) : (
-                    <div className="text-center py-8 text-sm text-[#5C5C5C]">
-                      No hay hitos registrados para este proyecto.
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Informes Tab */}
-              {activeTab === "informes" && (
-                <div className="p-6">
-                  <div className="flex items-center justify-between mb-4">
-                    <div className="flex items-center gap-2">
-                      <h3 className="text-sm font-bold uppercase tracking-wide text-[#5C5C5C]">
-                        Informes y Productos
-                      </h3>
-                      <MockDataTag />
-                    </div>
-                    <Link
-                      href="/informes/nuevo"
-                      className="flex items-center gap-2 rounded-lg bg-[#FFD600] px-3 py-1.5 text-xs font-bold text-[#1A1A1A] hover:bg-[#C9A42B]"
-                    >
-                      <Plus className="h-3.5 w-3.5" />
-                      Nuevo documento
-                    </Link>
+                  </>
+                ) : (
+                  <div className="text-center py-8 text-sm text-[#5C5C5C]">
+                    No hay hitos registrados para este proyecto.
                   </div>
-                  {documentos.length > 0 ? (
-                    <div className="space-y-3">
-                      {documentos.map(doc => (
-                        <div key={doc.id} className="flex items-center gap-4 rounded-lg border border-[#E0E0E0] p-4 hover:bg-[#FFFDE7]">
-                          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-[#FFD600]/20">
-                            <FileText className="h-5 w-5 text-[#C9A42B]" />
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm font-medium text-[#1A1A1A] truncate">{doc.titulo}</p>
-                            <div className="flex items-center gap-2 mt-1">
-                              <TypeBadge tipo={doc.tipo} />
-                              <span className="text-xs text-[#5C5C5C]">
-                                {new Date(doc.fechaElaboracion).toLocaleDateString("es-PE")}
-                              </span>
-                            </div>
-                          </div>
-                          <StatusBadge estado={doc.estado} />
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="text-center py-8 text-sm text-[#5C5C5C]">
-                      No hay documentos asociados a este proyecto.
-                    </div>
-                  )}
-                </div>
-              )}
+                )}
+              </div>
+            )}
 
-              {/* Equipo Tab */}
-              {activeTab === "equipo" && (
-                <div className="p-6">
-                  <div className="flex items-center justify-between mb-4">
-                    <div className="flex items-center gap-2">
-                      <h3 className="text-sm font-bold uppercase tracking-wide text-[#5C5C5C]">
-                        Equipo del Proyecto
-                      </h3>
-                    </div>
-                    <Dialog open={addMemberOpen} onOpenChange={setAddMemberOpen}>
-                      <DialogTrigger asChild>
-                        <button className="flex items-center gap-2 rounded-lg bg-[#FFD600] px-3 py-1.5 text-xs font-bold text-[#1A1A1A] hover:bg-[#C9A42B] transition-colors">
-                          <UserPlus className="h-3.5 w-3.5" />
-                          Agregar miembro
-                        </button>
-                      </DialogTrigger>
-                      <DialogContent className="sm:max-w-sm">
-                        <DialogHeader>
-                          <DialogTitle>Agregar Miembro</DialogTitle>
-                          <DialogDescription>Añade un nuevo integrante al equipo del proyecto.</DialogDescription>
-                        </DialogHeader>
-                        <form onSubmit={async e => {
-                          e.preventDefault()
-                          if (!nuevoMiembroNombre || !nuevoMiembroRol) return
-                          
-                          if (apiProyecto) {
-                            try {
-                              await api.post(`/proyectos/${id}/equipo`, { idUsuario: parseInt(nuevoMiembroNombre), rolEnProyecto: nuevoMiembroRol })
-                              const team = await api.get<any[]>(`/proyectos/${id}/equipo`)
-                              setApiEquipo(team)
-                              setNuevoMiembroNombre("")
-                              setNuevoMiembroRol("Equipo Técnico")
-                              setAddMemberOpen(false)
-                            } catch(err) {
-                              console.error(err)
-                            }
-                          } else {
-                            setEquipo(prev => [...prev, { nombre: nuevoMiembroNombre.trim(), rol: nuevoMiembroRol }])
+            {/* Informes Tab */}
+            {activeTab === "informes" && (
+              <div className="p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-sm font-bold uppercase tracking-wide text-[#5C5C5C]">
+                      Informes y Productos
+                    </h3>
+                    <MockDataTag />
+                  </div>
+                  <Link
+                    href="/informes/nuevo"
+                    className="flex items-center gap-2 rounded-lg bg-[#FFD600] px-3 py-1.5 text-xs font-bold text-[#1A1A1A] hover:bg-[#C9A42B]"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    Nuevo documento
+                  </Link>
+                </div>
+                {documentos.length > 0 ? (
+                  <div className="space-y-3">
+                    {documentos.map(doc => (
+                      <div key={doc.id} className="flex items-center gap-4 rounded-lg border border-[#E0E0E0] p-4 hover:bg-[#FFFDE7]">
+                        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-[#FFD600]/20">
+                          <FileText className="h-5 w-5 text-[#C9A42B]" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium text-[#1A1A1A] truncate">{doc.titulo}</p>
+                          <div className="flex items-center gap-2 mt-1">
+                            <TypeBadge tipo={doc.tipo} />
+                            <span className="text-xs text-[#5C5C5C]">
+                              {new Date(doc.fechaElaboracion).toLocaleDateString("es-PE")}
+                            </span>
+                          </div>
+                        </div>
+                        <StatusBadge estado={doc.estado} />
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-center py-8 text-sm text-[#5C5C5C]">
+                    No hay documentos asociados a este proyecto.
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Equipo Tab */}
+            {activeTab === "equipo" && (
+              <div className="p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-sm font-bold uppercase tracking-wide text-[#5C5C5C]">
+                      Equipo del Proyecto
+                    </h3>
+                  </div>
+                  <Dialog open={addMemberOpen} onOpenChange={setAddMemberOpen}>
+                    <DialogTrigger asChild>
+                      <button className="flex items-center gap-2 rounded-lg bg-[#FFD600] px-3 py-1.5 text-xs font-bold text-[#1A1A1A] hover:bg-[#C9A42B] transition-colors">
+                        <UserPlus className="h-3.5 w-3.5" />
+                        Agregar miembro
+                      </button>
+                    </DialogTrigger>
+                    <DialogContent className="sm:max-w-sm">
+                      <DialogHeader>
+                        <DialogTitle>Agregar Miembro</DialogTitle>
+                        <DialogDescription>Añade un nuevo integrante al equipo del proyecto.</DialogDescription>
+                      </DialogHeader>
+                      <form onSubmit={async e => {
+                        e.preventDefault()
+                        if (!nuevoMiembroNombre || !nuevoMiembroRol) return
+
+                        if (apiProyecto) {
+                          try {
+                            await api.post(`/proyectos/${id}/equipo`, { idUsuario: parseInt(nuevoMiembroNombre), rolEnProyecto: nuevoMiembroRol })
+                            const team = await api.get<any[]>(`/proyectos/${id}/equipo`)
+                            setApiEquipo(team)
                             setNuevoMiembroNombre("")
                             setNuevoMiembroRol("Equipo Técnico")
                             setAddMemberOpen(false)
+                          } catch (err) {
+                            console.error(err)
                           }
-                        }}>
+                        } else {
+                          setEquipo(prev => [...prev, { nombre: nuevoMiembroNombre.trim(), rol: nuevoMiembroRol }])
+                          setNuevoMiembroNombre("")
+                          setNuevoMiembroRol("Equipo Técnico")
+                          setAddMemberOpen(false)
+                        }
+                      }}>
                         <div className="grid gap-4 py-4">
                           <div className="grid gap-2">
                             <Label htmlFor="miembro-nombre">Miembro <span className="text-red-500">*</span></Label>
@@ -1239,195 +1559,194 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                             Agregar
                           </Button>
                         </DialogFooter>
-                        </form>
-                      </DialogContent>
-                    </Dialog>
-                  </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {/* Responsable principal */}
-                    <div className="rounded-lg border-2 border-[#FFD600] bg-[#FFFDE7] p-4">
-                      <div className="flex items-center gap-3">
-                        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#FFD600]">
-                          <User className="h-5 w-5 text-[#1A1A1A]" />
-                        </div>
-                        <div>
-                          <p className="text-sm font-medium text-[#1A1A1A]">{proyecto.responsable}</p>
-                          <p className="text-xs text-[#C9A42B] font-medium">Responsable Principal</p>
-                        </div>
+                      </form>
+                    </DialogContent>
+                  </Dialog>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {/* Responsable principal */}
+                  <div className="rounded-lg border-2 border-[#FFD600] bg-[#FFFDE7] p-4">
+                    <div className="flex items-center gap-3">
+                      <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#FFD600]">
+                        <User className="h-5 w-5 text-[#1A1A1A]" />
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium text-[#1A1A1A]">{proyecto.responsable}</p>
+                        <p className="text-xs text-[#C9A42B] font-medium">Responsable Principal</p>
                       </div>
                     </div>
-                    {/* Equipo dinámico */}
-                    {equipoVisual.map((miembro) => (
-                      <div key={miembro.id} className="group relative rounded-lg border border-[#E0E0E0] p-4 hover:border-[#FFD600] transition-colors">
-                        <div className="flex items-center gap-3">
-                          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#F7F7F7]">
-                            <User className="h-5 w-5 text-[#5C5C5C]" />
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm font-medium text-[#1A1A1A] truncate">{miembro.nombre}</p>
-                            <p className="text-xs text-[#5C5C5C]">{miembro.rol}</p>
-                          </div>
-                          <button
-                            onClick={async () => {
-                              if (apiProyecto) {
-                                try {
-                                  await api.delete(`/proyectos/${id}/equipo/${miembro.id}`)
-                                  setApiEquipo(prev => prev.filter(m => m.idUsuario !== miembro.id))
-                                } catch (err) {
-                                  console.error(err)
-                                }
-                              } else {
-                                setEquipo(prev => prev.filter((_, i) => i !== miembro.id))
+                  </div>
+                  {/* Equipo dinámico */}
+                  {equipoVisual.map((miembro) => (
+                    <div key={miembro.id} className="group relative rounded-lg border border-[#E0E0E0] p-4 hover:border-[#FFD600] transition-colors">
+                      <div className="flex items-center gap-3">
+                        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#F7F7F7]">
+                          <User className="h-5 w-5 text-[#5C5C5C]" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium text-[#1A1A1A] truncate">{miembro.nombre}</p>
+                          <p className="text-xs text-[#5C5C5C]">{miembro.rol}</p>
+                        </div>
+                        <button
+                          onClick={async () => {
+                            if (apiProyecto) {
+                              try {
+                                await api.delete(`/proyectos/${id}/equipo/${miembro.id}`)
+                                setApiEquipo(prev => prev.filter(m => m.idUsuario !== miembro.id))
+                              } catch (err) {
+                                console.error(err)
                               }
-                            }}
-                            className="opacity-0 group-hover:opacity-100 transition-opacity flex h-7 w-7 items-center justify-center rounded-full text-[#C8102E] hover:bg-[#C8102E]/10"
-                            title="Eliminar miembro"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </button>
+                            } else {
+                              setEquipo(prev => prev.filter((_, i) => i !== miembro.id))
+                            }
+                          }}
+                          className="opacity-0 group-hover:opacity-100 transition-opacity flex h-7 w-7 items-center justify-center rounded-full text-[#C8102E] hover:bg-[#C8102E]/10"
+                          title="Eliminar miembro"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                {equipo.length === 0 && (
+                  <p className="mt-4 text-center text-sm text-[#5C5C5C]">No hay miembros en el equipo. Agrega uno.</p>
+                )}
+              </div>
+            )}
+
+            {/* Bitácora Tab */}
+            {activeTab === "bitacora" && (
+              <div className="p-6">
+                <div className="mb-4 flex items-center gap-2">
+                  <h3 className="text-sm font-bold uppercase tracking-wide text-[#5C5C5C]">
+                    Historial de Cambios
+                  </h3>
+                  <MockDataTag />
+                </div>
+                {bitacora.length > 0 ? (
+                  <div className="space-y-4">
+                    {bitacora.map(entry => (
+                      <div key={entry.id} className="flex gap-4 rounded-lg border border-[#E0E0E0] p-4">
+                        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#F7F7F7]">
+                          <Clock className="h-4 w-4 text-[#5C5C5C]" />
+                        </div>
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-medium text-[#1A1A1A]">{entry.usuario}</span>
+                            <span className="text-xs text-[#5C5C5C]">•</span>
+                            <span className="text-xs text-[#5C5C5C]">{entry.accion}</span>
+                          </div>
+                          <p className="text-sm text-[#5C5C5C] mt-1">{entry.descripcion}</p>
+                          <p className="text-xs text-[#5C5C5C] mt-2">{entry.fecha}</p>
                         </div>
                       </div>
                     ))}
                   </div>
-                  {equipo.length === 0 && (
-                    <p className="mt-4 text-center text-sm text-[#5C5C5C]">No hay miembros en el equipo. Agrega uno.</p>
-                  )}
-                </div>
-              )}
-
-              {/* Bitácora Tab */}
-              {activeTab === "bitacora" && (
-                <div className="p-6">
-                  <div className="mb-4 flex items-center gap-2">
-                    <h3 className="text-sm font-bold uppercase tracking-wide text-[#5C5C5C]">
-                      Historial de Cambios
-                    </h3>
-                    <MockDataTag />
-                  </div>
-                  {bitacora.length > 0 ? (
-                    <div className="space-y-4">
-                      {bitacora.map(entry => (
-                        <div key={entry.id} className="flex gap-4 rounded-lg border border-[#E0E0E0] p-4">
-                          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#F7F7F7]">
-                            <Clock className="h-4 w-4 text-[#5C5C5C]" />
-                          </div>
-                          <div className="flex-1">
-                            <div className="flex items-center gap-2">
-                              <span className="text-sm font-medium text-[#1A1A1A]">{entry.usuario}</span>
-                              <span className="text-xs text-[#5C5C5C]">•</span>
-                              <span className="text-xs text-[#5C5C5C]">{entry.accion}</span>
-                            </div>
-                            <p className="text-sm text-[#5C5C5C] mt-1">{entry.descripcion}</p>
-                            <p className="text-xs text-[#5C5C5C] mt-2">{entry.fecha}</p>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="text-center py-8 text-sm text-[#5C5C5C]">
-                      No hay registros en la bitácora.
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Sidebar */}
-          <div className="space-y-4">
-            {/* Info card */}
-            <div className="rounded-lg border border-[#E0E0E0] bg-white p-5 shadow-sm">
-              <h3 className="text-sm font-bold uppercase tracking-wide text-[#5C5C5C] mb-4">
-                Información
-              </h3>
-              <div className="space-y-4">
-                <div className="flex items-start gap-3">
-                  <User className="h-4 w-4 text-[#5C5C5C] mt-0.5" />
-                  <div>
-                    <p className="text-xs text-[#5C5C5C]">Responsable</p>
-                    <p className="text-sm font-medium text-[#1A1A1A]">{proyecto.responsable}</p>
-                  </div>
-                </div>
-                <div className="flex items-start gap-3">
-                  <Calendar className="h-4 w-4 text-[#5C5C5C] mt-0.5" />
-                  <div>
-                    <p className="text-xs text-[#5C5C5C]">Periodo</p>
-                    <p className="text-sm text-[#1A1A1A]">
-                      {new Date(proyecto.fechaInicio).toLocaleDateString("es-PE")} - {new Date(proyecto.fechaFin).toLocaleDateString("es-PE")}
-                    </p>
-                  </div>
-                </div>
-                <div className="flex items-start gap-3">
-                  <Clock className="h-4 w-4 text-[#5C5C5C] mt-0.5" />
-                  <div>
-                    <p className="text-xs text-[#5C5C5C]">Días restantes</p>
-                    <p className={`text-sm font-semibold ${
-                      diasRestantes < 30 ? "text-[#C8102E]" :
-                      diasRestantes < 90 ? "text-[#F57C00]" : "text-[#2E7D32]"
-                    }`}>
-                      {diasRestantes > 0 ? `${diasRestantes} días` : "Vencido"}
-                    </p>
-                  </div>
-                </div>
-                {proyecto.presupuesto && (
-                  <div className="flex items-start gap-3">
-                    <DollarSign className="h-4 w-4 text-[#5C5C5C] mt-0.5" />
-                    <div>
-                      <p className="text-xs text-[#5C5C5C]">Presupuesto</p>
-                      <p className="text-sm font-medium text-[#1A1A1A]">
-                        S/ {proyecto.presupuesto.toLocaleString("es-PE")}
-                      </p>
-                    </div>
+                ) : (
+                  <div className="text-center py-8 text-sm text-[#5C5C5C]">
+                    No hay registros en la bitácora.
                   </div>
                 )}
-                {proyecto.fuentesDonantes && proyecto.fuentesDonantes.length > 0 && (
-                  <div className="flex items-start gap-3 border-t border-[#E0E0E0] pt-4 mt-4">
-                    <Building2 className="h-4 w-4 text-[#5C5C5C] mt-0.5" />
-                    <div className="w-full">
-                      <p className="text-xs text-[#5C5C5C] mb-2">Fuentes Donantes</p>
-                      <div className="space-y-2">
-                        {proyecto.fuentesDonantes.map((fuente, idx) => (
-                          <div key={idx} className="flex items-center justify-between bg-[#F7F7F7] border border-[#E0E0E0] rounded-md px-3 py-2">
-                            <span className="text-sm font-medium text-[#1A1A1A]">{fuente.nombre}</span>
-                            <Link href={fuente.contratoUrl} className="text-[#C9A42B] hover:text-[#FFD600] flex items-center gap-1 text-xs font-medium bg-white px-2 py-1 rounded shadow-sm border border-[#E0E0E0]" title="Ver contrato">
-                              <FileText className="h-3 w-3" /> Contrato
-                            </Link>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Progress card */}
-            <div className="rounded-lg border border-[#E0E0E0] bg-white p-5 shadow-sm">
-              <h3 className="text-sm font-bold uppercase tracking-wide text-[#5C5C5C] mb-4">
-                Avance
-              </h3>
-              <div className="text-center mb-4">
-                <span className="text-4xl font-bold text-[#1A1A1A]">{proyecto.avance}%</span>
-              </div>
-              <ProgressBar value={proyecto.avance} showLabel={false} size="lg" />
-            </div>
-
-            {/* Alerts card */}
-            {proyecto.estado === "En riesgo" && (
-              <div className="rounded-lg border border-[#C8102E]/20 bg-[#C8102E]/5 p-5">
-                <div className="flex items-center gap-2 text-[#C8102E] mb-2">
-                  <AlertTriangle className="h-4 w-4" />
-                  <h3 className="text-sm font-bold">Alertas Activas</h3>
-                </div>
-                <ul className="space-y-2 text-sm text-[#C8102E]">
-                  <li>• Actividades con retraso</li>
-                  <li>• Requiere atención inmediata</li>
-                </ul>
               </div>
             )}
           </div>
         </div>
+
+        {/* Sidebar */}
+        <div className="space-y-4">
+          {/* Info card */}
+          <div className="rounded-lg border border-[#E0E0E0] bg-white p-5 shadow-sm">
+            <h3 className="text-sm font-bold uppercase tracking-wide text-[#5C5C5C] mb-4">
+              Información
+            </h3>
+            <div className="space-y-4">
+              <div className="flex items-start gap-3">
+                <User className="h-4 w-4 text-[#5C5C5C] mt-0.5" />
+                <div>
+                  <p className="text-xs text-[#5C5C5C]">Responsable</p>
+                  <p className="text-sm font-medium text-[#1A1A1A]">{proyecto.responsable}</p>
+                </div>
+              </div>
+              <div className="flex items-start gap-3">
+                <Calendar className="h-4 w-4 text-[#5C5C5C] mt-0.5" />
+                <div>
+                  <p className="text-xs text-[#5C5C5C]">Periodo</p>
+                  <p className="text-sm text-[#1A1A1A]">
+                    {new Date(proyecto.fechaInicio).toLocaleDateString("es-PE")} - {new Date(proyecto.fechaFin).toLocaleDateString("es-PE")}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-start gap-3">
+                <Clock className="h-4 w-4 text-[#5C5C5C] mt-0.5" />
+                <div>
+                  <p className="text-xs text-[#5C5C5C]">Días restantes</p>
+                  <p className={`text-sm font-semibold ${diasRestantes < 30 ? "text-[#C8102E]" :
+                      diasRestantes < 90 ? "text-[#F57C00]" : "text-[#2E7D32]"
+                    }`}>
+                    {diasRestantes > 0 ? `${diasRestantes} días` : "Vencido"}
+                  </p>
+                </div>
+              </div>
+              {proyecto.presupuesto && (
+                <div className="flex items-start gap-3">
+                  <DollarSign className="h-4 w-4 text-[#5C5C5C] mt-0.5" />
+                  <div>
+                    <p className="text-xs text-[#5C5C5C]">Presupuesto</p>
+                    <p className="text-sm font-medium text-[#1A1A1A]">
+                      S/ {proyecto.presupuesto.toLocaleString("es-PE")}
+                    </p>
+                  </div>
+                </div>
+              )}
+              {proyecto.fuentesDonantes && proyecto.fuentesDonantes.length > 0 && (
+                <div className="flex items-start gap-3 border-t border-[#E0E0E0] pt-4 mt-4">
+                  <Building2 className="h-4 w-4 text-[#5C5C5C] mt-0.5" />
+                  <div className="w-full">
+                    <p className="text-xs text-[#5C5C5C] mb-2">Fuentes Donantes</p>
+                    <div className="space-y-2">
+                      {proyecto.fuentesDonantes.map((fuente, idx) => (
+                        <div key={idx} className="flex items-center justify-between bg-[#F7F7F7] border border-[#E0E0E0] rounded-md px-3 py-2">
+                          <span className="text-sm font-medium text-[#1A1A1A]">{fuente.nombre}</span>
+                          <Link href={fuente.contratoUrl} className="text-[#C9A42B] hover:text-[#FFD600] flex items-center gap-1 text-xs font-medium bg-white px-2 py-1 rounded shadow-sm border border-[#E0E0E0]" title="Ver contrato">
+                            <FileText className="h-3 w-3" /> Contrato
+                          </Link>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Progress card */}
+          <div className="rounded-lg border border-[#E0E0E0] bg-white p-5 shadow-sm">
+            <h3 className="text-sm font-bold uppercase tracking-wide text-[#5C5C5C] mb-4">
+              Avance
+            </h3>
+            <div className="text-center mb-4">
+              <span className="text-4xl font-bold text-[#1A1A1A]">{proyecto.avance}%</span>
+            </div>
+            <ProgressBar value={proyecto.avance} showLabel={false} size="lg" />
+          </div>
+
+          {/* Alerts card */}
+          {proyecto.estado === "En riesgo" && (
+            <div className="rounded-lg border border-[#C8102E]/20 bg-[#C8102E]/5 p-5">
+              <div className="flex items-center gap-2 text-[#C8102E] mb-2">
+                <AlertTriangle className="h-4 w-4" />
+                <h3 className="text-sm font-bold">Alertas Activas</h3>
+              </div>
+              <ul className="space-y-2 text-sm text-[#C8102E]">
+                <li>• Actividades con retraso</li>
+                <li>• Requiere atención inmediata</li>
+              </ul>
+            </div>
+          )}
+        </div>
       </div>
-    </AppLayout>
+    </div>
+    </AppLayout >
   )
 }

@@ -175,7 +175,7 @@ export interface ProyectoCreate {
 
 // ----- Actividad y Subactividad -----
 
-export type EstadoActividad = "PENDIENTE" | "EN_CURSO" | "COMPLETADA" | "VENCIDA"
+export type EstadoActividad = "PENDIENTE" | "EN_CURSO" | "FINALIZADA" | "COMPLETADA" | "VENCIDA"
 
 export interface SubactividadArchivoResponse {
   id: number
@@ -213,6 +213,38 @@ export interface ActividadResponse {
   idProyecto: number
   idResponsables: number[]
   subactividades?: SubactividadResponse[]
+}
+
+export interface ActividadCreate {
+  nombre: string
+  descripcion?: string
+  fechaInicio?: string
+  fechaFin?: string
+  estado?: EstadoActividad
+  idProyecto: number
+  idResponsables?: number[]
+}
+
+// ----- Hito -----
+
+export type EstadoHito = "PENDIENTE" | "EN_CURSO" | "FINALIZADO"
+
+export interface HitoResponse {
+  id: number
+  nombre: string
+  descripcion: string | null
+  fechaClave: string
+  estado: EstadoHito
+  idProyecto: number
+  fechaCreacion?: string | null
+  fechaModificacion?: string | null
+}
+
+export interface HitoCreate {
+  nombre: string
+  descripcion?: string | null
+  fechaClave: string
+  estado: EstadoHito
 }
 
 // ----- Bitacora -----
