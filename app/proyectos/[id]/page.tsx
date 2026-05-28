@@ -702,7 +702,7 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                     "Activo": "EN_CURSO",
                     "En riesgo": "EN_CURSO",
                     "Suspendido": "SUSPENDIDO",
-                    "Cerrado": "COMPLETADO"
+                    "Cerrado": "FINALIZADO"
                   };
                   const rawEstado = formData.get("estado") as string;
                   const estadoValue = statusMap[rawEstado] || "PENDIENTE";
@@ -711,17 +711,17 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                     nombre: formData.get("nombre"),
                     descripcion: formData.get("descripcion"),
                     objetivoGeneral: apiProyecto.objetivoGeneral || "Sin objetivo",
-                    fechaInicio: apiProyecto.fechaInicio,
-                    fechaFinEstimada: apiProyecto.fechaFinEstimada || apiProyecto.fechaFin,
+                    fechaInicio: formData.get("fechaInicio") || apiProyecto.fechaInicio,
+                    fechaFinEstimada: formData.get("fechaFin") || apiProyecto.fechaFinEstimada || apiProyecto.fechaFin,
                     estado: estadoValue,
                     nivelPrioridad: apiProyecto.nivelPrioridad || 1,
                     porcentajeAvance: apiProyecto.porcentajeAvance,
                     presupuesto: parseFloat(formData.get("presupuesto") as string) || 0,
                     idMacroregion: null,
-                    idMacroregiones: [],
+                    idMacroregiones: apiProyecto.macroregiones?.map(m => m.id) || [],
                     idEjeTematico: apiProyecto.idEjeTematico || null,
                     idResponsablePrincipal: apiProyecto.idResponsablePrincipal || null,
-                    idTerritorios: []
+                    idTerritorios: apiProyecto.territorios?.map(t => t.id) || []
                   };
 
                   try {
@@ -741,16 +741,26 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                   <div className="grid gap-4 py-6">
                     <div className="grid gap-2">
                       <Label htmlFor="nombre">Nombre del Proyecto</Label>
-                      <Input id="nombre" defaultValue={proyecto.nombre} />
+                      <Input id="nombre" name="nombre" defaultValue={proyecto.nombre} required />
                     </div>
                     <div className="grid grid-cols-2 gap-4">
                       <div className="grid gap-2">
-                        <Label htmlFor="codigo">Código</Label>
-                        <Input id="codigo" defaultValue={proyecto.codigo} />
+                        <Label htmlFor="codigo">Código (Solo lectura)</Label>
+                        <Input id="codigo" defaultValue={proyecto.codigo} disabled />
                       </div>
                       <div className="grid gap-2">
                         <Label htmlFor="presupuesto">Presupuesto (S/)</Label>
-                        <Input id="presupuesto" type="number" defaultValue={proyecto.presupuesto} />
+                        <Input id="presupuesto" name="presupuesto" type="number" defaultValue={proyecto.presupuesto} />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="grid gap-2">
+                        <Label htmlFor="fechaInicio">Fecha de Inicio</Label>
+                        <Input id="fechaInicio" name="fechaInicio" type="date" defaultValue={proyecto.fechaInicio?.split('T')[0]} required />
+                      </div>
+                      <div className="grid gap-2">
+                        <Label htmlFor="fechaFin">Fecha de Fin</Label>
+                        <Input id="fechaFin" name="fechaFin" type="date" defaultValue={proyecto.fechaFin?.split('T')[0]} />
                       </div>
                     </div>
                     <div className="grid grid-cols-2 gap-4">
@@ -758,9 +768,10 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                         <Label>Macroregión</Label>
                         <div className="flex flex-col gap-2 rounded-md border border-[#E0E0E0] bg-[#FAFAFA] p-3">
                           {(["Todas", "Norte", "Centro", "Sur"] as const).map((region) => (
-                            <label key={region} className="flex items-center gap-2 cursor-pointer">
+                            <label key={region} className="flex items-center gap-2 cursor-pointer opacity-70">
                               <input
                                 type="checkbox"
+                                disabled
                                 className="h-4 w-4 rounded border-[#E0E0E0] accent-[#FFD600]"
                                 defaultChecked={
                                   region === "Todas" ||
