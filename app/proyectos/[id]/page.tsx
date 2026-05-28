@@ -10,12 +10,11 @@ import {
   getHitosByProyecto,
   getDocumentosByProyecto,
   getBitacoraByEntidad,
-  hitos as allHitos,
   actividades as allActividades
 } from "@/lib/data"
-import type { Proyecto as ProyectoMock } from "@/lib/data"
+import type { Hito as HitoMock, Proyecto as ProyectoMock } from "@/lib/data"
 import { api, ApiError } from "@/lib/api"
-import type { MacroregionRef, ProyectoResponse } from "@/lib/types"
+import type { EstadoHito, HitoCreate, HitoResponse, MacroregionRef, ProyectoResponse } from "@/lib/types"
 import { 
   ChevronRight,
   Pencil,
@@ -32,7 +31,6 @@ import {
   Clock,
   CheckCircle2,
   Circle,
-  XCircle,
   Trash2,
   UserPlus
 } from "lucide-react"
@@ -46,6 +44,17 @@ import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 
 type TabType = "resumen" | "actividades" | "hitos" | "informes" | "equipo" | "bitacora"
+type HitoEstadoUi = "Pendiente" | "En curso" | "Finalizado"
+type HitoDetalle = {
+  id: string
+  proyectoId: string
+  nombre: string
+  fecha: string
+  estado: HitoEstadoUi
+  descripcion: string
+  fuenteDatos: "api" | "mock" | "local"
+}
+type HitoForm = Omit<HitoDetalle, "id" | "proyectoId" | "fuenteDatos">
 type ProyectoDetalle = Omit<ProyectoMock, "macroregion" | "ejeTematico" | "estado"> & {
   macroregion: string
   macroregiones?: MacroregionRef[]
@@ -209,6 +218,62 @@ function getApiErrorMessage(error: unknown): string {
   return "No se pudo cargar la API del proyecto."
 }
 
+const hitoFormInicial: HitoForm = {
+  nombre: "",
+  fecha: "",
+  estado: "Pendiente",
+  descripcion: "",
+}
+
+function estadoHitoDesdeApi(estado: EstadoHito): HitoEstadoUi {
+  if (estado === "FINALIZADO") return "Finalizado"
+  if (estado === "EN_CURSO") return "En curso"
+  return "Pendiente"
+}
+
+function estadoHitoParaApi(estado: HitoEstadoUi): EstadoHito {
+  if (estado === "Finalizado") return "FINALIZADO"
+  if (estado === "En curso") return "EN_CURSO"
+  return "PENDIENTE"
+}
+
+function hitoDesdeApi(hito: HitoResponse): HitoDetalle {
+  return {
+    id: String(hito.id),
+    proyectoId: String(hito.idProyecto),
+    nombre: hito.nombre,
+    fecha: hito.fechaClave,
+    estado: estadoHitoDesdeApi(hito.estado),
+    descripcion: hito.descripcion ?? "",
+    fuenteDatos: "api",
+  }
+}
+
+function hitoDesdeMock(hito: HitoMock): HitoDetalle {
+  const estado =
+    hito.estado === "Completado"
+      ? "Finalizado"
+      : hito.estado === "Vencido"
+        ? "En curso"
+        : "Pendiente"
+
+  return {
+    ...hito,
+    estado,
+    descripcion: "",
+    fuenteDatos: "mock",
+  }
+}
+
+function payloadHito(form: HitoForm): HitoCreate {
+  return {
+    nombre: form.nombre.trim(),
+    fechaClave: form.fecha,
+    estado: estadoHitoParaApi(form.estado),
+    descripcion: form.descripcion.trim() || null,
+  }
+}
+
 function MockDataTag() {
   return (
     <span className="inline-flex items-center rounded-full border border-[#E0E0E0] bg-[#F7F7F7] px-2 py-0.5 text-[10px] font-medium normal-case tracking-normal text-[#5C5C5C]">
@@ -263,12 +328,15 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
 
   // State for hitos
   const hitosData = getHitosByProyecto(id)
-  const [hitosState, setHitosState] = useState(
-    () => hitosData.map(h => ({ ...h }))
+  const [hitosState, setHitosState] = useState<HitoDetalle[]>(
+    () => hitosData.map(hitoDesdeMock)
   )
+  const [hitosLoading, setHitosLoading] = useState(true)
+  const [hitosError, setHitosError] = useState<string | null>(null)
+  const [hitoSubmitting, setHitoSubmitting] = useState(false)
   const [addHitoOpen, setAddHitoOpen] = useState(false)
-  const [editHito, setEditHito] = useState<typeof hitosState[0] | null>(null)
-  const [hitoForm, setHitoForm] = useState({ nombre: "", fecha: "", estado: "Pendiente" as "Completado" | "Pendiente" | "Vencido" })
+  const [editHito, setEditHito] = useState<HitoDetalle | null>(null)
+  const [hitoForm, setHitoForm] = useState<HitoForm>(hitoFormInicial)
 
   useEffect(() => {
     let cancelled = false
@@ -299,6 +367,111 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
       cancelled = true
     }
   }, [id])
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function cargarHitos() {
+      setHitosLoading(true)
+      setHitosError(null)
+      setHitosState(getHitosByProyecto(id).map(hitoDesdeMock))
+      try {
+        const data = await api.get<HitoResponse[] | { content: HitoResponse[] }>(`/proyectos/${id}/hitos`)
+        if (!cancelled) {
+          const hitosApi = Array.isArray(data) ? data : data.content
+          setHitosState(hitosApi.map(hitoDesdeApi))
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setHitosError(getApiErrorMessage(error))
+        }
+      } finally {
+        if (!cancelled) {
+          setHitosLoading(false)
+        }
+      }
+    }
+
+    cargarHitos()
+
+    return () => {
+      cancelled = true
+    }
+  }, [id])
+
+  const abrirNuevoHito = () => {
+    setHitoForm(hitoFormInicial)
+    setEditHito(null)
+    setHitosError(null)
+    setAddHitoOpen(true)
+  }
+
+  const abrirEditarHito = (hito: HitoDetalle) => {
+    setEditHito(hito)
+    setHitoForm({
+      nombre: hito.nombre,
+      fecha: hito.fecha,
+      estado: hito.estado,
+      descripcion: hito.descripcion,
+    })
+    setHitosError(null)
+    setAddHitoOpen(true)
+  }
+
+  const guardarHito = async () => {
+    if (!hitoForm.nombre.trim() || !hitoForm.fecha) {
+      setHitosError("Completa el nombre y la fecha programada del hito")
+      return
+    }
+
+    setHitoSubmitting(true)
+    setHitosError(null)
+
+    try {
+      if (editHito) {
+        if (editHito.fuenteDatos === "api") {
+          const actualizado = await api.put<HitoResponse>(
+            `/proyectos/${id}/hitos/${editHito.id}`,
+            payloadHito(hitoForm),
+          )
+          setHitosState(prev => prev.map(h => h.id === editHito.id ? hitoDesdeApi(actualizado) : h))
+        } else {
+          setHitosState(prev => prev.map(h => h.id === editHito.id ? { ...h, ...hitoForm, fuenteDatos: h.fuenteDatos } : h))
+        }
+      } else {
+        try {
+          const creado = await api.post<HitoResponse>(`/proyectos/${id}/hitos`, payloadHito(hitoForm))
+          setHitosState(prev => [...prev, hitoDesdeApi(creado)])
+        } catch (error) {
+          const newId = `hito-${Date.now()}`
+          setHitosState(prev => [...prev, { id: newId, proyectoId: id, ...hitoForm, fuenteDatos: "local" }])
+          setHitosError(`Hito guardado solo en esta sesion: ${getApiErrorMessage(error)}`)
+        }
+      }
+
+      setAddHitoOpen(false)
+      setEditHito(null)
+      setHitoForm(hitoFormInicial)
+    } catch (error) {
+      setHitosError(getApiErrorMessage(error))
+    } finally {
+      setHitoSubmitting(false)
+    }
+  }
+
+  const eliminarHito = async (hito: HitoDetalle) => {
+    const previous = hitosState
+    setHitosState(prev => prev.filter(item => item.id !== hito.id))
+
+    if (hito.fuenteDatos !== "api") return
+
+    try {
+      await api.delete<void>(`/proyectos/${id}/hitos/${hito.id}`)
+    } catch (error) {
+      setHitosState(previous)
+      setHitosError(getApiErrorMessage(error))
+    }
+  }
   
   if (!proyecto && apiLoading) {
     return (
@@ -359,7 +532,6 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
       hito.alertaVencimiento?.tipo === "vence-hoy",
   )
 
-  const hitos = hitosData
   const documentos = getDocumentosByProyecto(id)
   const bitacora = getBitacoraByEntidad(id)
 
@@ -980,24 +1152,28 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                       <h3 className="text-sm font-bold uppercase tracking-wide text-[#5C5C5C]">
                         Cronograma e Hitos
                       </h3>
-                      <MockDataTag />
+                      {hitosState.some(hito => hito.fuenteDatos !== "api") && <MockDataTag />}
+                      {hitosLoading && (
+                        <span className="text-xs text-[#5C5C5C]">Cargando hitos...</span>
+                      )}
                     </div>
                     <button
-                      onClick={() => {
-                        setHitoForm({ nombre: "", fecha: "", estado: "Pendiente" })
-                        setEditHito(null)
-                        setAddHitoOpen(true)
-                      }}
+                      onClick={abrirNuevoHito}
                       className="flex items-center gap-2 rounded-lg bg-[#FFD600] px-3 py-1.5 text-xs font-bold text-[#1A1A1A] hover:bg-[#C9A42B] transition-colors"
                     >
                       <Plus className="h-3.5 w-3.5" />
                       Agregar hito
                     </button>
                   </div>
+                  {hitosError && (
+                    <div className="mb-4 rounded-lg border border-[#C8102E]/20 bg-[#C8102E]/5 px-4 py-3 text-sm text-[#C8102E]">
+                      {hitosError}
+                    </div>
+                  )}
 
                   {/* Dialog agregar / editar hito */}
                   <Dialog open={addHitoOpen} onOpenChange={setAddHitoOpen}>
-                    <DialogContent className="sm:max-w-sm">
+                    <DialogContent className="overflow-y-auto sm:max-w-lg">
                       <DialogHeader>
                         <DialogTitle>{editHito ? "Editar Hito" : "Nuevo Hito"}</DialogTitle>
                         <DialogDescription>
@@ -1015,7 +1191,18 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                           />
                         </div>
                         <div className="grid gap-2">
-                          <Label htmlFor="hito-fecha">Fecha</Label>
+                          <Label htmlFor="hito-descripcion">Descripcion</Label>
+                          <Textarea
+                            id="hito-descripcion"
+                            placeholder="Objetivo o alcance del hito"
+                            value={hitoForm.descripcion}
+                            onChange={e => setHitoForm(f => ({ ...f, descripcion: e.target.value }))}
+                            rows={3}
+                            className="resize-none"
+                          />
+                        </div>
+                        <div className="grid gap-2">
+                          <Label htmlFor="hito-fecha">Fecha clave</Label>
                           <Input
                             id="hito-fecha"
                             type="date"
@@ -1027,33 +1214,25 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                           <Label htmlFor="hito-estado">Estado</Label>
                           <Select
                             value={hitoForm.estado}
-                            onValueChange={v => setHitoForm(f => ({ ...f, estado: v as "Completado" | "Pendiente" | "Vencido" }))}
+                            onValueChange={v => setHitoForm(f => ({ ...f, estado: v as HitoEstadoUi }))}
                           >
                             <SelectTrigger id="hito-estado"><SelectValue /></SelectTrigger>
                             <SelectContent>
                               <SelectItem value="Pendiente">Pendiente</SelectItem>
-                              <SelectItem value="Completado">Completado</SelectItem>
-                              <SelectItem value="Vencido">Vencido</SelectItem>
+                              <SelectItem value="En curso">En curso</SelectItem>
+                              <SelectItem value="Finalizado">Finalizado</SelectItem>
                             </SelectContent>
                           </Select>
                         </div>
                       </div>
                       <DialogFooter>
-                        <Button variant="outline" onClick={() => setAddHitoOpen(false)}>Cancelar</Button>
+                        <Button variant="outline" onClick={() => setAddHitoOpen(false)} disabled={hitoSubmitting}>Cancelar</Button>
                         <Button
                           className="bg-[#FFD600] text-[#1A1A1A] hover:bg-[#C9A42B]"
-                          onClick={() => {
-                            if (!hitoForm.nombre.trim() || !hitoForm.fecha) return
-                            if (editHito) {
-                              setHitosState(prev => prev.map(h => h.id === editHito.id ? { ...h, ...hitoForm } : h))
-                            } else {
-                              const newId = `hito-${Date.now()}`
-                              setHitosState(prev => [...prev, { id: newId, proyectoId: id, ...hitoForm }])
-                            }
-                            setAddHitoOpen(false)
-                          }}
+                          onClick={guardarHito}
+                          disabled={hitoSubmitting}
                         >
-                          {editHito ? "Guardar cambios" : "Crear hito"}
+                          {hitoSubmitting ? "Guardando..." : editHito ? "Guardar cambios" : "Crear hito"}
                         </Button>
                       </DialogFooter>
                     </DialogContent>
@@ -1097,15 +1276,12 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                         {hitosConAlertas.map((hito) => (
                           <div key={hito.id} className="relative flex gap-4 pl-10 group">
                             <div className={`absolute left-2 top-1 flex h-5 w-5 items-center justify-center rounded-full ${
-                              hito.estado === "Completado" ? "bg-[#2E7D32]" :
-                              hito.estado === "Vencido" || hito.alertaVencimiento?.tipo === "vencido" ? "bg-[#C8102E]" :
-                              hito.alertaVencimiento ? "bg-[#F57C00]" : "bg-[#E0E0E0]"
+                              hito.estado === "Finalizado" ? "bg-[#2E7D32]" :
+                              hito.estado === "En curso" ? "bg-[#F57C00]" : "bg-[#E0E0E0]"
                             }`}>
-                              {hito.estado === "Completado" ? (
+                              {hito.estado === "Finalizado" ? (
                                 <CheckCircle2 className="h-3 w-3 text-white" />
-                              ) : hito.estado === "Vencido" || hito.alertaVencimiento?.tipo === "vencido" ? (
-                                <XCircle className="h-3 w-3 text-white" />
-                              ) : hito.alertaVencimiento ? (
+                              ) : hito.estado === "En curso" ? (
                                 <Clock className="h-3 w-3 text-white" />
                               ) : (
                                 <Circle className="h-3 w-3 text-[#5C5C5C]" />
@@ -1128,36 +1304,30 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                                       day: "numeric"
                                     })}
                                   </p>
-                                  {hito.alertaVencimiento && (
-                                    <span className={`mt-2 inline-flex w-fit items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-semibold ${
-                                      hito.alertaVencimiento.tipo === "vencido"
-                                        ? "border-[#C8102E]/20 bg-[#C8102E]/10 text-[#C8102E]"
-                                        : "border-[#F57C00]/20 bg-[#F57C00]/10 text-[#F57C00]"
-                                    }`}>
-                                      {hito.alertaVencimiento.tipo === "vencido" ? (
-                                        <AlertTriangle className="h-3 w-3" />
-                                      ) : (
-                                        <Clock className="h-3 w-3" />
-                                      )}
-                                      {hito.alertaVencimiento.label}
-                                    </span>
+                                  {hito.descripcion && (
+                                    <p className="mt-3 text-sm leading-relaxed text-[#5C5C5C]">
+                                      {hito.descripcion}
+                                    </p>
                                   )}
+                                  <div className="mt-3 flex flex-wrap gap-2 text-xs text-[#5C5C5C]">
+                                    {hito.fuenteDatos !== "api" && (
+                                      <span className="inline-flex items-center rounded-full bg-[#F7F7F7] px-2.5 py-1">
+                                        {hito.fuenteDatos === "local" ? "Sesion local" : "Mock referencial"}
+                                      </span>
+                                    )}
+                                  </div>
                                 </div>
                                 <div className="flex items-center gap-2 shrink-0">
                                   <StatusBadge estado={hito.estado} />
                                   <button
-                                    onClick={() => {
-                                      setEditHito(hito)
-                                      setHitoForm({ nombre: hito.nombre, fecha: hito.fecha, estado: hito.estado })
-                                      setAddHitoOpen(true)
-                                    }}
+                                    onClick={() => abrirEditarHito(hito)}
                                     className="opacity-0 group-hover:opacity-100 transition-opacity flex h-7 w-7 items-center justify-center rounded-full text-[#5C5C5C] hover:bg-[#F7F7F7]"
                                     title="Editar hito"
                                   >
                                     <Pencil className="h-3.5 w-3.5" />
                                   </button>
                                   <button
-                                    onClick={() => setHitosState(prev => prev.filter(h => h.id !== hito.id))}
+                                    onClick={() => eliminarHito(hito)}
                                     className="opacity-0 group-hover:opacity-100 transition-opacity flex h-7 w-7 items-center justify-center rounded-full text-[#C8102E] hover:bg-[#C8102E]/10"
                                     title="Eliminar hito"
                                   >

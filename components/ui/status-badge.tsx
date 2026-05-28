@@ -21,12 +21,14 @@ export function StatusBadge({ estado, status, className }: StatusBadgeProps) {
       case "Publicado":
       case "Completada":
       case "Completado":
+      case "Finalizado":
       case "EN_CURSO":
       case "FINALIZADO":
         return "bg-[#2E7D32]/10 text-[#2E7D32] border-[#2E7D32]/20"
       case "En riesgo":
       case "En revisión":
       case "En progreso":
+      case "En curso":
         return "bg-[#F57C00]/10 text-[#F57C00] border-[#F57C00]/20"
       case "Vencido":
       case "Vencida":
