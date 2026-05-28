@@ -178,9 +178,11 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
   const [equipo, setEquipo] = useState<{ nombre: string; rol: string }[]>(
     () => (mockProyecto?.equipo ?? []).map(nombre => ({ nombre, rol: "Equipo T\u00e9cnico" }))
   )
+  const [apiEquipo, setApiEquipo] = useState<{ idUsuario: number; rolEnProyecto: string }[]>([])
   const [nuevoMiembroNombre, setNuevoMiembroNombre] = useState("")
   const [nuevoMiembroRol, setNuevoMiembroRol] = useState("Equipo T\u00e9cnico")
   const [addMemberOpen, setAddMemberOpen] = useState(false)
+  const [editModalOpen, setEditModalOpen] = useState(false)
 
   // State for hitos
   const hitosData = getHitosByProyecto(id)
@@ -201,16 +203,19 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
         const data = await api.get<ProyectoResponse>(`/proyectos/${id}`)
         let acts: ActividadResponse[] = []
         let users: PageResponse<UsuarioResponse> = { content: [], page: 0, size: 0, totalElements: 0, totalPages: 0, first: true, last: true }
+        let teamData: { idUsuario: number; rolEnProyecto: string }[] = []
         try {
           acts = await api.get<ActividadResponse[]>(`/proyectos/${id}/actividades`)
           users = await api.get<PageResponse<UsuarioResponse>>(`/usuarios`)
+          teamData = await api.get<{ idUsuario: number; rolEnProyecto: string }[]>(`/proyectos/${id}/equipo`)
         } catch (e) {
-          console.error("Error al cargar actividades o usuarios", e)
+          console.error("Error al cargar actividades, usuarios o equipo", e)
         }
         if (!cancelled) {
           setApiProyecto(data)
           setApiActividades(acts)
           setUsuariosSistema(users.content)
+          setApiEquipo(teamData)
         }
       } catch (error) {
         if (!cancelled) {
@@ -285,9 +290,19 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
     }
   });
 
-  const hitos = hitosData
   const documentos = getDocumentosByProyecto(id)
   const bitacora = getBitacoraByEntidad(id)
+
+  const equipoVisual = apiProyecto 
+    ? apiEquipo.map(miembro => {
+        const user = usuariosSistema.find(u => u.id === miembro.idUsuario)
+        return { 
+          id: miembro.idUsuario,
+          nombre: user ? `${user.nombres} ${user.apellidos}` : `Usuario ${miembro.idUsuario}`, 
+          rol: miembro.rolEnProyecto 
+        }
+      })
+    : equipo.map((e, idx) => ({ id: idx, nombre: e.nombre, rol: e.rol }))
 
   // Calculate days remaining
   const fechaFin = new Date(proyecto.fechaFin)
@@ -327,7 +342,7 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <Dialog>
+            <Dialog open={editModalOpen} onOpenChange={setEditModalOpen}>
               <DialogTrigger asChild>
                 <button className="flex items-center gap-2 rounded-lg border border-[#E0E0E0] bg-white px-4 py-2 text-sm font-medium text-[#5C5C5C] hover:bg-[#F7F7F7]">
                   <Pencil className="h-4 w-4" />
@@ -335,6 +350,47 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                 </button>
               </DialogTrigger>
               <DialogContent className="overflow-y-auto sm:max-w-md">
+                <form onSubmit={async (e) => {
+                  e.preventDefault();
+                  if (!apiProyecto) {
+                    setEditModalOpen(false);
+                    return;
+                  }
+                  const formData = new FormData(e.currentTarget);
+                  const statusMap: Record<string, string> = {
+                    "Activo": "EN_CURSO",
+                    "En riesgo": "EN_CURSO",
+                    "Suspendido": "SUSPENDIDO",
+                    "Cerrado": "COMPLETADO"
+                  };
+                  const rawEstado = formData.get("estado") as string;
+                  const estadoValue = statusMap[rawEstado] || "PENDIENTE";
+                  
+                  const payload = {
+                    nombre: formData.get("nombre"),
+                    descripcion: formData.get("descripcion"),
+                    objetivoGeneral: apiProyecto.objetivoGeneral || "Sin objetivo",
+                    fechaInicio: apiProyecto.fechaInicio,
+                    fechaFinEstimada: apiProyecto.fechaFinEstimada || apiProyecto.fechaFin,
+                    estado: estadoValue,
+                    nivelPrioridad: apiProyecto.nivelPrioridad || 1,
+                    porcentajeAvance: apiProyecto.porcentajeAvance,
+                    presupuesto: parseFloat(formData.get("presupuesto") as string) || 0,
+                    idMacroregion: null,
+                    idMacroregiones: [],
+                    idEjeTematico: apiProyecto.idEjeTematico || null,
+                    idResponsablePrincipal: apiProyecto.idResponsablePrincipal || null,
+                    idTerritorios: []
+                  };
+
+                  try {
+                    const data = await api.put<ProyectoResponse>(`/proyectos/${id}`, payload);
+                    setApiProyecto(data);
+                    setEditModalOpen(false);
+                  } catch (err) {
+                    console.error("Error updating project", err);
+                  }
+                }}>
                 <DialogHeader>
                   <DialogTitle>Editar Proyecto</DialogTitle>
                   <DialogDescription>
@@ -377,7 +433,7 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                     </div>
                     <div className="grid gap-2">
                       <Label>Estado</Label>
-                      <Select defaultValue={proyecto.estado}>
+                      <Select name="estado" defaultValue={proyecto.estado}>
                         <SelectTrigger><SelectValue placeholder="Seleccione" /></SelectTrigger>
                         <SelectContent>
                           <SelectItem value="Activo">Activo</SelectItem>
@@ -390,17 +446,14 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                   </div>
                   <div className="grid gap-2">
                     <Label htmlFor="desc">Descripción</Label>
-                    <Textarea id="desc" defaultValue={proyecto.descripcion} rows={4} className="resize-none" />
+                    <Textarea id="desc" name="descripcion" defaultValue={proyecto.descripcion} rows={4} className="resize-none" />
                   </div>
                 </div>
                 <DialogFooter>
-                  <DialogClose asChild>
-                    <Button variant="outline">Cancelar</Button>
-                  </DialogClose>
-                  <DialogClose asChild>
-                    <Button className="bg-[#FFD600] text-[#1A1A1A] hover:bg-[#C9A42B]">Guardar</Button>
-                  </DialogClose>
+                  <Button variant="outline" type="button" onClick={() => setEditModalOpen(false)}>Cancelar</Button>
+                  <Button type="submit" className="bg-[#FFD600] text-[#1A1A1A] hover:bg-[#C9A42B]">Guardar</Button>
                 </DialogFooter>
+                </form>
               </DialogContent>
             </Dialog>
             <button className="flex items-center gap-2 rounded-lg border border-[#E0E0E0] bg-white px-4 py-2 text-sm font-medium text-[#5C5C5C] hover:bg-[#F7F7F7]">
@@ -1106,7 +1159,6 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                       <h3 className="text-sm font-bold uppercase tracking-wide text-[#5C5C5C]">
                         Equipo del Proyecto
                       </h3>
-                      <MockDataTag />
                     </div>
                     <Dialog open={addMemberOpen} onOpenChange={setAddMemberOpen}>
                       <DialogTrigger asChild>
@@ -1120,15 +1172,49 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                           <DialogTitle>Agregar Miembro</DialogTitle>
                           <DialogDescription>Añade un nuevo integrante al equipo del proyecto.</DialogDescription>
                         </DialogHeader>
+                        <form onSubmit={async e => {
+                          e.preventDefault()
+                          if (!nuevoMiembroNombre || !nuevoMiembroRol) return
+                          
+                          if (apiProyecto) {
+                            try {
+                              await api.post(`/proyectos/${id}/equipo`, { idUsuario: parseInt(nuevoMiembroNombre), rolEnProyecto: nuevoMiembroRol })
+                              const team = await api.get<any[]>(`/proyectos/${id}/equipo`)
+                              setApiEquipo(team)
+                              setNuevoMiembroNombre("")
+                              setNuevoMiembroRol("Equipo Técnico")
+                              setAddMemberOpen(false)
+                            } catch(err) {
+                              console.error(err)
+                            }
+                          } else {
+                            setEquipo(prev => [...prev, { nombre: nuevoMiembroNombre.trim(), rol: nuevoMiembroRol }])
+                            setNuevoMiembroNombre("")
+                            setNuevoMiembroRol("Equipo Técnico")
+                            setAddMemberOpen(false)
+                          }
+                        }}>
                         <div className="grid gap-4 py-4">
                           <div className="grid gap-2">
-                            <Label htmlFor="miembro-nombre">Nombre completo</Label>
-                            <Input
-                              id="miembro-nombre"
-                              placeholder="Ej. Juan Pérez"
-                              value={nuevoMiembroNombre}
-                              onChange={e => setNuevoMiembroNombre(e.target.value)}
-                            />
+                            <Label htmlFor="miembro-nombre">Miembro <span className="text-red-500">*</span></Label>
+                            {apiProyecto ? (
+                              <Select value={nuevoMiembroNombre} onValueChange={setNuevoMiembroNombre} required>
+                                <SelectTrigger id="miembro-nombre"><SelectValue placeholder="Seleccione un usuario" /></SelectTrigger>
+                                <SelectContent>
+                                  {usuariosSistema.map(u => (
+                                    <SelectItem key={u.id} value={String(u.id)}>{u.nombres} {u.apellidos}</SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            ) : (
+                              <Input
+                                id="miembro-nombre"
+                                placeholder="Ej. Juan Pérez"
+                                value={nuevoMiembroNombre}
+                                onChange={e => setNuevoMiembroNombre(e.target.value)}
+                                required
+                              />
+                            )}
                           </div>
                           <div className="grid gap-2">
                             <Label htmlFor="miembro-rol">Rol en el proyecto</Label>
@@ -1147,22 +1233,13 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                         </div>
                         <DialogFooter>
                           <DialogClose asChild>
-                            <Button variant="outline">Cancelar</Button>
+                            <Button variant="outline" type="button">Cancelar</Button>
                           </DialogClose>
-                          <Button
-                            className="bg-[#FFD600] text-[#1A1A1A] hover:bg-[#C9A42B]"
-                            onClick={() => {
-                              if (nuevoMiembroNombre.trim()) {
-                                setEquipo(prev => [...prev, { nombre: nuevoMiembroNombre.trim(), rol: nuevoMiembroRol }])
-                                setNuevoMiembroNombre("")
-                                setNuevoMiembroRol("Equipo Técnico")
-                                setAddMemberOpen(false)
-                              }
-                            }}
-                          >
+                          <Button type="submit" className="bg-[#FFD600] text-[#1A1A1A] hover:bg-[#C9A42B]">
                             Agregar
                           </Button>
                         </DialogFooter>
+                        </form>
                       </DialogContent>
                     </Dialog>
                   </div>
@@ -1180,8 +1257,8 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                       </div>
                     </div>
                     {/* Equipo dinámico */}
-                    {equipo.map((miembro, idx) => (
-                      <div key={idx} className="group relative rounded-lg border border-[#E0E0E0] p-4 hover:border-[#FFD600] transition-colors">
+                    {equipoVisual.map((miembro) => (
+                      <div key={miembro.id} className="group relative rounded-lg border border-[#E0E0E0] p-4 hover:border-[#FFD600] transition-colors">
                         <div className="flex items-center gap-3">
                           <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#F7F7F7]">
                             <User className="h-5 w-5 text-[#5C5C5C]" />
@@ -1191,7 +1268,18 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                             <p className="text-xs text-[#5C5C5C]">{miembro.rol}</p>
                           </div>
                           <button
-                            onClick={() => setEquipo(prev => prev.filter((_, i) => i !== idx))}
+                            onClick={async () => {
+                              if (apiProyecto) {
+                                try {
+                                  await api.delete(`/proyectos/${id}/equipo/${miembro.id}`)
+                                  setApiEquipo(prev => prev.filter(m => m.idUsuario !== miembro.id))
+                                } catch (err) {
+                                  console.error(err)
+                                }
+                              } else {
+                                setEquipo(prev => prev.filter((_, i) => i !== miembro.id))
+                              }
+                            }}
                             className="opacity-0 group-hover:opacity-100 transition-opacity flex h-7 w-7 items-center justify-center rounded-full text-[#C8102E] hover:bg-[#C8102E]/10"
                             title="Eliminar miembro"
                           >
