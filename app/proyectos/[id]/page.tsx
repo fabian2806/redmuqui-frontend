@@ -14,6 +14,7 @@ import {
 import type { Hito as HitoMock, Proyecto as ProyectoMock } from "@/lib/data"
 import { api, ApiError } from "@/lib/api"
 import type {
+  Macroregion,
   MacroregionRef,
   ProyectoResponse,
   ActividadResponse,
@@ -325,6 +326,7 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
   const [usuariosSistema, setUsuariosSistema] = useState<UsuarioResponse[]>([])
   const [apiLoading, setApiLoading] = useState(true)
   const [apiError, setApiError] = useState<string | null>(null)
+  const [macroregionesList, setMacroregionesList] = useState<Macroregion[]>([])
   const proyecto = useMemo(
     () => combinarProyecto(mockProyecto, apiProyecto),
     [mockProyecto, apiProyecto],
@@ -406,10 +408,12 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
         let acts: ActividadResponse[] = []
         let users: PageResponse<UsuarioResponse> = { content: [], page: 0, size: 0, totalElements: 0, totalPages: 0, first: true, last: true }
         let teamData: { idUsuario: number; rolEnProyecto: string }[] = []
+        let macros: Macroregion[] = []
         try {
           acts = await api.get<ActividadResponse[]>(`/proyectos/${id}/actividades`)
           users = await api.get<PageResponse<UsuarioResponse>>(`/usuarios`)
           teamData = await api.get<{ idUsuario: number; rolEnProyecto: string }[]>(`/proyectos/${id}/equipo`)
+          macros = await api.get<Macroregion[]>("/macroregiones")
         } catch (e) {
           console.error("Error al cargar actividades, usuarios o equipo", e)
         }
@@ -418,6 +422,7 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
           setApiActividades(acts)
           setUsuariosSistema(users.content)
           setApiEquipo(teamData)
+          setMacroregionesList(macros)
         }
       } catch (error) {
         if (!cancelled) {
@@ -698,14 +703,6 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                     return;
                   }
                   const formData = new FormData(e.currentTarget);
-                  const statusMap: Record<string, string> = {
-                    "Activo": "EN_CURSO",
-                    "En riesgo": "EN_CURSO",
-                    "Suspendido": "SUSPENDIDO",
-                    "Cerrado": "FINALIZADO"
-                  };
-                  const rawEstado = formData.get("estado") as string;
-                  const estadoValue = statusMap[rawEstado] || "PENDIENTE";
 
                   const payload = {
                     nombre: formData.get("nombre"),
@@ -713,12 +710,12 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                     objetivoGeneral: apiProyecto.objetivoGeneral || "Sin objetivo",
                     fechaInicio: formData.get("fechaInicio") || apiProyecto.fechaInicio,
                     fechaFinEstimada: formData.get("fechaFin") || apiProyecto.fechaFinEstimada || apiProyecto.fechaFin,
-                    estado: estadoValue,
+                    estado: formData.get("estado") as string || "PENDIENTE",
                     nivelPrioridad: apiProyecto.nivelPrioridad || 1,
                     porcentajeAvance: apiProyecto.porcentajeAvance,
                     presupuesto: parseFloat(formData.get("presupuesto") as string) || 0,
                     idMacroregion: null,
-                    idMacroregiones: apiProyecto.macroregiones?.map(m => m.id) || [],
+                    idMacroregiones: formData.getAll("macroregiones").map(Number),
                     idEjeTematico: apiProyecto.idEjeTematico || null,
                     idResponsablePrincipal: apiProyecto.idResponsablePrincipal || null,
                     idTerritorios: apiProyecto.territorios?.map(t => t.id) || []
@@ -766,21 +763,21 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                     <div className="grid grid-cols-2 gap-4">
                       <div className="grid gap-2">
                         <Label>Macroregión</Label>
-                        <div className="flex flex-col gap-2 rounded-md border border-[#E0E0E0] bg-[#FAFAFA] p-3">
-                          {(["Todas", "Norte", "Centro", "Sur"] as const).map((region) => (
-                            <label key={region} className="flex items-center gap-2 cursor-pointer opacity-70">
+                        <div className="flex flex-col gap-2 rounded-md border border-[#E0E0E0] bg-[#FAFAFA] p-3 max-h-40 overflow-y-auto">
+                          {macroregionesList.length > 0 ? macroregionesList.map((region) => (
+                            <label key={region.id} className="flex items-center gap-2 cursor-pointer">
                               <input
                                 type="checkbox"
-                                disabled
+                                name="macroregiones"
+                                value={region.id}
                                 className="h-4 w-4 rounded border-[#E0E0E0] accent-[#FFD600]"
-                                defaultChecked={
-                                  region === "Todas" ||
-                                  (proyecto.macroregiones?.some(m => m.nombre === region) ?? proyecto.macroregion === region)
-                                }
+                                defaultChecked={proyecto.macroregiones?.some(m => m.id === region.id) ?? false}
                               />
-                              <span className="text-sm text-[#1A1A1A]">{region}</span>
+                              <span className="text-sm text-[#1A1A1A]">{region.nombre}</span>
                             </label>
-                          ))}
+                          )) : (
+                            <span className="text-sm text-[#5C5C5C]">Cargando...</span>
+                          )}
                         </div>
                       </div>
                       <div className="grid gap-2">
@@ -788,10 +785,9 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                         <Select name="estado" defaultValue={proyecto.estado}>
                           <SelectTrigger><SelectValue placeholder="Seleccione" /></SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="Activo">Activo</SelectItem>
-                            <SelectItem value="En riesgo">En riesgo</SelectItem>
-                            <SelectItem value="Suspendido">Suspendido</SelectItem>
-                            <SelectItem value="Cerrado">Cerrado</SelectItem>
+                            <SelectItem value="PENDIENTE">Pendiente</SelectItem>
+                            <SelectItem value="EN_CURSO">En curso</SelectItem>
+                            <SelectItem value="FINALIZADO">Finalizado</SelectItem>
                           </SelectContent>
                         </Select>
                       </div>
