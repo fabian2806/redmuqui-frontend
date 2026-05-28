@@ -173,6 +173,53 @@ export interface ProyectoCreate {
   idTerritorios?: number[]
 }
 
+// ----- Actividad -----
+
+export type EstadoActividad = "PENDIENTE" | "EN_CURSO" | "FINALIZADA"
+
+export interface ActividadResponse {
+  id: number
+  nombre: string
+  descripcion: string | null
+  fechaInicio: string | null
+  fechaFin: string | null
+  estado: EstadoActividad
+  idProyecto: number
+  idResponsables: number[]
+}
+
+export interface ActividadCreate {
+  nombre: string
+  descripcion?: string
+  fechaInicio?: string
+  fechaFin?: string
+  estado?: EstadoActividad
+  idProyecto: number
+  idResponsables?: number[]
+}
+
+// ----- Hito -----
+
+export type EstadoHito = "PENDIENTE" | "EN_CURSO" | "FINALIZADO"
+
+export interface HitoResponse {
+  id: number
+  nombre: string
+  descripcion: string | null
+  fechaClave: string
+  estado: EstadoHito
+  idProyecto: number
+  fechaCreacion?: string | null
+  fechaModificacion?: string | null
+}
+
+export interface HitoCreate {
+  nombre: string
+  descripcion?: string | null
+  fechaClave: string
+  estado: EstadoHito
+}
+
 // ----- Bitacora -----
 
 export interface BitacoraResponse {
