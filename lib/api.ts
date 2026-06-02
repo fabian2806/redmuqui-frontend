@@ -76,7 +76,11 @@ function safeParse(text: string): unknown {
   }
 }
 
-async function apiFetch<T>(path: string, options: RequestOptions = {}): Promise<T> {
+/** Petición JSON autenticada (fetch + Bearer + manejo de 401/refresh y {@link ApiError}). */
+export async function authenticatedJsonRequest<T>(
+  path: string,
+  options: RequestOptions = {},
+): Promise<T> {
   // Lazy-import para evitar ciclos: api.ts -> auth.ts -> api.ts
   const { getAccessToken, refreshAccessToken, clearTokens } = await import("./auth")
 
@@ -84,7 +88,7 @@ async function apiFetch<T>(path: string, options: RequestOptions = {}): Promise<
 
   try {
     return await rawFetch<T>(path, options, accessToken)
-  } catch (err) {
+  } catch (err: unknown) {
     if (err instanceof ApiError && err.status === 401 && !options.skipAuth) {
       // Intentar refresh UNA vez
       const newToken = await refreshAccessToken()
@@ -103,13 +107,13 @@ async function apiFetch<T>(path: string, options: RequestOptions = {}): Promise<
 
 export const api = {
   get: <T>(path: string, opts: Omit<RequestOptions, "method" | "body"> = {}) =>
-    apiFetch<T>(path, { ...opts, method: "GET" }),
+    authenticatedJsonRequest<T>(path, { ...opts, method: "GET" }),
   post: <T>(path: string, body?: unknown, opts: Omit<RequestOptions, "method" | "body"> = {}) =>
-    apiFetch<T>(path, { ...opts, method: "POST", body }),
+    authenticatedJsonRequest<T>(path, { ...opts, method: "POST", body }),
   put: <T>(path: string, body?: unknown, opts: Omit<RequestOptions, "method" | "body"> = {}) =>
-    apiFetch<T>(path, { ...opts, method: "PUT", body }),
+    authenticatedJsonRequest<T>(path, { ...opts, method: "PUT", body }),
   patch: <T>(path: string, body?: unknown, opts: Omit<RequestOptions, "method" | "body"> = {}) =>
-    apiFetch<T>(path, { ...opts, method: "PATCH", body }),
+    authenticatedJsonRequest<T>(path, { ...opts, method: "PATCH", body }),
   delete: <T>(path: string, opts: Omit<RequestOptions, "method" | "body"> = {}) =>
-    apiFetch<T>(path, { ...opts, method: "DELETE" }),
+    authenticatedJsonRequest<T>(path, { ...opts, method: "DELETE" }),
 }

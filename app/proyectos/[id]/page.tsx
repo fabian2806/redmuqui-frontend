@@ -14,6 +14,7 @@ import {
 import type { Hito as HitoMock, Proyecto as ProyectoMock } from "@/lib/data"
 import { api, ApiError } from "@/lib/api"
 import type {
+  Macroregion,
   MacroregionRef,
   ProyectoResponse,
   ActividadResponse,
@@ -321,8 +322,11 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
   const { id } = use(params)
   const mockProyecto = getProyectoById(id)
   const [apiProyecto, setApiProyecto] = useState<ProyectoResponse | null>(null)
+  const [apiActividades, setApiActividades] = useState<ActividadResponse[]>([])
+  const [usuariosSistema, setUsuariosSistema] = useState<UsuarioResponse[]>([])
   const [apiLoading, setApiLoading] = useState(true)
   const [apiError, setApiError] = useState<string | null>(null)
+  const [macroregionesList, setMacroregionesList] = useState<Macroregion[]>([])
   const proyecto = useMemo(
     () => combinarProyecto(mockProyecto, apiProyecto),
     [mockProyecto, apiProyecto],
@@ -331,9 +335,11 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
   const [equipo, setEquipo] = useState<{ nombre: string; rol: string }[]>(
     () => (mockProyecto?.equipo ?? []).map(nombre => ({ nombre, rol: "Equipo T\u00e9cnico" }))
   )
+  const [apiEquipo, setApiEquipo] = useState<{ idUsuario: number; rolEnProyecto: string }[]>([])
   const [nuevoMiembroNombre, setNuevoMiembroNombre] = useState("")
   const [nuevoMiembroRol, setNuevoMiembroRol] = useState("Equipo T\u00e9cnico")
   const [addMemberOpen, setAddMemberOpen] = useState(false)
+  const [editModalOpen, setEditModalOpen] = useState(false)
 
   // State for hitos
   const hitosData = getHitosByProyecto(id)
@@ -376,6 +382,21 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
     idResponsables: [] as number[],
   })
 
+  // ── Crear Subactividad ──
+  const [createSubactOpen, setCreateSubactOpen] = useState(false)
+  const [creandoSubact, setCreandoSubact] = useState(false)
+  const [targetActividadId, setTargetActividadId] = useState<number | null>(null)
+  const [subactForm, setSubactForm] = useState({
+    nombre: "",
+    idResponsable: "",
+    presupuesto: "",
+    hombresInvolucrados: "",
+    mujeresInvolucradas: "",
+    fechaInicio: "",
+    fechaFin: "",
+    descripcion: "",
+  })
+
   useEffect(() => {
     let cancelled = false
 
@@ -384,8 +405,24 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
       setApiError(null)
       try {
         const data = await api.get<ProyectoResponse>(`/proyectos/${id}`)
+        let acts: ActividadResponse[] = []
+        let users: PageResponse<UsuarioResponse> = { content: [], page: 0, size: 0, totalElements: 0, totalPages: 0, first: true, last: true }
+        let teamData: { idUsuario: number; rolEnProyecto: string }[] = []
+        let macros: Macroregion[] = []
+        try {
+          acts = await api.get<ActividadResponse[]>(`/proyectos/${id}/actividades`)
+          users = await api.get<PageResponse<UsuarioResponse>>(`/usuarios`)
+          teamData = await api.get<{ idUsuario: number; rolEnProyecto: string }[]>(`/proyectos/${id}/equipo`)
+          macros = await api.get<Macroregion[]>("/macroregiones")
+        } catch (e) {
+          console.error("Error al cargar actividades, usuarios o equipo", e)
+        }
         if (!cancelled) {
           setApiProyecto(data)
+          setApiActividades(acts)
+          setUsuariosSistema(users.content)
+          setApiEquipo(teamData)
+          setMacroregionesList(macros)
         }
       } catch (error) {
         if (!cancelled) {
@@ -542,6 +579,16 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
     }
   }
 
+  const actividades = useMemo(() =>
+    actividadesApi.map(act => ({
+      ...act,
+      responsableDisplay: act.idResponsables
+        .map(id => usuariosMap.get(id) ?? `Usuario #${id}`)
+        .join(", "),
+    })),
+    [actividadesApi, usuariosMap]
+  )
+
   if (!proyecto && apiLoading) {
     return (
       <AppLayout>
@@ -556,22 +603,13 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
     notFound()
   }
 
-  const actividades = useMemo(() =>
-    actividadesApi.map(act => ({
-      ...act,
-      responsableDisplay: act.idResponsables
-        .map(id => usuariosMap.get(id) ?? `Usuario #${id}`)
-        .join(", "),
-    })),
-    [actividadesApi, usuariosMap]
-  )
 
   const actividadesConAlertas = actividades
     .map((actividad) => ({
       ...actividad,
       alertaVencimiento: getAlertaVencimientoActividad(actividad),
     })
-  )
+    )
 
   const actividadesVencidas = actividadesConAlertas.filter(
     (actividad) => actividad.alertaVencimiento?.tipo === "vencida",
@@ -600,6 +638,17 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
 
   const documentos = getDocumentosByProyecto(id)
   const bitacora = getBitacoraByEntidad(id)
+
+  const equipoVisual = apiProyecto
+    ? apiEquipo.map(miembro => {
+      const user = usuariosSistema.find(u => u.id === miembro.idUsuario)
+      return {
+        id: miembro.idUsuario,
+        nombre: user ? `${user.nombres} ${user.apellidos}` : `Usuario ${miembro.idUsuario}`,
+        rol: miembro.rolEnProyecto
+      }
+    })
+    : equipo.map((e, idx) => ({ id: idx, nombre: e.nombre, rol: e.rol }))
 
   // Calculate days remaining
   const fechaFin = new Date(proyecto.fechaFin)
@@ -639,7 +688,7 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <Dialog>
+            <Dialog open={editModalOpen} onOpenChange={setEditModalOpen}>
               <DialogTrigger asChild>
                 <button className="flex items-center gap-2 rounded-lg border border-[#E0E0E0] bg-white px-4 py-2 text-sm font-medium text-[#5C5C5C] hover:bg-[#F7F7F7]">
                   <Pencil className="h-4 w-4" />
@@ -647,72 +696,112 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                 </button>
               </DialogTrigger>
               <DialogContent className="overflow-y-auto sm:max-w-md">
-                <DialogHeader>
-                  <DialogTitle>Editar Proyecto</DialogTitle>
-                  <DialogDescription>
-                    Modifica los datos generales del proyecto aquí. Haz clic en guardar al finalizar.
-                  </DialogDescription>
-                </DialogHeader>
-                <div className="grid gap-4 py-6">
-                  <div className="grid gap-2">
-                    <Label htmlFor="nombre">Nombre del Proyecto</Label>
-                    <Input id="nombre" defaultValue={proyecto.nombre} />
-                  </div>
-                  <div className="grid grid-cols-2 gap-4">
+                <form onSubmit={async (e) => {
+                  e.preventDefault();
+                  if (!apiProyecto) {
+                    setEditModalOpen(false);
+                    return;
+                  }
+                  const formData = new FormData(e.currentTarget);
+
+                  const payload = {
+                    nombre: formData.get("nombre"),
+                    descripcion: formData.get("descripcion"),
+                    objetivoGeneral: apiProyecto.objetivoGeneral || "Sin objetivo",
+                    fechaInicio: formData.get("fechaInicio") || apiProyecto.fechaInicio,
+                    fechaFinEstimada: formData.get("fechaFin") || apiProyecto.fechaFinEstimada || apiProyecto.fechaFin,
+                    estado: formData.get("estado") as string || "PENDIENTE",
+                    nivelPrioridad: apiProyecto.nivelPrioridad || 1,
+                    porcentajeAvance: apiProyecto.porcentajeAvance,
+                    presupuesto: parseFloat(formData.get("presupuesto") as string) || 0,
+                    idMacroregion: null,
+                    idMacroregiones: formData.getAll("macroregiones").map(Number),
+                    idEjeTematico: apiProyecto.idEjeTematico || null,
+                    idResponsablePrincipal: apiProyecto.idResponsablePrincipal || null,
+                    idTerritorios: apiProyecto.territorios?.map(t => t.id) || []
+                  };
+
+                  try {
+                    const data = await api.put<ProyectoResponse>(`/proyectos/${id}`, payload);
+                    setApiProyecto(data);
+                    setEditModalOpen(false);
+                  } catch (err) {
+                    console.error("Error updating project", err);
+                  }
+                }}>
+                  <DialogHeader>
+                    <DialogTitle>Editar Proyecto</DialogTitle>
+                    <DialogDescription>
+                      Modifica los datos generales del proyecto aquí. Haz clic en guardar al finalizar.
+                    </DialogDescription>
+                  </DialogHeader>
+                  <div className="grid gap-4 py-6">
                     <div className="grid gap-2">
-                      <Label htmlFor="codigo">Código</Label>
-                      <Input id="codigo" defaultValue={proyecto.codigo} />
+                      <Label htmlFor="nombre">Nombre del Proyecto</Label>
+                      <Input id="nombre" name="nombre" defaultValue={proyecto.nombre} required />
                     </div>
-                    <div className="grid gap-2">
-                      <Label htmlFor="presupuesto">Presupuesto (S/)</Label>
-                      <Input id="presupuesto" type="number" defaultValue={proyecto.presupuesto} />
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="grid gap-2">
+                        <Label htmlFor="codigo">Código (Solo lectura)</Label>
+                        <Input id="codigo" defaultValue={proyecto.codigo} disabled />
+                      </div>
+                      <div className="grid gap-2">
+                        <Label htmlFor="presupuesto">Presupuesto (S/)</Label>
+                        <Input id="presupuesto" name="presupuesto" type="number" defaultValue={proyecto.presupuesto} />
+                      </div>
                     </div>
-                  </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="grid gap-2">
-                      <Label>Macroregión</Label>
-                      <div className="flex flex-col gap-2 rounded-md border border-[#E0E0E0] bg-[#FAFAFA] p-3">
-                        {(["Todas", "Norte", "Centro", "Sur"] as const).map((region) => (
-                          <label key={region} className="flex items-center gap-2 cursor-pointer">
-                            <input
-                              type="checkbox"
-                              className="h-4 w-4 rounded border-[#E0E0E0] accent-[#FFD600]"
-                              defaultChecked={
-                                region === "Todas" ||
-                                (proyecto.macroregiones?.some(m => m.nombre === region) ?? proyecto.macroregion === region)
-                              }
-                            />
-                            <span className="text-sm text-[#1A1A1A]">{region}</span>
-                          </label>
-                        ))}
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="grid gap-2">
+                        <Label htmlFor="fechaInicio">Fecha de Inicio</Label>
+                        <Input id="fechaInicio" name="fechaInicio" type="date" defaultValue={proyecto.fechaInicio?.split('T')[0]} required />
+                      </div>
+                      <div className="grid gap-2">
+                        <Label htmlFor="fechaFin">Fecha de Fin</Label>
+                        <Input id="fechaFin" name="fechaFin" type="date" defaultValue={proyecto.fechaFin?.split('T')[0]} />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="grid gap-2">
+                        <Label>Macroregión</Label>
+                        <div className="flex flex-col gap-2 rounded-md border border-[#E0E0E0] bg-[#FAFAFA] p-3 max-h-40 overflow-y-auto">
+                          {macroregionesList.length > 0 ? macroregionesList.map((region) => (
+                            <label key={region.id} className="flex items-center gap-2 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                name="macroregiones"
+                                value={region.id}
+                                className="h-4 w-4 rounded border-[#E0E0E0] accent-[#FFD600]"
+                                defaultChecked={proyecto.macroregiones?.some(m => m.id === region.id) ?? false}
+                              />
+                              <span className="text-sm text-[#1A1A1A]">{region.nombre}</span>
+                            </label>
+                          )) : (
+                            <span className="text-sm text-[#5C5C5C]">Cargando...</span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="grid gap-2">
+                        <Label>Estado</Label>
+                        <Select name="estado" defaultValue={proyecto.estado}>
+                          <SelectTrigger><SelectValue placeholder="Seleccione" /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="PENDIENTE">Pendiente</SelectItem>
+                            <SelectItem value="EN_CURSO">En curso</SelectItem>
+                            <SelectItem value="FINALIZADO">Finalizado</SelectItem>
+                          </SelectContent>
+                        </Select>
                       </div>
                     </div>
                     <div className="grid gap-2">
-                      <Label>Estado</Label>
-                      <Select defaultValue={proyecto.estado}>
-                        <SelectTrigger><SelectValue placeholder="Seleccione" /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="Activo">Activo</SelectItem>
-                          <SelectItem value="En riesgo">En riesgo</SelectItem>
-                          <SelectItem value="Suspendido">Suspendido</SelectItem>
-                          <SelectItem value="Cerrado">Cerrado</SelectItem>
-                        </SelectContent>
-                      </Select>
+                      <Label htmlFor="desc">Descripción</Label>
+                      <Textarea id="desc" name="descripcion" defaultValue={proyecto.descripcion} rows={4} className="resize-none" />
                     </div>
                   </div>
-                  <div className="grid gap-2">
-                    <Label htmlFor="desc">Descripción</Label>
-                    <Textarea id="desc" defaultValue={proyecto.descripcion} rows={4} className="resize-none" />
-                  </div>
-                </div>
-                <DialogFooter>
-                  <DialogClose asChild>
-                    <Button variant="outline">Cancelar</Button>
-                  </DialogClose>
-                  <DialogClose asChild>
-                    <Button className="bg-[#FFD600] text-[#1A1A1A] hover:bg-[#C9A42B]">Guardar</Button>
-                  </DialogClose>
-                </DialogFooter>
+                  <DialogFooter>
+                    <Button variant="outline" type="button" onClick={() => setEditModalOpen(false)}>Cancelar</Button>
+                    <Button type="submit" className="bg-[#FFD600] text-[#1A1A1A] hover:bg-[#C9A42B]">Guardar</Button>
+                  </DialogFooter>
+                </form>
               </DialogContent>
             </Dialog>
             <button className="flex items-center gap-2 rounded-lg border border-[#E0E0E0] bg-white px-4 py-2 text-sm font-medium text-[#5C5C5C] hover:bg-[#F7F7F7]">
@@ -735,11 +824,10 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                 <button
                   key={tab.id}
                   onClick={() => setActiveTab(tab.id)}
-                  className={`rounded-md px-4 py-2 text-sm font-medium transition-colors ${
-                    activeTab === tab.id
+                  className={`rounded-md px-4 py-2 text-sm font-medium transition-colors ${activeTab === tab.id
                       ? "bg-[#FFD600] text-[#1A1A1A]"
                       : "text-[#5C5C5C] hover:text-[#1A1A1A]"
-                  }`}
+                    }`}
                 >
                   {tab.label}
                 </button>
@@ -906,121 +994,217 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                             {creandoActividad ? "Creando..." : "Crear actividad"}
                           </Button>
                         </DialogFooter>
-                      </DialogContent>
-                    </Dialog>
+                    </DialogContent>
+                  </Dialog>
 
-                    {/* ── EDITAR ACTIVIDAD ── */}
-                    <Dialog open={editActividadOpen} onOpenChange={setEditActividadOpen}>
-                      <DialogContent className="overflow-y-auto sm:max-w-lg">
-                        <DialogHeader>
-                          <DialogTitle>Editar Actividad</DialogTitle>
-                          <DialogDescription>Modifica los datos de la actividad seleccionada.</DialogDescription>
-                        </DialogHeader>
-                        <div className="grid gap-4 py-6">
-                          <div className="grid gap-2">
-                            <Label htmlFor="edit-nombre">Nombre de la actividad</Label>
-                            <Input id="edit-nombre" placeholder="Ej. Taller de sensibilización" value={editForm.nombre} onChange={e => setEditForm(f => ({ ...f, nombre: e.target.value }))} />
-                          </div>
-                          <div className="grid gap-2">
-                            <Label htmlFor="edit-descripcion">Descripción</Label>
-                            <Textarea id="edit-descripcion" placeholder="Descripción de la actividad..." value={editForm.descripcion} onChange={e => setEditForm(f => ({ ...f, descripcion: e.target.value }))} />
-                          </div>
-                          <div className="grid gap-2">
-                            <Label>Responsable(s)</Label>
-                            <div className="flex flex-wrap gap-2 rounded-md border border-[#E0E0E0] bg-white p-3 max-h-40 overflow-y-auto">
-                              {Array.from(usuariosMap.entries()).length > 0 ? (
-                                Array.from(usuariosMap.entries()).map(([id, nombre]) => (
-                                  <label key={id} className="flex items-center gap-2 cursor-pointer">
-                                    <input
-                                      type="checkbox"
-                                      className="h-4 w-4 rounded border-[#E0E0E0] accent-[#FFD600]"
-                                      checked={editForm.idResponsables.includes(id)}
-                                      onChange={e => {
-                                        if (e.target.checked) {
-                                          setEditForm(f => ({ ...f, idResponsables: [...f.idResponsables, id] }))
-                                        } else {
-                                          setEditForm(f => ({ ...f, idResponsables: f.idResponsables.filter(i => i !== id) }))
-                                        }
-                                      }}
-                                    />
-                                    <span className="text-sm text-[#1A1A1A]">{nombre}</span>
-                                  </label>
-                                ))
-                              ) : (
-                                <span className="text-sm text-[#5C5C5C]">Cargando usuarios...</span>
-                              )}
-                            </div>
-                          </div>
-                          <div className="grid gap-2">
-                            <Label htmlFor="edit-estado">Estado</Label>
-                            <Select value={editForm.estado} onValueChange={v => setEditForm(f => ({ ...f, estado: v as "PENDIENTE" | "EN_CURSO" | "FINALIZADA" }))}>
-                              <SelectTrigger id="edit-estado"><SelectValue /></SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="PENDIENTE">Pendiente</SelectItem>
-                                <SelectItem value="EN_CURSO">En curso</SelectItem>
-                                <SelectItem value="FINALIZADA">Finalizada</SelectItem>
-                              </SelectContent>
-                            </Select>
-                          </div>
-                          <div className="grid grid-cols-2 gap-4">
-                            <div className="grid gap-2">
-                              <Label htmlFor="edit-inicio">Fecha de Inicio</Label>
-                              <Input id="edit-inicio" type="date" value={editForm.fechaInicio} onChange={e => setEditForm(f => ({ ...f, fechaInicio: e.target.value }))} />
-                            </div>
-                            <div className="grid gap-2">
-                              <Label htmlFor="edit-fin">Fecha de Fin</Label>
-                              <Input id="edit-fin" type="date" value={editForm.fechaFin} onChange={e => setEditForm(f => ({ ...f, fechaFin: e.target.value }))} />
-                            </div>
-                          </div>
-                          {(() => {
-                            const invalida = editForm.fechaInicio && editForm.fechaFin && editForm.fechaFin < editForm.fechaInicio
-                            return invalida ? <p className="text-xs text-[#C8102E]">La fecha de fin no puede ser anterior a la fecha de inicio.</p> : null
-                          })()}
+                  {/* ── EDITAR ACTIVIDAD ── */}
+                  <Dialog open={editActividadOpen} onOpenChange={setEditActividadOpen}>
+                    <DialogContent className="overflow-y-auto sm:max-w-lg">
+                      <DialogHeader>
+                        <DialogTitle>Editar Actividad</DialogTitle>
+                        <DialogDescription>Modifica los datos de la actividad seleccionada.</DialogDescription>
+                      </DialogHeader>
+                      <div className="grid gap-4 py-6">
+                        <div className="grid gap-2">
+                          <Label htmlFor="edit-nombre">Nombre de la actividad</Label>
+                          <Input id="edit-nombre" placeholder="Ej. Taller de sensibilización" value={editForm.nombre} onChange={e => setEditForm(f => ({ ...f, nombre: e.target.value }))} />
                         </div>
-                        <DialogFooter>
-                          <Button variant="outline" onClick={() => setEditActividadOpen(false)}>Cancelar</Button>
-                          <Button
-                            className="bg-[#FFD600] text-[#1A1A1A] hover:bg-[#C9A42B]"
-                            disabled={!!(editandoActividad || !editForm.nombre.trim() || (editForm.fechaInicio && editForm.fechaFin && editForm.fechaFin < editForm.fechaInicio))}
-                            onClick={async () => {
-                              if (!editForm.nombre.trim() || !editingActividad) return
-                              if (editForm.fechaInicio && editForm.fechaFin && editForm.fechaFin < editForm.fechaInicio) return
-                              setEditandoActividad(true)
-                              try {
-                                const actualizada = await api.put<ActividadResponse>("/actividades/" + editingActividad.id, {
-                                  nombre: editForm.nombre,
-                                  descripcion: editForm.descripcion || undefined,
-                                  fechaInicio: editForm.fechaInicio || undefined,
-                                  fechaFin: editForm.fechaFin || undefined,
-                                  estado: editForm.estado,
-                                  idProyecto: editingActividad.idProyecto,
-                                  idResponsables: editForm.idResponsables.length > 0 ? editForm.idResponsables : undefined,
-                                })
-                                setActividadesApi(prev => prev.map(a => a.id === actualizada.id ? actualizada : a))
-                                setEditActividadOpen(false)
-                                setEditingActividad(null)
-                              } catch (err) {
-                                console.error(err)
-                              } finally {
-                                setEditandoActividad(false)
+                        <div className="grid gap-2">
+                          <Label htmlFor="edit-descripcion">Descripción</Label>
+                          <Textarea id="edit-descripcion" placeholder="Descripción de la actividad..." value={editForm.descripcion} onChange={e => setEditForm(f => ({ ...f, descripcion: e.target.value }))} />
+                        </div>
+                        <div className="grid gap-2">
+                          <Label>Responsable(s)</Label>
+                          <div className="flex flex-wrap gap-2 rounded-md border border-[#E0E0E0] bg-white p-3 max-h-40 overflow-y-auto">
+                            {Array.from(usuariosMap.entries()).length > 0 ? (
+                              Array.from(usuariosMap.entries()).map(([id, nombre]) => (
+                                <label key={id} className="flex items-center gap-2 cursor-pointer">
+                                  <input
+                                    type="checkbox"
+                                    className="h-4 w-4 rounded border-[#E0E0E0] accent-[#FFD600]"
+                                    checked={editForm.idResponsables.includes(id)}
+                                    onChange={e => {
+                                      if (e.target.checked) {
+                                        setEditForm(f => ({ ...f, idResponsables: [...f.idResponsables, id] }))
+                                      } else {
+                                        setEditForm(f => ({ ...f, idResponsables: f.idResponsables.filter(i => i !== id) }))
+                                      }
+                                    }}
+                                  />
+                                  <span className="text-sm text-[#1A1A1A]">{nombre}</span>
+                                </label>
+                              ))
+                            ) : (
+                              <span className="text-sm text-[#5C5C5C]">Cargando usuarios...</span>
+                            )}
+                          </div>
+                        </div>
+                        <div className="grid gap-2">
+                          <Label htmlFor="edit-estado">Estado</Label>
+                          <Select value={editForm.estado} onValueChange={v => setEditForm(f => ({ ...f, estado: v as "PENDIENTE" | "EN_CURSO" | "FINALIZADA" }))}>
+                            <SelectTrigger id="edit-estado"><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="PENDIENTE">Pendiente</SelectItem>
+                              <SelectItem value="EN_CURSO">En curso</SelectItem>
+                              <SelectItem value="FINALIZADA">Finalizada</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="grid gap-2">
+                            <Label htmlFor="edit-inicio">Fecha de Inicio</Label>
+                            <Input id="edit-inicio" type="date" value={editForm.fechaInicio} onChange={e => setEditForm(f => ({ ...f, fechaInicio: e.target.value }))} />
+                          </div>
+                          <div className="grid gap-2">
+                            <Label htmlFor="edit-fin">Fecha de Fin</Label>
+                            <Input id="edit-fin" type="date" value={editForm.fechaFin} onChange={e => setEditForm(f => ({ ...f, fechaFin: e.target.value }))} />
+                          </div>
+                        </div>
+                        {(() => {
+                          const invalida = editForm.fechaInicio && editForm.fechaFin && editForm.fechaFin < editForm.fechaInicio
+                          return invalida ? <p className="text-xs text-[#C8102E]">La fecha de fin no puede ser anterior a la fecha de inicio.</p> : null
+                        })()}
+                      </div>
+                      <DialogFooter>
+                        <Button variant="outline" onClick={() => setEditActividadOpen(false)}>Cancelar</Button>
+                        <Button
+                          className="bg-[#FFD600] text-[#1A1A1A] hover:bg-[#C9A42B]"
+                          disabled={!!(editandoActividad || !editForm.nombre.trim() || (editForm.fechaInicio && editForm.fechaFin && editForm.fechaFin < editForm.fechaInicio))}
+                          onClick={async () => {
+                            if (!editForm.nombre.trim() || !editingActividad) return
+                            if (editForm.fechaInicio && editForm.fechaFin && editForm.fechaFin < editForm.fechaInicio) return
+                            setEditandoActividad(true)
+                            try {
+                              const actualizada = await api.put<ActividadResponse>("/actividades/" + editingActividad.id, {
+                                nombre: editForm.nombre,
+                                descripcion: editForm.descripcion || undefined,
+                                fechaInicio: editForm.fechaInicio || undefined,
+                                fechaFin: editForm.fechaFin || undefined,
+                                estado: editForm.estado,
+                                idProyecto: editingActividad.idProyecto,
+                                idResponsables: editForm.idResponsables.length > 0 ? editForm.idResponsables : undefined,
+                              })
+                              setActividadesApi(prev => prev.map(a => a.id === actualizada.id ? actualizada : a))
+                              setEditActividadOpen(false)
+                              setEditingActividad(null)
+                            } catch (err) {
+                              console.error(err)
+                            } finally {
+                              setEditandoActividad(false)
+                            }
+                          }}
+                        >
+                          {editandoActividad ? "Guardando..." : "Guardar cambios"}
+                        </Button>
+                      </DialogFooter>
+                    </DialogContent>
+                  </Dialog>
+
+                  {/* ── CREAR SUBACTIVIDAD ── */}
+                  <Dialog open={createSubactOpen} onOpenChange={setCreateSubactOpen}>
+                    <DialogContent className="overflow-y-auto sm:max-w-lg">
+                      <DialogHeader>
+                        <DialogTitle>Nueva Subactividad</DialogTitle>
+                        <DialogDescription>Añadir una subactividad a la actividad seleccionada.</DialogDescription>
+                      </DialogHeader>
+                      <div className="grid gap-4 py-6">
+                        <div className="grid gap-2">
+                          <Label htmlFor="sub-nombre">Nombre de la subactividad</Label>
+                          <Input id="sub-nombre" placeholder="Ej. Sesión teórica" value={subactForm.nombre} onChange={e => setSubactForm(f => ({ ...f, nombre: e.target.value }))} />
+                        </div>
+                        <div className="grid gap-2">
+                          <Label htmlFor="sub-descripcion">Descripción</Label>
+                          <Textarea id="sub-descripcion" placeholder="Descripción..." value={subactForm.descripcion} onChange={e => setSubactForm(f => ({ ...f, descripcion: e.target.value }))} />
+                        </div>
+                        <div className="grid gap-2">
+                          <Label htmlFor="sub-resp">Responsable</Label>
+                          <Select value={subactForm.idResponsable} onValueChange={v => setSubactForm(f => ({ ...f, idResponsable: v }))}>
+                            <SelectTrigger id="sub-resp"><SelectValue placeholder="Seleccionar responsable" /></SelectTrigger>
+                            <SelectContent>
+                              {Array.from(usuariosMap.entries()).map(([id, nombre]) => (
+                                <SelectItem key={id} value={String(id)}>{nombre}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="grid gap-2">
+                            <Label htmlFor="sub-inicio">Fecha de Inicio</Label>
+                            <Input id="sub-inicio" type="date" value={subactForm.fechaInicio} onChange={e => setSubactForm(f => ({ ...f, fechaInicio: e.target.value }))} />
+                          </div>
+                          <div className="grid gap-2">
+                            <Label htmlFor="sub-fin">Fecha de Fin</Label>
+                            <Input id="sub-fin" type="date" value={subactForm.fechaFin} onChange={e => setSubactForm(f => ({ ...f, fechaFin: e.target.value }))} />
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-3 gap-4">
+                          <div className="grid gap-2">
+                            <Label htmlFor="sub-presu">Presupuesto (S/)</Label>
+                            <Input id="sub-presu" type="number" min="0" value={subactForm.presupuesto} onChange={e => setSubactForm(f => ({ ...f, presupuesto: e.target.value }))} />
+                          </div>
+                          <div className="grid gap-2">
+                            <Label htmlFor="sub-hombres">Hombres Involucrados</Label>
+                            <Input id="sub-hombres" type="number" min="0" value={subactForm.hombresInvolucrados} onChange={e => setSubactForm(f => ({ ...f, hombresInvolucrados: e.target.value }))} />
+                          </div>
+                          <div className="grid gap-2">
+                            <Label htmlFor="sub-mujeres">Mujeres Involucradas</Label>
+                            <Input id="sub-mujeres" type="number" min="0" value={subactForm.mujeresInvolucradas} onChange={e => setSubactForm(f => ({ ...f, mujeresInvolucradas: e.target.value }))} />
+                          </div>
+                        </div>
+                        {(() => {
+                          const invalida = subactForm.fechaInicio && subactForm.fechaFin && subactForm.fechaFin < subactForm.fechaInicio
+                          return invalida ? <p className="text-xs text-[#C8102E]">La fecha de fin no puede ser anterior a la fecha de inicio.</p> : null
+                        })()}
+                      </div>
+                      <DialogFooter>
+                        <Button variant="outline" onClick={() => setCreateSubactOpen(false)}>Cancelar</Button>
+                        <Button
+                          className="bg-[#FFD600] text-[#1A1A1A] hover:bg-[#C9A42B]"
+                          disabled={!!(creandoSubact || !subactForm.nombre.trim() || !subactForm.idResponsable || (subactForm.fechaInicio && subactForm.fechaFin && subactForm.fechaFin < subactForm.fechaInicio))}
+                          onClick={async () => {
+                            if (!subactForm.nombre.trim() || !subactForm.idResponsable || !targetActividadId) return
+                            if (subactForm.fechaInicio && subactForm.fechaFin && subactForm.fechaFin < subactForm.fechaInicio) return
+                            setCreandoSubact(true)
+                            try {
+                              const nuevaSub: SubactividadCreate = {
+                                nombre: subactForm.nombre,
+                                idResponsable: Number(subactForm.idResponsable),
+                                presupuesto: subactForm.presupuesto ? Number(subactForm.presupuesto) : undefined,
+                                hombresInvolucrados: subactForm.hombresInvolucrados ? Number(subactForm.hombresInvolucrados) : undefined,
+                                mujeresInvolucradas: subactForm.mujeresInvolucradas ? Number(subactForm.mujeresInvolucradas) : undefined,
+                                fechaInicio: subactForm.fechaInicio || undefined,
+                                fechaFin: subactForm.fechaFin || undefined,
+                                descripcion: subactForm.descripcion || undefined,
                               }
-                            }}
-                          >
-                            {editandoActividad ? "Guardando..." : "Guardar cambios"}
-                          </Button>
-                        </DialogFooter>
-                      </DialogContent>
-                    </Dialog>
-                  </div>
+                              const creada = await api.post<SubactividadResponse>(`/actividades/${targetActividadId}/subactividades`, nuevaSub)
+                              setActividadesApi(prev => prev.map(a => a.id === targetActividadId ? { ...a, subactividades: [...(a.subactividades || []), creada] } : a))
+                              setCreateSubactOpen(false)
+                              setSubactForm({
+                                nombre: "", idResponsable: "", presupuesto: "", hombresInvolucrados: "", mujeresInvolucradas: "", fechaInicio: "", fechaFin: "", descripcion: ""
+                              })
+                            } catch (err) {
+                              console.error(err)
+                            } finally {
+                              setCreandoSubact(false)
+                            }
+                          }}
+                        >
+                          {creandoSubact ? "Guardando..." : "Crear subactividad"}
+                        </Button>
+                      </DialogFooter>
+                    </DialogContent>
+                  </Dialog>
+
+                </div>
                   {actividadesLoading ? (
-                    <div className="text-center py-8 text-sm text-[#5C5C5C]">Cargando actividades...</div>
-                  ) : actividadesError ? (
-                    <div className="text-center py-8">
-                      <p className="text-sm text-[#C8102E]">Error al cargar actividades: {actividadesError}</p>
-                    </div>
-                  ) : actividades.length > 0 ? (
-                    actividadesConAlertas.length > 0 ? (
-                    <>
+                <div className="text-center py-8 text-sm text-[#5C5C5C]">Cargando actividades...</div>
+              ) : actividadesError ? (
+                <div className="text-center py-8">
+                  <p className="text-sm text-[#C8102E]">Error al cargar actividades: {actividadesError}</p>
+                </div>
+              ) : actividades.length > 0 ? (
+                actividadesConAlertas.length > 0 ? (
+                  <>
                     {(actividadesVencidas.length > 0 || actividadesProximasAVencer.length > 0) && (
                       <div className="mb-4 grid gap-3 md:grid-cols-2">
                         {actividadesVencidas.length > 0 && (
@@ -1077,11 +1261,10 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                                   <div className="flex flex-col gap-1">
                                     <span>{act.nombre}</span>
                                     {act.alertaVencimiento && (
-                                      <span className={`inline-flex w-fit items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-semibold ${
-                                        act.alertaVencimiento.tipo === "vencida"
+                                      <span className={`inline-flex w-fit items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-semibold ${act.alertaVencimiento.tipo === "vencida"
                                           ? "border-[#C8102E]/20 bg-[#C8102E]/10 text-[#C8102E]"
                                           : "border-[#F57C00]/20 bg-[#F57C00]/10 text-[#F57C00]"
-                                      }`}>
+                                        }`}>
                                         {act.alertaVencimiento.tipo === "vencida" ? (
                                           <AlertTriangle className="h-3 w-3" />
                                         ) : (
@@ -1125,19 +1308,46 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                                   </button>
                                 </td>
                               </tr>
-                              {/* Subactividades placeholder */}
+                              {/* Render Subactividades */}
+                              {act.subactividades?.map((sub) => (
+                                <tr key={`sub-${sub.id}`} className="bg-[#FAFAFA] border-none">
+                                  <td className="py-2 pl-8 text-xs font-medium text-[#5C5C5C] relative">
+                                    <div className="absolute left-4 top-0 bottom-0 w-px bg-[#E0E0E0]" />
+                                    <div className="flex flex-col gap-0.5">
+                                      <span className="text-[#1A1A1A] before:content-[''] before:absolute before:left-4 before:top-4 before:w-3 before:h-px before:bg-[#E0E0E0]">
+                                        {sub.nombre}
+                                      </span>
+                                    </div>
+                                  </td>
+                                  <td className="py-2 text-xs text-[#5C5C5C]">{sub.responsable || "—"}</td>
+                                  <td className="py-2 text-xs text-[#5C5C5C]">
+                                    {sub.fechaFin ? sub.fechaFin.split('-').reverse().join('/') : "—"}
+                                  </td>
+                                  <td className="py-2">
+                                    <span className="text-xs text-[#5C5C5C]">
+                                      {sub.presupuesto ? `S/ ${sub.presupuesto}` : "—"}
+                                    </span>
+                                  </td>
+                                  <td className="py-2" colSpan={2}>
+                                    {/* Action buttons o badge if needed */}
+                                  </td>
+                                </tr>
+                              ))}
+                              {/* Agregar subactividad */}
                               <tr className="bg-[#FAFAFA] border-none">
                                 <td colSpan={6} className="py-2 pl-8 relative">
-                                  <div className="flex items-center gap-2">
-                                    <div className="w-px h-4 bg-[#E0E0E0]" />
+                                  <div className="absolute left-4 top-0 bottom-1/2 w-px bg-[#E0E0E0]" />
+                                  <div className="flex items-center gap-2 relative before:content-[''] before:absolute before:-left-4 before:top-3 before:w-3 before:h-px before:bg-[#E0E0E0]">
                                     <button
                                       className="flex items-center gap-1 text-xs font-medium text-[#C9A42B] hover:text-[#1A1A1A] transition-colors"
-                                      title="Funcionalidad próximamente"
+                                      onClick={() => {
+                                        setTargetActividadId(act.id)
+                                        setCreateSubactOpen(true)
+                                      }}
                                     >
                                       <Plus className="h-3 w-3" />
                                       Agregar subactividad
                                     </button>
-                                    <span className="text-[10px] text-[#BDBDBD] italic">(próximamente)</span>
                                   </div>
                                 </td>
                               </tr>
@@ -1146,112 +1356,112 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                         </tbody>
                       </table>
                     </div>
-                    </>
-                  ) : (
-                    <div className="text-center py-8 text-sm text-[#5C5C5C]">
-                      No hay actividades registradas para este proyecto.
-                    </div>
-                  )
-                  ) : null }
-                </div>
+                  </>
+                ) : (
+                  <div className="text-center py-8 text-sm text-[#5C5C5C]">
+                    No hay actividades registradas para este proyecto.
+                  </div>
+                )
+              ) : null}
+            </div>
               )}
 
-              {/* Hitos Tab */}
-              {activeTab === "hitos" && (
-                <div className="p-6">
-                  <div className="flex items-center justify-between mb-6">
-                    <div className="flex items-center gap-2">
-                      <h3 className="text-sm font-bold uppercase tracking-wide text-[#5C5C5C]">
-                        Cronograma e Hitos
-                      </h3>
-                      {hitosState.some(hito => hito.fuenteDatos !== "api") && <MockDataTag />}
-                      {hitosLoading && (
-                        <span className="text-xs text-[#5C5C5C]">Cargando hitos...</span>
-                      )}
-                    </div>
-                    <button
-                      onClick={abrirNuevoHito}
-                      className="flex items-center gap-2 rounded-lg bg-[#FFD600] px-3 py-1.5 text-xs font-bold text-[#1A1A1A] hover:bg-[#C9A42B] transition-colors"
-                    >
-                      <Plus className="h-3.5 w-3.5" />
-                      Agregar hito
-                    </button>
+            {/* Hitos Tab */}
+            {activeTab === "hitos" && (
+              <div className="p-6">
+                <div className="flex items-center justify-between mb-6">
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-sm font-bold uppercase tracking-wide text-[#5C5C5C]">
+                      Cronograma e Hitos
+                    </h3>
+                    {hitosState.some(hito => hito.fuenteDatos !== "api") && <MockDataTag />}
+                    {hitosLoading && (
+                      <span className="text-xs text-[#5C5C5C]">Cargando hitos...</span>
+                    )}
                   </div>
-                  {hitosError && (
-                    <div className="mb-4 rounded-lg border border-[#C8102E]/20 bg-[#C8102E]/5 px-4 py-3 text-sm text-[#C8102E]">
-                      {hitosError}
-                    </div>
-                  )}
+                  <button
+                    onClick={abrirNuevoHito}
+                    className="flex items-center gap-2 rounded-lg bg-[#FFD600] px-3 py-1.5 text-xs font-bold text-[#1A1A1A] hover:bg-[#C9A42B] transition-colors"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    Agregar hito
+                  </button>
+                </div>
+                {hitosError && (
+                  <div className="mb-4 rounded-lg border border-[#C8102E]/20 bg-[#C8102E]/5 px-4 py-3 text-sm text-[#C8102E]">
+                    {hitosError}
+                  </div>
+                )}
 
-                  {/* Dialog agregar / editar hito */}
-                  <Dialog open={addHitoOpen} onOpenChange={setAddHitoOpen}>
-                    <DialogContent className="overflow-y-auto sm:max-w-lg">
-                      <DialogHeader>
-                        <DialogTitle>{editHito ? "Editar Hito" : "Nuevo Hito"}</DialogTitle>
-                        <DialogDescription>
-                          {editHito ? "Modifica los datos del hito seleccionado." : "Registra un nuevo hito para el cronograma."}
-                        </DialogDescription>
-                      </DialogHeader>
-                      <div className="grid gap-4 py-4">
-                        <div className="grid gap-2">
-                          <Label htmlFor="hito-nombre">Nombre del hito</Label>
-                          <Input
-                            id="hito-nombre"
-                            placeholder="Ej. Entrega de informe final"
-                            value={hitoForm.nombre}
-                            onChange={e => setHitoForm(f => ({ ...f, nombre: e.target.value }))}
-                          />
-                        </div>
-                        <div className="grid gap-2">
-                          <Label htmlFor="hito-descripcion">Descripcion</Label>
-                          <Textarea
-                            id="hito-descripcion"
-                            placeholder="Objetivo o alcance del hito"
-                            value={hitoForm.descripcion}
-                            onChange={e => setHitoForm(f => ({ ...f, descripcion: e.target.value }))}
-                            rows={3}
-                            className="resize-none"
-                          />
-                        </div>
-                        <div className="grid gap-2">
-                          <Label htmlFor="hito-fecha">Fecha clave</Label>
-                          <Input
-                            id="hito-fecha"
-                            type="date"
-                            value={hitoForm.fecha}
-                            onChange={e => setHitoForm(f => ({ ...f, fecha: e.target.value }))}
-                          />
-                        </div>
-                        <div className="grid gap-2">
-                          <Label htmlFor="hito-estado">Estado</Label>
-                          <Select
-                            value={hitoForm.estado}
-                            onValueChange={v => setHitoForm(f => ({ ...f, estado: v as HitoEstadoUi }))}
-                          >
-                            <SelectTrigger id="hito-estado"><SelectValue /></SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="Pendiente">Pendiente</SelectItem>
-                              <SelectItem value="En curso">En curso</SelectItem>
-                              <SelectItem value="Finalizado">Finalizado</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
+                {/* Dialog agregar / editar hito */}
+                <Dialog open={addHitoOpen} onOpenChange={setAddHitoOpen}>
+                  <DialogContent className="overflow-y-auto sm:max-w-lg">
+                    <DialogHeader>
+                      <DialogTitle>{editHito ? "Editar Hito" : "Nuevo Hito"}</DialogTitle>
+                      <DialogDescription>
+                        {editHito ? "Modifica los datos del hito seleccionado." : "Registra un nuevo hito para el cronograma."}
+                      </DialogDescription>
+                    </DialogHeader>
+                    <div className="grid gap-4 py-4">
+                      <div className="grid gap-2">
+                        <Label htmlFor="hito-nombre">Nombre del hito</Label>
+                        <Input
+                          id="hito-nombre"
+                          placeholder="Ej. Entrega de informe final"
+                          value={hitoForm.nombre}
+                          onChange={e => setHitoForm(f => ({ ...f, nombre: e.target.value }))}
+                        />
                       </div>
-                      <DialogFooter>
-                        <Button variant="outline" onClick={() => setAddHitoOpen(false)} disabled={hitoSubmitting}>Cancelar</Button>
-                        <Button
-                          className="bg-[#FFD600] text-[#1A1A1A] hover:bg-[#C9A42B]"
-                          onClick={guardarHito}
-                          disabled={hitoSubmitting}
+                      <div className="grid gap-2">
+                        <Label htmlFor="hito-descripcion">Descripcion</Label>
+                        <Textarea
+                          id="hito-descripcion"
+                          placeholder="Objetivo o alcance del hito"
+                          value={hitoForm.descripcion}
+                          onChange={e => setHitoForm(f => ({ ...f, descripcion: e.target.value }))}
+                          rows={3}
+                          className="resize-none"
+                        />
+                      </div>
+                      <div className="grid gap-2">
+                        <Label htmlFor="hito-fecha">Fecha clave</Label>
+                        <Input
+                          id="hito-fecha"
+                          type="date"
+                          value={hitoForm.fecha}
+                          onChange={e => setHitoForm(f => ({ ...f, fecha: e.target.value }))}
+                        />
+                      </div>
+                      <div className="grid gap-2">
+                        <Label htmlFor="hito-estado">Estado</Label>
+                        <Select
+                          value={hitoForm.estado}
+                          onValueChange={v => setHitoForm(f => ({ ...f, estado: v as HitoEstadoUi }))}
                         >
-                          {hitoSubmitting ? "Guardando..." : editHito ? "Guardar cambios" : "Crear hito"}
-                        </Button>
-                      </DialogFooter>
-                    </DialogContent>
-                  </Dialog>
+                          <SelectTrigger id="hito-estado"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="Pendiente">Pendiente</SelectItem>
+                            <SelectItem value="En curso">En curso</SelectItem>
+                            <SelectItem value="Finalizado">Finalizado</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                    <DialogFooter>
+                      <Button variant="outline" onClick={() => setAddHitoOpen(false)} disabled={hitoSubmitting}>Cancelar</Button>
+                      <Button
+                        className="bg-[#FFD600] text-[#1A1A1A] hover:bg-[#C9A42B]"
+                        onClick={guardarHito}
+                        disabled={hitoSubmitting}
+                      >
+                        {hitoSubmitting ? "Guardando..." : editHito ? "Guardar cambios" : "Crear hito"}
+                      </Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
 
-                  {hitosConAlertas.length > 0 ? (
-                    <>
+                {hitosConAlertas.length > 0 ? (
+                  <>
                     {(hitosVencidos.length > 0 || hitosProximosAVencer.length > 0) && (
                       <div className="mb-6 grid gap-3 md:grid-cols-2">
                         {hitosVencidos.length > 0 && (
@@ -1287,10 +1497,9 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                       <div className="space-y-6">
                         {hitosConAlertas.map((hito) => (
                           <div key={hito.id} className="relative flex gap-4 pl-10 group">
-                            <div className={`absolute left-2 top-1 flex h-5 w-5 items-center justify-center rounded-full ${
-                              hito.estado === "Finalizado" ? "bg-[#2E7D32]" :
-                              hito.estado === "En curso" ? "bg-[#F57C00]" : "bg-[#E0E0E0]"
-                            }`}>
+                            <div className={`absolute left-2 top-1 flex h-5 w-5 items-center justify-center rounded-full ${hito.estado === "Finalizado" ? "bg-[#2E7D32]" :
+                                hito.estado === "En curso" ? "bg-[#F57C00]" : "bg-[#E0E0E0]"
+                              }`}>
                               {hito.estado === "Finalizado" ? (
                                 <CheckCircle2 className="h-3 w-3 text-white" />
                               ) : hito.estado === "En curso" ? (
@@ -1299,13 +1508,12 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                                 <Circle className="h-3 w-3 text-[#5C5C5C]" />
                               )}
                             </div>
-                            <div className={`flex-1 rounded-lg border p-4 transition-colors ${
-                              hito.alertaVencimiento?.tipo === "vencido"
+                            <div className={`flex-1 rounded-lg border p-4 transition-colors ${hito.alertaVencimiento?.tipo === "vencido"
                                 ? "border-[#C8102E]/20 bg-[#C8102E]/5 hover:border-[#C8102E]/40"
                                 : hito.alertaVencimiento
                                   ? "border-[#F57C00]/20 bg-[#F57C00]/5 hover:border-[#F57C00]/40"
                                   : "border-[#E0E0E0] hover:border-[#FFD600]"
-                            }`}>
+                              }`}>
                               <div className="flex items-start justify-between gap-2">
                                 <div className="flex-1 min-w-0">
                                   <p className="text-sm font-medium text-[#1A1A1A]">{hito.nombre}</p>
@@ -1352,92 +1560,125 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                         ))}
                       </div>
                     </div>
-                    </>
-                  ) : (
-                    <div className="text-center py-8 text-sm text-[#5C5C5C]">
-                      No hay hitos registrados para este proyecto.
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Informes Tab */}
-              {activeTab === "informes" && (
-                <div className="p-6">
-                  <div className="flex items-center justify-between mb-4">
-                    <div className="flex items-center gap-2">
-                      <h3 className="text-sm font-bold uppercase tracking-wide text-[#5C5C5C]">
-                        Informes y Productos
-                      </h3>
-                      <MockDataTag />
-                    </div>
-                    <Link
-                      href="/informes/nuevo"
-                      className="flex items-center gap-2 rounded-lg bg-[#FFD600] px-3 py-1.5 text-xs font-bold text-[#1A1A1A] hover:bg-[#C9A42B]"
-                    >
-                      <Plus className="h-3.5 w-3.5" />
-                      Nuevo documento
-                    </Link>
+                  </>
+                ) : (
+                  <div className="text-center py-8 text-sm text-[#5C5C5C]">
+                    No hay hitos registrados para este proyecto.
                   </div>
-                  {documentos.length > 0 ? (
-                    <div className="space-y-3">
-                      {documentos.map(doc => (
-                        <div key={doc.id} className="flex items-center gap-4 rounded-lg border border-[#E0E0E0] p-4 hover:bg-[#FFFDE7]">
-                          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-[#FFD600]/20">
-                            <FileText className="h-5 w-5 text-[#C9A42B]" />
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm font-medium text-[#1A1A1A] truncate">{doc.titulo}</p>
-                            <div className="flex items-center gap-2 mt-1">
-                              <TypeBadge tipo={doc.tipo} />
-                              <span className="text-xs text-[#5C5C5C]">
-                                {new Date(doc.fechaElaboracion).toLocaleDateString("es-PE")}
-                              </span>
-                            </div>
-                          </div>
-                          <StatusBadge estado={doc.estado} />
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="text-center py-8 text-sm text-[#5C5C5C]">
-                      No hay documentos asociados a este proyecto.
-                    </div>
-                  )}
-                </div>
-              )}
+                )}
+              </div>
+            )}
 
-              {/* Equipo Tab */}
-              {activeTab === "equipo" && (
-                <div className="p-6">
-                  <div className="flex items-center justify-between mb-4">
-                    <div className="flex items-center gap-2">
-                      <h3 className="text-sm font-bold uppercase tracking-wide text-[#5C5C5C]">
-                        Equipo del Proyecto
-                      </h3>
-                      <MockDataTag />
-                    </div>
-                    <Dialog open={addMemberOpen} onOpenChange={setAddMemberOpen}>
-                      <DialogTrigger asChild>
-                        <button className="flex items-center gap-2 rounded-lg bg-[#FFD600] px-3 py-1.5 text-xs font-bold text-[#1A1A1A] hover:bg-[#C9A42B] transition-colors">
-                          <UserPlus className="h-3.5 w-3.5" />
-                          Agregar miembro
-                        </button>
-                      </DialogTrigger>
-                      <DialogContent className="sm:max-w-sm">
-                        <DialogHeader>
-                          <DialogTitle>Agregar Miembro</DialogTitle>
-                          <DialogDescription>Añade un nuevo integrante al equipo del proyecto.</DialogDescription>
-                        </DialogHeader>
+            {/* Informes Tab */}
+            {activeTab === "informes" && (
+              <div className="p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-sm font-bold uppercase tracking-wide text-[#5C5C5C]">
+                      Informes y Productos
+                    </h3>
+                    <MockDataTag />
+                  </div>
+                  <Link
+                    href="/informes/nuevo"
+                    className="flex items-center gap-2 rounded-lg bg-[#FFD600] px-3 py-1.5 text-xs font-bold text-[#1A1A1A] hover:bg-[#C9A42B]"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    Nuevo documento
+                  </Link>
+                </div>
+                {documentos.length > 0 ? (
+                  <div className="space-y-3">
+                    {documentos.map(doc => (
+                      <div key={doc.id} className="flex items-center gap-4 rounded-lg border border-[#E0E0E0] p-4 hover:bg-[#FFFDE7]">
+                        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-[#FFD600]/20">
+                          <FileText className="h-5 w-5 text-[#C9A42B]" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium text-[#1A1A1A] truncate">{doc.titulo}</p>
+                          <div className="flex items-center gap-2 mt-1">
+                            <TypeBadge tipo={doc.tipo} />
+                            <span className="text-xs text-[#5C5C5C]">
+                              {new Date(doc.fechaElaboracion).toLocaleDateString("es-PE")}
+                            </span>
+                          </div>
+                        </div>
+                        <StatusBadge estado={doc.estado} />
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-center py-8 text-sm text-[#5C5C5C]">
+                    No hay documentos asociados a este proyecto.
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Equipo Tab */}
+            {activeTab === "equipo" && (
+              <div className="p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-sm font-bold uppercase tracking-wide text-[#5C5C5C]">
+                      Equipo del Proyecto
+                    </h3>
+                  </div>
+                  <Dialog open={addMemberOpen} onOpenChange={setAddMemberOpen}>
+                    <DialogTrigger asChild>
+                      <button className="flex items-center gap-2 rounded-lg bg-[#FFD600] px-3 py-1.5 text-xs font-bold text-[#1A1A1A] hover:bg-[#C9A42B] transition-colors">
+                        <UserPlus className="h-3.5 w-3.5" />
+                        Agregar miembro
+                      </button>
+                    </DialogTrigger>
+                    <DialogContent className="sm:max-w-sm">
+                      <DialogHeader>
+                        <DialogTitle>Agregar Miembro</DialogTitle>
+                        <DialogDescription>Añade un nuevo integrante al equipo del proyecto.</DialogDescription>
+                      </DialogHeader>
+                      <form onSubmit={async e => {
+                        e.preventDefault()
+                        if (!nuevoMiembroNombre || !nuevoMiembroRol) return
+
+                        if (apiProyecto) {
+                          try {
+                            await api.post(`/proyectos/${id}/equipo`, { idUsuario: parseInt(nuevoMiembroNombre), rolEnProyecto: nuevoMiembroRol })
+                            const team = await api.get<any[]>(`/proyectos/${id}/equipo`)
+                            setApiEquipo(team)
+                            setNuevoMiembroNombre("")
+                            setNuevoMiembroRol("Equipo Técnico")
+                            setAddMemberOpen(false)
+                          } catch (err) {
+                            console.error(err)
+                          }
+                        } else {
+                          setEquipo(prev => [...prev, { nombre: nuevoMiembroNombre.trim(), rol: nuevoMiembroRol }])
+                          setNuevoMiembroNombre("")
+                          setNuevoMiembroRol("Equipo Técnico")
+                          setAddMemberOpen(false)
+                        }
+                      }}>
                         <div className="grid gap-4 py-4">
                           <div className="grid gap-2">
-                            <Label htmlFor="miembro-nombre">Nombre completo</Label>
-                            <Input
-                              id="miembro-nombre"
-                              placeholder="Ej. Juan Pérez"
-                              value={nuevoMiembroNombre}
-                              onChange={e => setNuevoMiembroNombre(e.target.value)}
-                            />
+                            <Label htmlFor="miembro-nombre">Miembro <span className="text-red-500">*</span></Label>
+                            {apiProyecto ? (
+                              <Select value={nuevoMiembroNombre} onValueChange={setNuevoMiembroNombre} required>
+                                <SelectTrigger id="miembro-nombre"><SelectValue placeholder="Seleccione un usuario" /></SelectTrigger>
+                                <SelectContent>
+                                  {usuariosSistema.map(u => (
+                                    <SelectItem key={u.id} value={String(u.id)}>{u.nombres} {u.apellidos}</SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            ) : (
+                              <Input
+                                id="miembro-nombre"
+                                placeholder="Ej. Juan Pérez"
+                                value={nuevoMiembroNombre}
+                                onChange={e => setNuevoMiembroNombre(e.target.value)}
+                                required
+                              />
+                            )}
                           </div>
                           <div className="grid gap-2">
                             <Label htmlFor="miembro-rol">Rol en el proyecto</Label>
@@ -1456,199 +1697,200 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                         </div>
                         <DialogFooter>
                           <DialogClose asChild>
-                            <Button variant="outline">Cancelar</Button>
+                            <Button variant="outline" type="button">Cancelar</Button>
                           </DialogClose>
-                          <Button
-                            className="bg-[#FFD600] text-[#1A1A1A] hover:bg-[#C9A42B]"
-                            onClick={() => {
-                              if (nuevoMiembroNombre.trim()) {
-                                setEquipo(prev => [...prev, { nombre: nuevoMiembroNombre.trim(), rol: nuevoMiembroRol }])
-                                setNuevoMiembroNombre("")
-                                setNuevoMiembroRol("Equipo Técnico")
-                                setAddMemberOpen(false)
-                              }
-                            }}
-                          >
+                          <Button type="submit" className="bg-[#FFD600] text-[#1A1A1A] hover:bg-[#C9A42B]">
                             Agregar
                           </Button>
                         </DialogFooter>
-                      </DialogContent>
-                    </Dialog>
-                  </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {/* Responsable principal */}
-                    <div className="rounded-lg border-2 border-[#FFD600] bg-[#FFFDE7] p-4">
-                      <div className="flex items-center gap-3">
-                        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#FFD600]">
-                          <User className="h-5 w-5 text-[#1A1A1A]" />
-                        </div>
-                        <div>
-                          <p className="text-sm font-medium text-[#1A1A1A]">{proyecto.responsable}</p>
-                          <p className="text-xs text-[#C9A42B] font-medium">Responsable Principal</p>
-                        </div>
+                      </form>
+                    </DialogContent>
+                  </Dialog>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {/* Responsable principal */}
+                  <div className="rounded-lg border-2 border-[#FFD600] bg-[#FFFDE7] p-4">
+                    <div className="flex items-center gap-3">
+                      <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#FFD600]">
+                        <User className="h-5 w-5 text-[#1A1A1A]" />
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium text-[#1A1A1A]">{proyecto.responsable}</p>
+                        <p className="text-xs text-[#C9A42B] font-medium">Responsable Principal</p>
                       </div>
                     </div>
-                    {/* Equipo dinámico */}
-                    {equipo.map((miembro, idx) => (
-                      <div key={idx} className="group relative rounded-lg border border-[#E0E0E0] p-4 hover:border-[#FFD600] transition-colors">
-                        <div className="flex items-center gap-3">
-                          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#F7F7F7]">
-                            <User className="h-5 w-5 text-[#5C5C5C]" />
+                  </div>
+                  {/* Equipo dinámico */}
+                  {equipoVisual.map((miembro) => (
+                    <div key={miembro.id} className="group relative rounded-lg border border-[#E0E0E0] p-4 hover:border-[#FFD600] transition-colors">
+                      <div className="flex items-center gap-3">
+                        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#F7F7F7]">
+                          <User className="h-5 w-5 text-[#5C5C5C]" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium text-[#1A1A1A] truncate">{miembro.nombre}</p>
+                          <p className="text-xs text-[#5C5C5C]">{miembro.rol}</p>
+                        </div>
+                        <button
+                          onClick={async () => {
+                            if (apiProyecto) {
+                              try {
+                                await api.delete(`/proyectos/${id}/equipo/${miembro.id}`)
+                                setApiEquipo(prev => prev.filter(m => m.idUsuario !== miembro.id))
+                              } catch (err) {
+                                console.error(err)
+                              }
+                            } else {
+                              setEquipo(prev => prev.filter((_, i) => i !== miembro.id))
+                            }
+                          }}
+                          className="opacity-0 group-hover:opacity-100 transition-opacity flex h-7 w-7 items-center justify-center rounded-full text-[#C8102E] hover:bg-[#C8102E]/10"
+                          title="Eliminar miembro"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                {equipo.length === 0 && (
+                  <p className="mt-4 text-center text-sm text-[#5C5C5C]">No hay miembros en el equipo. Agrega uno.</p>
+                )}
+              </div>
+            )}
+
+            {/* Bitácora Tab */}
+            {activeTab === "bitacora" && (
+              <div className="p-6">
+                <div className="mb-4 flex items-center gap-2">
+                  <h3 className="text-sm font-bold uppercase tracking-wide text-[#5C5C5C]">
+                    Historial de Cambios
+                  </h3>
+                  <MockDataTag />
+                </div>
+                {bitacora.length > 0 ? (
+                  <div className="space-y-4">
+                    {bitacora.map(entry => (
+                      <div key={entry.id} className="flex gap-4 rounded-lg border border-[#E0E0E0] p-4">
+                        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#F7F7F7]">
+                          <Clock className="h-4 w-4 text-[#5C5C5C]" />
+                        </div>
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-medium text-[#1A1A1A]">{entry.usuario}</span>
+                            <span className="text-xs text-[#5C5C5C]">•</span>
+                            <span className="text-xs text-[#5C5C5C]">{entry.accion}</span>
                           </div>
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm font-medium text-[#1A1A1A] truncate">{miembro.nombre}</p>
-                            <p className="text-xs text-[#5C5C5C]">{miembro.rol}</p>
-                          </div>
-                          <button
-                            onClick={() => setEquipo(prev => prev.filter((_, i) => i !== idx))}
-                            className="opacity-0 group-hover:opacity-100 transition-opacity flex h-7 w-7 items-center justify-center rounded-full text-[#C8102E] hover:bg-[#C8102E]/10"
-                            title="Eliminar miembro"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </button>
+                          <p className="text-sm text-[#5C5C5C] mt-1">{entry.descripcion}</p>
+                          <p className="text-xs text-[#5C5C5C] mt-2">{entry.fecha}</p>
                         </div>
                       </div>
                     ))}
                   </div>
-                  {equipo.length === 0 && (
-                    <p className="mt-4 text-center text-sm text-[#5C5C5C]">No hay miembros en el equipo. Agrega uno.</p>
-                  )}
-                </div>
-              )}
-
-              {/* Bitácora Tab */}
-              {activeTab === "bitacora" && (
-                <div className="p-6">
-                  <div className="mb-4 flex items-center gap-2">
-                    <h3 className="text-sm font-bold uppercase tracking-wide text-[#5C5C5C]">
-                      Historial de Cambios
-                    </h3>
-                    <MockDataTag />
-                  </div>
-                  {bitacora.length > 0 ? (
-                    <div className="space-y-4">
-                      {bitacora.map(entry => (
-                        <div key={entry.id} className="flex gap-4 rounded-lg border border-[#E0E0E0] p-4">
-                          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#F7F7F7]">
-                            <Clock className="h-4 w-4 text-[#5C5C5C]" />
-                          </div>
-                          <div className="flex-1">
-                            <div className="flex items-center gap-2">
-                              <span className="text-sm font-medium text-[#1A1A1A]">{entry.usuario}</span>
-                              <span className="text-xs text-[#5C5C5C]">•</span>
-                              <span className="text-xs text-[#5C5C5C]">{entry.accion}</span>
-                            </div>
-                            <p className="text-sm text-[#5C5C5C] mt-1">{entry.descripcion}</p>
-                            <p className="text-xs text-[#5C5C5C] mt-2">{entry.fecha}</p>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="text-center py-8 text-sm text-[#5C5C5C]">
-                      No hay registros en la bitácora.
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Sidebar */}
-          <div className="space-y-4">
-            {/* Info card */}
-            <div className="rounded-lg border border-[#E0E0E0] bg-white p-5 shadow-sm">
-              <h3 className="text-sm font-bold uppercase tracking-wide text-[#5C5C5C] mb-4">
-                Información
-              </h3>
-              <div className="space-y-4">
-                <div className="flex items-start gap-3">
-                  <User className="h-4 w-4 text-[#5C5C5C] mt-0.5" />
-                  <div>
-                    <p className="text-xs text-[#5C5C5C]">Responsable</p>
-                    <p className="text-sm font-medium text-[#1A1A1A]">{proyecto.responsable}</p>
-                  </div>
-                </div>
-                <div className="flex items-start gap-3">
-                  <Calendar className="h-4 w-4 text-[#5C5C5C] mt-0.5" />
-                  <div>
-                    <p className="text-xs text-[#5C5C5C]">Periodo</p>
-                    <p className="text-sm text-[#1A1A1A]">
-                      {new Date(proyecto.fechaInicio).toLocaleDateString("es-PE")} - {new Date(proyecto.fechaFin).toLocaleDateString("es-PE")}
-                    </p>
-                  </div>
-                </div>
-                <div className="flex items-start gap-3">
-                  <Clock className="h-4 w-4 text-[#5C5C5C] mt-0.5" />
-                  <div>
-                    <p className="text-xs text-[#5C5C5C]">Días restantes</p>
-                    <p className={`text-sm font-semibold ${
-                      diasRestantes < 30 ? "text-[#C8102E]" :
-                      diasRestantes < 90 ? "text-[#F57C00]" : "text-[#2E7D32]"
-                    }`}>
-                      {diasRestantes > 0 ? `${diasRestantes} días` : "Vencido"}
-                    </p>
-                  </div>
-                </div>
-                {proyecto.presupuesto && (
-                  <div className="flex items-start gap-3">
-                    <DollarSign className="h-4 w-4 text-[#5C5C5C] mt-0.5" />
-                    <div>
-                      <p className="text-xs text-[#5C5C5C]">Presupuesto</p>
-                      <p className="text-sm font-medium text-[#1A1A1A]">
-                        S/ {proyecto.presupuesto.toLocaleString("es-PE")}
-                      </p>
-                    </div>
+                ) : (
+                  <div className="text-center py-8 text-sm text-[#5C5C5C]">
+                    No hay registros en la bitácora.
                   </div>
                 )}
-                {proyecto.fuentesDonantes && proyecto.fuentesDonantes.length > 0 && (
-                  <div className="flex items-start gap-3 border-t border-[#E0E0E0] pt-4 mt-4">
-                    <Building2 className="h-4 w-4 text-[#5C5C5C] mt-0.5" />
-                    <div className="w-full">
-                      <p className="text-xs text-[#5C5C5C] mb-2">Fuentes Donantes</p>
-                      <div className="space-y-2">
-                        {proyecto.fuentesDonantes.map((fuente, idx) => (
-                          <div key={idx} className="flex items-center justify-between bg-[#F7F7F7] border border-[#E0E0E0] rounded-md px-3 py-2">
-                            <span className="text-sm font-medium text-[#1A1A1A]">{fuente.nombre}</span>
-                            <Link href={fuente.contratoUrl} className="text-[#C9A42B] hover:text-[#FFD600] flex items-center gap-1 text-xs font-medium bg-white px-2 py-1 rounded shadow-sm border border-[#E0E0E0]" title="Ver contrato">
-                              <FileText className="h-3 w-3" /> Contrato
-                            </Link>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Progress card */}
-            <div className="rounded-lg border border-[#E0E0E0] bg-white p-5 shadow-sm">
-              <h3 className="text-sm font-bold uppercase tracking-wide text-[#5C5C5C] mb-4">
-                Avance
-              </h3>
-              <div className="text-center mb-4">
-                <span className="text-4xl font-bold text-[#1A1A1A]">{proyecto.avance}%</span>
-              </div>
-              <ProgressBar value={proyecto.avance} showLabel={false} size="lg" />
-            </div>
-
-            {/* Alerts card */}
-            {proyecto.estado === "En riesgo" && (
-              <div className="rounded-lg border border-[#C8102E]/20 bg-[#C8102E]/5 p-5">
-                <div className="flex items-center gap-2 text-[#C8102E] mb-2">
-                  <AlertTriangle className="h-4 w-4" />
-                  <h3 className="text-sm font-bold">Alertas Activas</h3>
-                </div>
-                <ul className="space-y-2 text-sm text-[#C8102E]">
-                  <li>• Actividades con retraso</li>
-                  <li>• Requiere atención inmediata</li>
-                </ul>
               </div>
             )}
           </div>
         </div>
+
+        {/* Sidebar */}
+        <div className="space-y-4">
+          {/* Info card */}
+          <div className="rounded-lg border border-[#E0E0E0] bg-white p-5 shadow-sm">
+            <h3 className="text-sm font-bold uppercase tracking-wide text-[#5C5C5C] mb-4">
+              Información
+            </h3>
+            <div className="space-y-4">
+              <div className="flex items-start gap-3">
+                <User className="h-4 w-4 text-[#5C5C5C] mt-0.5" />
+                <div>
+                  <p className="text-xs text-[#5C5C5C]">Responsable</p>
+                  <p className="text-sm font-medium text-[#1A1A1A]">{proyecto.responsable}</p>
+                </div>
+              </div>
+              <div className="flex items-start gap-3">
+                <Calendar className="h-4 w-4 text-[#5C5C5C] mt-0.5" />
+                <div>
+                  <p className="text-xs text-[#5C5C5C]">Periodo</p>
+                  <p className="text-sm text-[#1A1A1A]">
+                    {new Date(proyecto.fechaInicio).toLocaleDateString("es-PE")} - {new Date(proyecto.fechaFin).toLocaleDateString("es-PE")}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-start gap-3">
+                <Clock className="h-4 w-4 text-[#5C5C5C] mt-0.5" />
+                <div>
+                  <p className="text-xs text-[#5C5C5C]">Días restantes</p>
+                  <p className={`text-sm font-semibold ${diasRestantes < 30 ? "text-[#C8102E]" :
+                      diasRestantes < 90 ? "text-[#F57C00]" : "text-[#2E7D32]"
+                    }`}>
+                    {diasRestantes > 0 ? `${diasRestantes} días` : "Vencido"}
+                  </p>
+                </div>
+              </div>
+              {proyecto.presupuesto && (
+                <div className="flex items-start gap-3">
+                  <DollarSign className="h-4 w-4 text-[#5C5C5C] mt-0.5" />
+                  <div>
+                    <p className="text-xs text-[#5C5C5C]">Presupuesto</p>
+                    <p className="text-sm font-medium text-[#1A1A1A]">
+                      S/ {proyecto.presupuesto.toLocaleString("es-PE")}
+                    </p>
+                  </div>
+                </div>
+              )}
+              {proyecto.fuentesDonantes && proyecto.fuentesDonantes.length > 0 && (
+                <div className="flex items-start gap-3 border-t border-[#E0E0E0] pt-4 mt-4">
+                  <Building2 className="h-4 w-4 text-[#5C5C5C] mt-0.5" />
+                  <div className="w-full">
+                    <p className="text-xs text-[#5C5C5C] mb-2">Fuentes Donantes</p>
+                    <div className="space-y-2">
+                      {proyecto.fuentesDonantes.map((fuente, idx) => (
+                        <div key={idx} className="flex items-center justify-between bg-[#F7F7F7] border border-[#E0E0E0] rounded-md px-3 py-2">
+                          <span className="text-sm font-medium text-[#1A1A1A]">{fuente.nombre}</span>
+                          <Link href={fuente.contratoUrl} className="text-[#C9A42B] hover:text-[#FFD600] flex items-center gap-1 text-xs font-medium bg-white px-2 py-1 rounded shadow-sm border border-[#E0E0E0]" title="Ver contrato">
+                            <FileText className="h-3 w-3" /> Contrato
+                          </Link>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Progress card */}
+          <div className="rounded-lg border border-[#E0E0E0] bg-white p-5 shadow-sm">
+            <h3 className="text-sm font-bold uppercase tracking-wide text-[#5C5C5C] mb-4">
+              Avance
+            </h3>
+            <div className="text-center mb-4">
+              <span className="text-4xl font-bold text-[#1A1A1A]">{proyecto.avance}%</span>
+            </div>
+            <ProgressBar value={proyecto.avance} showLabel={false} size="lg" />
+          </div>
+
+          {/* Alerts card */}
+          {proyecto.estado === "En riesgo" && (
+            <div className="rounded-lg border border-[#C8102E]/20 bg-[#C8102E]/5 p-5">
+              <div className="flex items-center gap-2 text-[#C8102E] mb-2">
+                <AlertTriangle className="h-4 w-4" />
+                <h3 className="text-sm font-bold">Alertas Activas</h3>
+              </div>
+              <ul className="space-y-2 text-sm text-[#C8102E]">
+                <li>• Actividades con retraso</li>
+                <li>• Requiere atención inmediata</li>
+              </ul>
+            </div>
+          )}
+        </div>
       </div>
-    </AppLayout>
+    </div>
+    </AppLayout >
   )
 }
