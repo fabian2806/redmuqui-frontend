@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
+import { useAuth } from "@/hooks/useAuth"
 import { AppLayout } from "@/components/layout/app-layout"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -43,6 +44,7 @@ import {
 import Link from "next/link"
 
 export default function UsuariosPage() {
+  const { user: usuarioActual } = useAuth()
   const [usuarios, setUsuarios] = useState<UsuarioResponse[]>([])
   const [cargando, setCargando] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -473,10 +475,17 @@ export default function UsuariosPage() {
                               Gestionar permisos
                             </DropdownMenuItem>
                             <DropdownMenuSeparator />
-                            <DropdownMenuItem onClick={() => { setUsuarioAConfirmar(usuario); setAccionConfirmar(usuario.estado ? "desactivar" : "activar") }} className={usuario.estado ? "text-orange-600" : "text-green-600"}>
-                              <UserX className="mr-2 h-4 w-4" />
-                              {usuario.estado ? "Desactivar" : "Activar"}
-                            </DropdownMenuItem>
+                            {usuarioActual?.id === usuario.id ? (
+                              <DropdownMenuItem disabled className="cursor-not-allowed opacity-50">
+                                <UserX className="mr-2 h-4 w-4" />
+                                Desactivar (eres tú)
+                              </DropdownMenuItem>
+                            ) : (
+                              <DropdownMenuItem onClick={() => { setUsuarioAConfirmar(usuario); setAccionConfirmar(usuario.estado ? "desactivar" : "activar") }} className={usuario.estado ? "text-orange-600" : "text-green-600"}>
+                                <UserX className="mr-2 h-4 w-4" />
+                                {usuario.estado ? "Desactivar" : "Activar"}
+                              </DropdownMenuItem>
+                            )}
                           </DropdownMenuContent>
                         </DropdownMenu>
                       </TableCell>
@@ -611,7 +620,7 @@ export default function UsuariosPage() {
             <div className="space-y-2"><Label htmlFor="edit-email">Correo electrónico *</Label><Input id="edit-email" type="email" value={editData.email} onChange={(e) => setEditData({ ...editData, email: e.target.value })} /></div>
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-2"><Label htmlFor="edit-telefono">Teléfono</Label><Input id="edit-telefono" inputMode="numeric" maxLength={9} value={editData.telefono} onChange={(e) => setEditData({ ...editData, telefono: e.target.value.replace(/\D/g, "").slice(0, 9) })} /></div>
-              <div className="space-y-2"><Label>Estado</Label><Select value={editData.estado} onValueChange={(value) => setEditData({ ...editData, estado: value })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="activo">Activo</SelectItem><SelectItem value="inactivo">Inactivo</SelectItem></SelectContent></Select></div>
+              <div className="space-y-2"><Label>Estado</Label><Select value={editData.estado} onValueChange={(value) => setEditData({ ...editData, estado: value })} disabled={usuarioActual?.id === usuarioEditando?.id}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="activo">Activo</SelectItem><SelectItem value="inactivo" disabled={usuarioActual?.id === usuarioEditando?.id}>Inactivo</SelectItem></SelectContent></Select>{usuarioActual?.id === usuarioEditando?.id && <p className="text-xs text-muted-foreground">No puedes desactivar tu propia cuenta.</p>}</div>
             </div>
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-2"><Label>Rol *</Label><Select value={editData.rolId} onValueChange={(value) => setEditData({ ...editData, rolId: value })}><SelectTrigger><SelectValue placeholder="Seleccionar rol" /></SelectTrigger><SelectContent>{rolesCatalogo.map((rol) => (<SelectItem key={rol.id} value={String(rol.id)}>{rol.nombre}</SelectItem>))}</SelectContent></Select></div>

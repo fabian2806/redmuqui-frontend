@@ -5,18 +5,18 @@
 // públicas. Verifica la cookie `auth-presence` que setea lib/auth.ts
 // al hacer login (la cookie no contiene el token, solo una bandera).
 //
-// En modo NEXT_PUBLIC_AUTH_MODE=mock, el middleware se desactiva para
-// que los squads puedan navegar libremente sin login real.
+// En modo NEXT_PUBLIC_AUTH_MODE=mock, el middleware se desactiva solo
+// para prototipos locales sin login real.
 // =====================================================================
 
 import { NextResponse, type NextRequest } from "next/server"
 
-const AUTH_MODE = process.env.NEXT_PUBLIC_AUTH_MODE ?? "mock"
+const AUTH_MODE = process.env.NEXT_PUBLIC_AUTH_MODE ?? "real"
 
 const PUBLIC_ROUTES = ["/login", "/recuperar", "/reset-password"]
 
 export function middleware(request: NextRequest) {
-  // En modo mock, no protegemos nada (los squads navegan libre).
+  // En modo mock, no protegemos nada.
   if (AUTH_MODE === "mock") {
     return NextResponse.next()
   }

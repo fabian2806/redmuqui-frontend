@@ -6,11 +6,8 @@
 // los cambios se propagan a todos los demás (header, sidebar, páginas).
 //
 // Modos:
-//   - "mock"  (default Sprint 1): admin hardcodeado. login() no toca
-//             el backend. Permite a los squads avanzar sin esperar a
-//             que squad Auth termine la Fase A.
-//   - "real": login real contra el backend + carga de /usuarios/me.
-//             Activar con NEXT_PUBLIC_AUTH_MODE=real en .env.local.
+//   - "real" (default): login real contra el backend + carga de /usuarios/me.
+//   - "mock": admin hardcodeado solo para prototipos locales.
 // =====================================================================
 
 "use client"
@@ -24,13 +21,14 @@ import {
 } from "react"
 import { api, ApiError } from "@/lib/api"
 import {
+  clearTokens,
   login as authLogin,
   logout as authLogout,
   isAuthenticated as hasToken,
 } from "@/lib/auth"
 import type { LoginRequest, UsuarioResponse } from "@/lib/types"
 
-const AUTH_MODE = (process.env.NEXT_PUBLIC_AUTH_MODE ?? "mock") as "mock" | "real"
+const AUTH_MODE = (process.env.NEXT_PUBLIC_AUTH_MODE ?? "real") as "mock" | "real"
 
 const MOCK_ADMIN: UsuarioResponse = {
   id: 1,
@@ -83,6 +81,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (!cancelled) setUser(data)
       })
       .catch(() => {
+        clearTokens()
         if (!cancelled) setUser(null)
       })
       .finally(() => {
@@ -105,8 +104,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUser(me)
     } catch (err) {
       if (err instanceof ApiError) {
-        // /usuarios/me todavía no implementado: dejar user mínimo.
-        setUser({ ...MOCK_ADMIN, email: credentials.email })
+        // Si no se puede cargar el usuario real, no concedemos acceso.
+        clearTokens()
+        throw err
       } else {
         throw err
       }
