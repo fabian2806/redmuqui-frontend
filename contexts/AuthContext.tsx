@@ -123,14 +123,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null)
   }, [])
 
+  const isAdminRole = (user?.nombreRol ?? "").toLowerCase().includes("administrador")
+
   const hasPermission = useCallback(
     (permiso: string) => {
       if (!user) return false
-      if (!user.permisos || user.permisos.length === 0) return false
-      if (user.permisos.includes("*")) return true
+      if (user.permisos?.includes("*")) return true
+      if (!user.permisos || user.permisos.length === 0) {
+        return isAdminRole
+      }
       return user.permisos.includes(permiso)
     },
-    [user],
+    [user, isAdminRole],
   )
 
   const value: AuthContextValue = {

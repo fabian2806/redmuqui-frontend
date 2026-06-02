@@ -84,6 +84,9 @@ export default function NuevoProyectoPage() {
   const [loadingUsuarios, setLoadingUsuarios] = useState(true)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [touched, setTouched] = useState<{ objetivoGeneral?: boolean }>({})
+
+  const isObjetivoGeneralInvalid = touched.objetivoGeneral && !formData.objetivoGeneral.trim()
 
   useEffect(() => {
     let cancelled = false
@@ -210,8 +213,10 @@ export default function NuevoProyectoPage() {
       !formData.idEjeTematico ||
       !formData.fechaInicio ||
       !formData.nombre.trim() ||
-      !formData.codigoInterno.trim()
+      !formData.codigoInterno.trim() ||
+      !formData.objetivoGeneral.trim()
     ) {
+      setTouched((current) => ({ ...current, objetivoGeneral: true }))
       setError("Completa los campos obligatorios antes de crear el proyecto")
       return
     }
@@ -273,7 +278,7 @@ export default function NuevoProyectoPage() {
         )}
 
         <form onSubmit={handleSubmit} className="space-y-6">
-          <section className="rounded-lg border border-[#E0E0E0] bg-white shadow-sm">
+          <section className={`rounded-lg border ${isObjetivoGeneralInvalid ? "border-[#C8102E]" : "border-[#E0E0E0]"} bg-white shadow-sm`}>
             <div className="border-b border-[#E0E0E0] px-6 py-4">
               <h2 className="text-sm font-bold uppercase tracking-wide text-[#1A1A1A]">
                 Información General
@@ -346,7 +351,7 @@ export default function NuevoProyectoPage() {
               </div>
 
               <div>
-                <label className="mb-1.5 block text-xs font-medium text-[#5C5C5C]">
+                <label className={`mb-1.5 block text-xs font-medium ${isObjetivoGeneralInvalid ? "text-[#C8102E]" : "text-[#5C5C5C]"}`}>
                   Objetivo general
                 </label>
                 <textarea
@@ -355,9 +360,15 @@ export default function NuevoProyectoPage() {
                   onChange={(event) =>
                     updateField("objetivoGeneral", event.target.value)
                   }
-                  className="w-full rounded-lg border border-[#E0E0E0] px-4 py-2.5 text-sm text-[#1A1A1A] focus:border-[#FFD600] focus:outline-none focus:ring-1 focus:ring-[#FFD600]"
+                  onBlur={() => setTouched((current) => ({ ...current, objetivoGeneral: true }))}
+                  className={`w-full rounded-lg border ${isObjetivoGeneralInvalid ? "border-[#C8102E]" : "border-[#E0E0E0]"} px-4 py-2.5 text-sm text-[#1A1A1A] focus:border-[#FFD600] focus:outline-none focus:ring-1 focus:ring-[#FFD600]`}
                   placeholder="Define el objetivo principal del proyecto..."
                 />
+                {isObjetivoGeneralInvalid && (
+                  <p className="mt-2 text-xs text-[#C8102E]">
+                    El objetivo general es obligatorio.
+                  </p>
+                )}
               </div>
             </div>
           </section>
