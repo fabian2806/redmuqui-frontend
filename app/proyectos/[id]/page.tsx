@@ -13,16 +13,26 @@ import {
 } from "@/lib/data"
 import type { Hito as HitoMock, Proyecto as ProyectoMock } from "@/lib/data"
 import { api, ApiError } from "@/lib/api"
+import { ESTADOS_PROYECTO, normalizarEstadoProyecto } from "@/lib/project-status"
 import type {
-  Macroregion,
   MacroregionRef,
+  Macroregion,
+  EjeTematico,
+  Territorio,
+  Institucion,
   ProyectoResponse,
   ActividadResponse,
+  EstadoActividad,
+  SubactividadCreate,
+  SubactividadResponse,
   UsuarioResponse,
   PageResponse,
   HitoCreate,
   HitoResponse,
-  EstadoHito
+  EstadoHito,
+  EstadoProyecto,
+  ProyectoUpdate,
+  AsociarInstitucionesRequest
 } from "@/lib/types"
 import {
   ChevronRight,
@@ -30,6 +40,7 @@ import {
   Download,
   Archive,
   Calendar,
+  Save,
   User,
   MapPin,
   Building2,
@@ -87,6 +98,17 @@ function startOfToday(): Date {
 function getDiasHastaFecha(date: string, today = startOfToday()): number {
   const fechaFin = parseLocalDate(date)
   return Math.ceil((fechaFin.getTime() - today.getTime()) / (1000 * 60 * 60 * 24))
+}
+
+function formatLocalDate(date: string | null | undefined): string {
+  if (!date) return "—"
+  const [year, month, day] = date.split("-")
+  if (!year || !month || !day) return date
+  return `${day}/${month}/${year}`
+}
+
+function normalizeSearch(value: string): string {
+  return value.trim().toLowerCase()
 }
 
 function getAlertaVencimientoActividad(actividad: {
@@ -154,6 +176,26 @@ function getAlertaVencimientoHito(hito: {
   return null
 }
 
+
+const PRIORIDADES_PROYECTO = [
+  { value: "", label: "Sin prioridad" },
+  { value: "1", label: "Baja" },
+  { value: "2", label: "Media" },
+  { value: "3", label: "Alta" },
+]
+
+const ROLES_PROYECTO = ["Equipo Técnico", "Coordinador", "Asesor", "Observador"]
+
+function estadoProyectoParaFormulario(estado: string): EstadoProyecto {
+  return normalizarEstadoProyecto(estado)
+}
+
+function optionalNumber(value: string): number | undefined {
+  if (value === "") return undefined
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : undefined
+}
+
 function apiMacroregiones(proyecto: ProyectoResponse): MacroregionRef[] {
   if (proyecto.macroregiones?.length) return proyecto.macroregiones
   if (proyecto.idMacroregion && proyecto.nombreMacroregion) {
@@ -187,7 +229,7 @@ function proyectoDesdeApi(apiProyecto: ProyectoResponse): ProyectoDetalle {
     fechaFin: apiProyecto.fechaFinEstimada ?? apiProyecto.fechaInicio,
     avance: apiProyecto.porcentajeAvance ?? 0,
     estado: apiProyecto.estado,
-    institucionesMiembro: [],
+    institucionesMiembro: apiProyecto.instituciones?.map(i => i.nombre) ?? [],
     presupuesto: apiProyecto.presupuesto ?? undefined,
     fuentesDonantes: [],
     fuenteDatos: "api",
@@ -214,7 +256,7 @@ function combinarProyecto(
     ...mockProyecto,
     ...real,
     equipo: mockProyecto.equipo,
-    institucionesMiembro: mockProyecto.institucionesMiembro,
+    institucionesMiembro: real.institucionesMiembro.length > 0 ? real.institucionesMiembro : mockProyecto.institucionesMiembro,
     fuentesDonantes: mockProyecto.fuentesDonantes,
     fuenteDatos: "mixto",
   }
@@ -292,41 +334,18 @@ function MockDataTag() {
   )
 }
 
-function ApiSourceTag({
-  loading,
-  error,
-  source,
-}: {
-  loading: boolean
-  error: string | null
-  source: ProyectoDetalle["fuenteDatos"]
-}) {
-  const label = loading
-    ? "Sincronizando API"
-    : error
-      ? "Mock con API no disponible"
-      : source === "mock"
-        ? "Mock referencial"
-        : source === "mixto"
-          ? "Datos base API"
-          : "API real"
-
-  return (
-    <span className="inline-flex items-center rounded-full border border-[#E0E0E0] bg-white px-2.5 py-1 text-xs font-medium text-[#5C5C5C]">
-      {label}
-    </span>
-  )
-}
-
 export default function ProyectoDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params)
   const mockProyecto = getProyectoById(id)
   const [apiProyecto, setApiProyecto] = useState<ProyectoResponse | null>(null)
   const [apiActividades, setApiActividades] = useState<ActividadResponse[]>([])
   const [usuariosSistema, setUsuariosSistema] = useState<UsuarioResponse[]>([])
+  const [macroregionesCatalogo, setMacroregionesCatalogo] = useState<Macroregion[]>([])
+  const [ejesCatalogo, setEjesCatalogo] = useState<EjeTematico[]>([])
+  const [territoriosCatalogo, setTerritoriosCatalogo] = useState<Territorio[]>([])
+  const [institucionesCatalogo, setInstitucionesCatalogo] = useState<Institucion[]>([])
   const [apiLoading, setApiLoading] = useState(true)
   const [apiError, setApiError] = useState<string | null>(null)
-  const [macroregionesList, setMacroregionesList] = useState<Macroregion[]>([])
   const proyecto = useMemo(
     () => combinarProyecto(mockProyecto, apiProyecto),
     [mockProyecto, apiProyecto],
@@ -337,9 +356,34 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
   )
   const [apiEquipo, setApiEquipo] = useState<{ idUsuario: number; rolEnProyecto: string }[]>([])
   const [nuevoMiembroNombre, setNuevoMiembroNombre] = useState("")
-  const [nuevoMiembroRol, setNuevoMiembroRol] = useState("Equipo T\u00e9cnico")
+  const [nuevoMiembroRol, setNuevoMiembroRol] = useState("Equipo Técnico")
   const [addMemberOpen, setAddMemberOpen] = useState(false)
   const [editModalOpen, setEditModalOpen] = useState(false)
+  const [editSubmitting, setEditSubmitting] = useState(false)
+  const [editError, setEditError] = useState<string | null>(null)
+  const [territorioSearch, setTerritorioSearch] = useState("")
+  const [institucionSearch, setInstitucionSearch] = useState("")
+  const [responsableSearch, setResponsableSearch] = useState("")
+  const [avanceDirecto, setAvanceDirecto] = useState("0")
+  const [avanceSubmitting, setAvanceSubmitting] = useState(false)
+  const [avanceError, setAvanceError] = useState<string | null>(null)
+  const [editFormProyecto, setEditFormProyecto] = useState({
+    nombre: "",
+    codigoInterno: "",
+    descripcion: "",
+    objetivoGeneral: "",
+    fechaInicio: "",
+    fechaFinEstimada: "",
+    estado: "ACTIVO" as EstadoProyecto,
+    nivelPrioridad: "",
+    porcentajeAvance: "0",
+    presupuesto: "",
+    idMacroregiones: [] as number[],
+    idEjeTematico: "",
+    idResponsablePrincipal: "",
+    idTerritorios: [] as number[],
+    instituciones: [] as Array<{ idInstitucion: number; tipoParticipacion: string }>,
+  })
 
   // State for hitos
   const hitosData = getHitosByProyecto(id)
@@ -378,7 +422,7 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
     descripcion: "",
     fechaInicio: "",
     fechaFin: "",
-    estado: "PENDIENTE" as "PENDIENTE" | "EN_CURSO" | "FINALIZADA",
+    estado: "PENDIENTE" as EstadoActividad,
     idResponsables: [] as number[],
   })
 
@@ -397,6 +441,149 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
     descripcion: "",
   })
 
+  const prepararFormularioEdicionProyecto = (proyectoApi: ProyectoResponse) => {
+    setEditError(null)
+    setEditFormProyecto({
+      nombre: proyectoApi.nombre ?? "",
+      codigoInterno: proyectoApi.codigoInterno ?? "",
+      descripcion: proyectoApi.descripcion ?? "",
+      objetivoGeneral: proyectoApi.objetivoGeneral ?? "",
+      fechaInicio: proyectoApi.fechaInicio ?? "",
+      fechaFinEstimada: proyectoApi.fechaFinEstimada ?? "",
+      estado: estadoProyectoParaFormulario(proyectoApi.estado),
+      nivelPrioridad: proyectoApi.nivelPrioridad ? String(proyectoApi.nivelPrioridad) : "",
+      porcentajeAvance: String(proyectoApi.porcentajeAvance ?? 0),
+      presupuesto: proyectoApi.presupuesto != null ? String(proyectoApi.presupuesto) : "",
+      idMacroregiones: proyectoApi.macroregiones?.map(m => m.id) ?? [],
+      idEjeTematico: proyectoApi.idEjeTematico ? String(proyectoApi.idEjeTematico) : "",
+      idResponsablePrincipal: proyectoApi.responsablePrincipal ? String(proyectoApi.responsablePrincipal.id) : "",
+      idTerritorios: proyectoApi.territorios?.map(t => t.id) ?? [],
+      instituciones: proyectoApi.instituciones?.map(i => ({
+        idInstitucion: i.id,
+        tipoParticipacion: "Miembro",
+      })) ?? [],
+    })
+  }
+
+  const toggleEditMacroregion = (idMacroregion: number) => {
+    setEditFormProyecto(prev => ({
+      ...prev,
+      idMacroregiones: prev.idMacroregiones.includes(idMacroregion)
+        ? prev.idMacroregiones.filter(id => id !== idMacroregion)
+        : [...prev.idMacroregiones, idMacroregion],
+    }))
+  }
+
+  const toggleEditTerritorio = (idTerritorio: number) => {
+    setEditFormProyecto(prev => ({
+      ...prev,
+      idTerritorios: prev.idTerritorios.includes(idTerritorio)
+        ? prev.idTerritorios.filter(id => id !== idTerritorio)
+        : [...prev.idTerritorios, idTerritorio],
+    }))
+  }
+
+  const toggleEditInstitucion = (idInstitucion: number) => {
+    setEditFormProyecto(prev => ({
+      ...prev,
+      instituciones: prev.instituciones.some(item => item.idInstitucion === idInstitucion)
+        ? prev.instituciones.filter(item => item.idInstitucion !== idInstitucion)
+        : [...prev.instituciones, { idInstitucion, tipoParticipacion: "Miembro" }],
+    }))
+  }
+
+  const guardarAvanceProyecto = async () => {
+    if (!apiProyecto) return
+    const porcentajeAvance = Number(avanceDirecto)
+    if (!Number.isFinite(porcentajeAvance) || porcentajeAvance < 0 || porcentajeAvance > 100) {
+      setAvanceError("El avance debe estar entre 0 y 100.")
+      return
+    }
+
+    setAvanceSubmitting(true)
+    setAvanceError(null)
+    try {
+      const actualizado = await api.patch<ProyectoResponse>(`/proyectos/${id}/avance?porcentajeAvance=${porcentajeAvance}`)
+      setApiProyecto(actualizado)
+      setAvanceDirecto(String(actualizado.porcentajeAvance ?? porcentajeAvance))
+      prepararFormularioEdicionProyecto(actualizado)
+    } catch (error) {
+      setAvanceError(getApiErrorMessage(error))
+    } finally {
+      setAvanceSubmitting(false)
+    }
+  }
+
+  const guardarEdicionProyecto = async () => {
+    if (!apiProyecto) return
+    setEditError(null)
+
+    const porcentajeAvance = Number(editFormProyecto.porcentajeAvance)
+    if (!editFormProyecto.nombre.trim() || !editFormProyecto.codigoInterno.trim() || !editFormProyecto.fechaInicio) {
+      setEditError("Completa nombre, código interno y fecha de inicio.")
+      return
+    }
+    if (!editFormProyecto.idResponsablePrincipal) {
+      setEditError("Selecciona un responsable principal para el proyecto.")
+      return
+    }
+    if (editFormProyecto.fechaFinEstimada && editFormProyecto.fechaFinEstimada < editFormProyecto.fechaInicio) {
+      setEditError("La fecha de fin estimada no puede ser anterior a la fecha de inicio.")
+      return
+    }
+    if (!Number.isFinite(porcentajeAvance) || porcentajeAvance < 0 || porcentajeAvance > 100) {
+      setEditError("El porcentaje de avance debe estar entre 0 y 100.")
+      return
+    }
+    if (editFormProyecto.idMacroregiones.length === 0) {
+      setEditError("Selecciona al menos una macroregión.")
+      return
+    }
+
+    const payload: ProyectoUpdate = {
+      nombre: editFormProyecto.nombre.trim(),
+      codigoInterno: editFormProyecto.codigoInterno.trim(),
+      descripcion: editFormProyecto.descripcion.trim() || undefined,
+      objetivoGeneral: editFormProyecto.objetivoGeneral.trim() || undefined,
+      fechaInicio: editFormProyecto.fechaInicio,
+      fechaFinEstimada: editFormProyecto.fechaFinEstimada || undefined,
+      estado: editFormProyecto.estado,
+      nivelPrioridad: optionalNumber(editFormProyecto.nivelPrioridad),
+      porcentajeAvance,
+      presupuesto: optionalNumber(editFormProyecto.presupuesto),
+      idMacroregiones: editFormProyecto.idMacroregiones,
+      idEjeTematico: editFormProyecto.idEjeTematico ? Number(editFormProyecto.idEjeTematico) : undefined,
+      idResponsablePrincipal: editFormProyecto.idResponsablePrincipal ? Number(editFormProyecto.idResponsablePrincipal) : undefined,
+      idTerritorios: editFormProyecto.idTerritorios,
+    }
+
+    setEditSubmitting(true)
+    try {
+      let actualizado = await api.put<ProyectoResponse>(`/proyectos/${id}`, payload)
+      const institucionesPayload: AsociarInstitucionesRequest = {
+        instituciones: Array.from(
+          new Map(
+            editFormProyecto.instituciones.map(item => [
+              item.idInstitucion,
+              {
+                idInstitucion: item.idInstitucion,
+                tipoParticipacion: "Miembro",
+              },
+            ]),
+          ).values(),
+        ),
+      }
+      await api.post<void>(`/proyectos/${id}/instituciones`, institucionesPayload)
+      actualizado = await api.get<ProyectoResponse>(`/proyectos/${id}`)
+      setApiProyecto(actualizado)
+      setEditModalOpen(false)
+    } catch (error) {
+      setEditError(getApiErrorMessage(error))
+    } finally {
+      setEditSubmitting(false)
+    }
+  }
+
   useEffect(() => {
     let cancelled = false
 
@@ -408,21 +595,41 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
         let acts: ActividadResponse[] = []
         let users: PageResponse<UsuarioResponse> = { content: [], page: 0, size: 0, totalElements: 0, totalPages: 0, first: true, last: true }
         let teamData: { idUsuario: number; rolEnProyecto: string }[] = []
-        let macros: Macroregion[] = []
+        let macroregionesData: Macroregion[] = []
+        let ejesData: EjeTematico[] = []
+        let territoriosData: Territorio[] = []
+        let institucionesData: Institucion[] = []
         try {
-          acts = await api.get<ActividadResponse[]>(`/proyectos/${id}/actividades`)
-          users = await api.get<PageResponse<UsuarioResponse>>(`/usuarios`)
-          teamData = await api.get<{ idUsuario: number; rolEnProyecto: string }[]>(`/proyectos/${id}/equipo`)
-          macros = await api.get<Macroregion[]>("/macroregiones")
+          const [actsResponse, usersResponse, teamResponse, macrosResponse, ejesResponse, territoriosResponse, institucionesResponse] = await Promise.all([
+            api.get<ActividadResponse[]>(`/proyectos/${id}/actividades`),
+            api.get<PageResponse<UsuarioResponse>>(`/usuarios?page=0&size=100&sort=apellidos,asc`),
+            api.get<{ idUsuario: number; rolEnProyecto: string }[]>(`/proyectos/${id}/equipo`),
+            api.get<Macroregion[]>(`/macroregiones`),
+            api.get<EjeTematico[]>(`/ejes-tematicos`),
+            api.get<Territorio[]>(`/territorios`),
+            api.get<Institucion[]>(`/instituciones`),
+          ])
+          acts = actsResponse
+          users = usersResponse
+          teamData = teamResponse
+          macroregionesData = macrosResponse
+          ejesData = ejesResponse
+          territoriosData = territoriosResponse
+          institucionesData = institucionesResponse
         } catch (e) {
-          console.error("Error al cargar actividades, usuarios o equipo", e)
+          console.error("Error al cargar actividades, usuarios, equipo o catálogos", e)
         }
         if (!cancelled) {
           setApiProyecto(data)
+          setAvanceDirecto(String(data.porcentajeAvance ?? 0))
+          prepararFormularioEdicionProyecto(data)
           setApiActividades(acts)
           setUsuariosSistema(users.content)
           setApiEquipo(teamData)
-          setMacroregionesList(macros)
+          setMacroregionesCatalogo(macroregionesData)
+          setEjesCatalogo(ejesData)
+          setTerritoriosCatalogo(territoriosData)
+          setInstitucionesCatalogo(institucionesData)
         }
       } catch (error) {
         if (!cancelled) {
@@ -650,10 +857,27 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
     })
     : equipo.map((e, idx) => ({ id: idx, nombre: e.nombre, rol: e.rol }))
 
-  // Calculate days remaining
-  const fechaFin = new Date(proyecto.fechaFin)
-  const hoy = new Date()
-  const diasRestantes = Math.ceil((fechaFin.getTime() - hoy.getTime()) / (1000 * 60 * 60 * 24))
+  const territoriosFiltrados = territoriosCatalogo.filter(territorio =>
+    normalizeSearch(territorio.nombre).includes(normalizeSearch(territorioSearch)),
+  )
+  const institucionesFiltradas = institucionesCatalogo.filter(institucion =>
+    normalizeSearch(institucion.nombre).includes(normalizeSearch(institucionSearch)),
+  )
+  const responsablesFiltrados = usuariosSistema.filter(usuario => {
+    const texto = `${usuario.nombres} ${usuario.apellidos} ${usuario.email}`
+    return normalizeSearch(texto).includes(normalizeSearch(responsableSearch))
+  })
+
+  const responsableSeleccionado = usuariosSistema.find(usuario =>
+    String(usuario.id) === editFormProyecto.idResponsablePrincipal,
+  )
+
+  const responsablesEdicionVisibles = responsableSeleccionado && !responsablesFiltrados.some(usuario => usuario.id === responsableSeleccionado.id)
+    ? [responsableSeleccionado, ...responsablesFiltrados]
+    : responsablesFiltrados
+
+  // Calculate days remaining without shifting LocalDate values by timezone
+  const diasRestantes = getDiasHastaFecha(proyecto.fechaFin)
 
   const tabs = [
     { id: "resumen" as TabType, label: "Resumen" },
@@ -677,131 +901,153 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
         {/* Header */}
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div className="space-y-3">
-            <h1 className="text-2xl font-bold text-[#1A1A1A]">{proyecto.nombre}</h1>
+            <div className="space-y-1">
+              <h1 className="text-2xl font-bold text-[#1A1A1A]">{proyecto.nombre}</h1>
+              <p className="inline-flex items-center rounded-md border border-[#E0E0E0] bg-white px-2.5 py-1 text-xs font-medium text-[#5C5C5C]">
+                Código interno: <span className="ml-1 font-semibold text-[#1A1A1A]">{proyecto.codigo || "Sin código"}</span>
+              </p>
+            </div>
             <div className="flex flex-wrap items-center gap-2">
               {(proyecto.macroregiones?.length ? proyecto.macroregiones : [{ id: 0, nombre: proyecto.macroregion }]).map((macroregion) => (
                 <MacroregionBadge key={macroregion.id} macroregion={macroregion.nombre} />
               ))}
               <TypeBadge tipo={proyecto.ejeTematico} />
               <StatusBadge estado={proyecto.estado} />
-              <ApiSourceTag loading={apiLoading} error={apiError} source={proyecto.fuenteDatos} />
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <Dialog open={editModalOpen} onOpenChange={setEditModalOpen}>
+            <Dialog open={editModalOpen} onOpenChange={(open) => {
+              if (open && apiProyecto) prepararFormularioEdicionProyecto(apiProyecto)
+              setEditModalOpen(open)
+            }}>
               <DialogTrigger asChild>
                 <button className="flex items-center gap-2 rounded-lg border border-[#E0E0E0] bg-white px-4 py-2 text-sm font-medium text-[#5C5C5C] hover:bg-[#F7F7F7]">
                   <Pencil className="h-4 w-4" />
                   Editar
                 </button>
               </DialogTrigger>
-              <DialogContent className="overflow-y-auto sm:max-w-md">
-                <form onSubmit={async (e) => {
-                  e.preventDefault();
-                  if (!apiProyecto) {
-                    setEditModalOpen(false);
-                    return;
-                  }
-                  const formData = new FormData(e.currentTarget);
-
-                  const payload = {
-                    nombre: formData.get("nombre"),
-                    descripcion: formData.get("descripcion"),
-                    objetivoGeneral: apiProyecto.objetivoGeneral || "Sin objetivo",
-                    fechaInicio: formData.get("fechaInicio") || apiProyecto.fechaInicio,
-                    fechaFinEstimada: formData.get("fechaFin") || apiProyecto.fechaFinEstimada || apiProyecto.fechaFin,
-                    estado: formData.get("estado") as string || "PENDIENTE",
-                    nivelPrioridad: apiProyecto.nivelPrioridad || 1,
-                    porcentajeAvance: apiProyecto.porcentajeAvance,
-                    presupuesto: parseFloat(formData.get("presupuesto") as string) || 0,
-                    idMacroregion: null,
-                    idMacroregiones: formData.getAll("macroregiones").map(Number),
-                    idEjeTematico: apiProyecto.idEjeTematico || null,
-                    idResponsablePrincipal: apiProyecto.idResponsablePrincipal || null,
-                    idTerritorios: apiProyecto.territorios?.map(t => t.id) || []
-                  };
-
-                  try {
-                    const data = await api.put<ProyectoResponse>(`/proyectos/${id}`, payload);
-                    setApiProyecto(data);
-                    setEditModalOpen(false);
-                  } catch (err) {
-                    console.error("Error updating project", err);
-                  }
-                }}>
-                  <DialogHeader>
-                    <DialogTitle>Editar Proyecto</DialogTitle>
-                    <DialogDescription>
-                      Modifica los datos generales del proyecto aquí. Haz clic en guardar al finalizar.
-                    </DialogDescription>
-                  </DialogHeader>
-                  <div className="grid gap-4 py-6">
-                    <div className="grid gap-2">
-                      <Label htmlFor="nombre">Nombre del Proyecto</Label>
-                      <Input id="nombre" name="nombre" defaultValue={proyecto.nombre} required />
+              <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-4xl">
+                <DialogHeader>
+                  <DialogTitle>Editar Proyecto</DialogTitle>
+                  <DialogDescription>Actualiza todos los campos vinculados al proyecto.</DialogDescription>
+                </DialogHeader>
+                {editError && <div className="rounded-lg border border-[#C8102E]/20 bg-[#C8102E]/5 px-4 py-3 text-sm text-[#C8102E]">{editError}</div>}
+                <div className="grid gap-5 py-4">
+                  <section className="grid gap-4 rounded-lg border border-[#E0E0E0] p-4">
+                    <h3 className="text-xs font-bold uppercase tracking-wide text-[#5C5C5C]">Información general</h3>
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <div className="grid gap-2 md:col-span-2"><Label htmlFor="edit-proyecto-nombre">Nombre del proyecto <span className="text-[#C8102E]">*</span></Label><Input id="edit-proyecto-nombre" value={editFormProyecto.nombre} onChange={e => setEditFormProyecto(f => ({ ...f, nombre: e.target.value }))} /></div>
+                      <div className="grid gap-2"><Label htmlFor="edit-proyecto-codigo">Código interno <span className="text-[#C8102E]">*</span></Label><Input id="edit-proyecto-codigo" value={editFormProyecto.codigoInterno} onChange={e => setEditFormProyecto(f => ({ ...f, codigoInterno: e.target.value }))} /></div>
+                      <div className="grid gap-2"><Label htmlFor="edit-proyecto-eje">Eje temático</Label><Select value={editFormProyecto.idEjeTematico || "sin-eje"} onValueChange={v => setEditFormProyecto(f => ({ ...f, idEjeTematico: v === "sin-eje" ? "" : v }))}><SelectTrigger id="edit-proyecto-eje"><SelectValue placeholder="Seleccionar eje" /></SelectTrigger><SelectContent><SelectItem value="sin-eje">Sin eje temático</SelectItem>{ejesCatalogo.map(eje => <SelectItem key={eje.id} value={String(eje.id)}>{eje.nombre}</SelectItem>)}</SelectContent></Select></div>
+                      <div className="grid gap-2 md:col-span-2"><Label htmlFor="edit-proyecto-descripcion">Descripción</Label><Textarea id="edit-proyecto-descripcion" rows={3} value={editFormProyecto.descripcion} onChange={e => setEditFormProyecto(f => ({ ...f, descripcion: e.target.value }))} /></div>
+                      <div className="grid gap-2 md:col-span-2"><Label htmlFor="edit-proyecto-objetivo">Objetivo general</Label><Textarea id="edit-proyecto-objetivo" rows={2} value={editFormProyecto.objetivoGeneral} onChange={e => setEditFormProyecto(f => ({ ...f, objetivoGeneral: e.target.value }))} /></div>
                     </div>
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="grid gap-2">
-                        <Label htmlFor="codigo">Código (Solo lectura)</Label>
-                        <Input id="codigo" defaultValue={proyecto.codigo} disabled />
-                      </div>
-                      <div className="grid gap-2">
-                        <Label htmlFor="presupuesto">Presupuesto (S/)</Label>
-                        <Input id="presupuesto" name="presupuesto" type="number" defaultValue={proyecto.presupuesto} />
-                      </div>
+                  </section>
+                  <section className="grid gap-4 rounded-lg border border-[#E0E0E0] p-4">
+                    <h3 className="text-xs font-bold uppercase tracking-wide text-[#5C5C5C]">Fechas, estado, prioridad, avance y presupuesto</h3>
+                    <div className="grid gap-4 md:grid-cols-3">
+                      <div className="grid gap-2"><Label>Fecha de inicio <span className="text-[#C8102E]">*</span></Label><Input type="date" value={editFormProyecto.fechaInicio} onChange={e => setEditFormProyecto(f => ({ ...f, fechaInicio: e.target.value }))} /></div>
+                      <div className="grid gap-2"><Label>Fecha de fin estimada</Label><Input type="date" value={editFormProyecto.fechaFinEstimada} onChange={e => setEditFormProyecto(f => ({ ...f, fechaFinEstimada: e.target.value }))} /></div>
+                      <div className="grid gap-2"><Label>Estado <span className="text-[#C8102E]">*</span></Label><Select value={editFormProyecto.estado} onValueChange={v => setEditFormProyecto(f => ({ ...f, estado: v as EstadoProyecto }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{ESTADOS_PROYECTO.map(estado => <SelectItem key={estado.value} value={estado.value}>{estado.label}</SelectItem>)}</SelectContent></Select></div>
+                      <div className="grid gap-2"><Label>Prioridad</Label><Select value={editFormProyecto.nivelPrioridad || "sin-prioridad"} onValueChange={v => setEditFormProyecto(f => ({ ...f, nivelPrioridad: v === "sin-prioridad" ? "" : v }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{PRIORIDADES_PROYECTO.map(prioridad => <SelectItem key={prioridad.value || "sin-prioridad"} value={prioridad.value || "sin-prioridad"}>{prioridad.label}</SelectItem>)}</SelectContent></Select></div>
+                      <div className="grid gap-2"><Label>Avance (%) <span className="text-[#C8102E]">*</span></Label><Input type="number" min="0" max="100" step="1" value={editFormProyecto.porcentajeAvance} onChange={e => setEditFormProyecto(f => ({ ...f, porcentajeAvance: e.target.value }))} /></div>
+                      <div className="grid gap-2"><Label>Presupuesto</Label><Input type="number" min="0" step="0.01" value={editFormProyecto.presupuesto} onChange={e => setEditFormProyecto(f => ({ ...f, presupuesto: e.target.value }))} /></div>
                     </div>
-                    <div className="grid grid-cols-2 gap-4">
+                  </section>
+                  <section className="grid gap-4 rounded-lg border border-[#E0E0E0] p-4">
+                    <h3 className="text-xs font-bold uppercase tracking-wide text-[#5C5C5C]">Clasificación y relaciones</h3>
+                    <div className="grid gap-4 md:grid-cols-2">
                       <div className="grid gap-2">
-                        <Label htmlFor="fechaInicio">Fecha de Inicio</Label>
-                        <Input id="fechaInicio" name="fechaInicio" type="date" defaultValue={proyecto.fechaInicio?.split('T')[0]} required />
-                      </div>
-                      <div className="grid gap-2">
-                        <Label htmlFor="fechaFin">Fecha de Fin</Label>
-                        <Input id="fechaFin" name="fechaFin" type="date" defaultValue={proyecto.fechaFin?.split('T')[0]} />
-                      </div>
-                    </div>
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="grid gap-2">
-                        <Label>Macroregión</Label>
-                        <div className="flex flex-col gap-2 rounded-md border border-[#E0E0E0] bg-[#FAFAFA] p-3 max-h-40 overflow-y-auto">
-                          {macroregionesList.length > 0 ? macroregionesList.map((region) => (
-                            <label key={region.id} className="flex items-center gap-2 cursor-pointer">
-                              <input
-                                type="checkbox"
-                                name="macroregiones"
-                                value={region.id}
-                                className="h-4 w-4 rounded border-[#E0E0E0] accent-[#FFD600]"
-                                defaultChecked={proyecto.macroregiones?.some(m => m.id === region.id) ?? false}
-                              />
-                              <span className="text-sm text-[#1A1A1A]">{region.nombre}</span>
-                            </label>
-                          )) : (
-                            <span className="text-sm text-[#5C5C5C]">Cargando...</span>
-                          )}
+                        <Label>Macroregiones <span className="text-[#C8102E]">*</span></Label>
+                        <div className="flex min-h-24 flex-wrap items-center gap-2 rounded-md border border-[#E0E0E0] p-3">
+                          {macroregionesCatalogo.map(m => (
+                            <button
+                              key={m.id}
+                              type="button"
+                              onClick={() => toggleEditMacroregion(m.id)}
+                              className={`rounded-full px-3 py-1 text-xs font-medium ${editFormProyecto.idMacroregiones.includes(m.id) ? "bg-[#FFD600] text-[#1A1A1A]" : "border border-[#E0E0E0] text-[#5C5C5C]"}`}
+                            >
+                              {m.nombre}
+                            </button>
+                          ))}
                         </div>
                       </div>
                       <div className="grid gap-2">
-                        <Label>Estado</Label>
-                        <Select name="estado" defaultValue={proyecto.estado}>
-                          <SelectTrigger><SelectValue placeholder="Seleccione" /></SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="PENDIENTE">Pendiente</SelectItem>
-                            <SelectItem value="EN_CURSO">En curso</SelectItem>
-                            <SelectItem value="FINALIZADO">Finalizado</SelectItem>
-                          </SelectContent>
-                        </Select>
+                        <Label>Responsable principal <span className="text-[#C8102E]">*</span></Label>
+                        <Input
+                          placeholder="Buscar responsable..."
+                          value={responsableSearch}
+                          onChange={e => setResponsableSearch(e.target.value)}
+                        />
+                        <div className="flex max-h-32 flex-wrap gap-2 overflow-y-auto rounded-md border border-[#E0E0E0] p-3">
+                          {responsablesEdicionVisibles.length > 0 ? responsablesEdicionVisibles.map(u => {
+                            const selected = editFormProyecto.idResponsablePrincipal === String(u.id)
+                            return (
+                              <button
+                                key={u.id}
+                                type="button"
+                                onClick={() => setEditFormProyecto(f => ({ ...f, idResponsablePrincipal: String(u.id) }))}
+                                className={`rounded-full px-3 py-1 text-xs font-medium ${selected ? "bg-[#FFD600] text-[#1A1A1A]" : "border border-[#E0E0E0] text-[#5C5C5C]"}`}
+                              >
+                                {u.nombres} {u.apellidos}
+                              </button>
+                            )
+                          }) : <span className="text-xs text-[#5C5C5C]">No se encontraron responsables.</span>}
+                        </div>
+                      </div>
+                      <div className="grid gap-2">
+                        <Label>Territorios (departamentos)</Label>
+                        <Input
+                          placeholder="Buscar departamento..."
+                          value={territorioSearch}
+                          onChange={e => setTerritorioSearch(e.target.value)}
+                        />
+                        <div className="flex max-h-40 flex-wrap gap-2 overflow-y-auto rounded-md border border-[#E0E0E0] p-3">
+                          {territoriosFiltrados.length > 0 ? territoriosFiltrados.map(t => (
+                            <button
+                              key={t.id}
+                              type="button"
+                              onClick={() => toggleEditTerritorio(t.id)}
+                              className={`rounded-full px-3 py-1 text-xs font-medium ${editFormProyecto.idTerritorios.includes(t.id) ? "bg-[#FFD600] text-[#1A1A1A]" : "border border-[#E0E0E0] text-[#5C5C5C]"}`}
+                            >
+                              {t.nombre}
+                            </button>
+                          )) : <span className="text-xs text-[#5C5C5C]">No se encontraron departamentos.</span>}
+                        </div>
+                        {editFormProyecto.idTerritorios.length > 0 && (
+                          <p className="text-xs text-[#5C5C5C]">{editFormProyecto.idTerritorios.length} departamento(s) seleccionado(s)</p>
+                        )}
+                      </div>
+                      <div className="grid gap-2">
+                        <Label>Instituciones miembro</Label>
+                        <Input
+                          placeholder="Buscar institución..."
+                          value={institucionSearch}
+                          onChange={e => setInstitucionSearch(e.target.value)}
+                        />
+                        <div className="flex max-h-40 flex-wrap gap-2 overflow-y-auto rounded-md border border-[#E0E0E0] p-3">
+                          {institucionesFiltradas.length > 0 ? institucionesFiltradas.map(inst => {
+                            const selected = editFormProyecto.instituciones.some(item => item.idInstitucion === inst.id)
+                            return (
+                              <button
+                                key={inst.id}
+                                type="button"
+                                onClick={() => toggleEditInstitucion(inst.id)}
+                                className={`rounded-full px-3 py-1 text-xs font-medium ${selected ? "bg-[#FFD600] text-[#1A1A1A]" : "border border-[#E0E0E0] text-[#5C5C5C]"}`}
+                              >
+                                {inst.nombre}
+                              </button>
+                            )
+                          }) : <span className="text-xs text-[#5C5C5C]">No se encontraron instituciones.</span>}
+                        </div>
+                        {editFormProyecto.instituciones.length > 0 && (
+                          <p className="text-xs text-[#5C5C5C]">{editFormProyecto.instituciones.length} institución(es) seleccionada(s) como miembro.</p>
+                        )}
                       </div>
                     </div>
-                    <div className="grid gap-2">
-                      <Label htmlFor="desc">Descripción</Label>
-                      <Textarea id="desc" name="descripcion" defaultValue={proyecto.descripcion} rows={4} className="resize-none" />
-                    </div>
-                  </div>
-                  <DialogFooter>
-                    <Button variant="outline" type="button" onClick={() => setEditModalOpen(false)}>Cancelar</Button>
-                    <Button type="submit" className="bg-[#FFD600] text-[#1A1A1A] hover:bg-[#C9A42B]">Guardar</Button>
-                  </DialogFooter>
-                </form>
+                  </section>
+                </div>
+                <DialogFooter><Button variant="outline" type="button" onClick={() => setEditModalOpen(false)} disabled={editSubmitting}>Cancelar</Button><Button type="button" onClick={guardarEdicionProyecto} disabled={editSubmitting} className="bg-[#FFD600] text-[#1A1A1A] hover:bg-[#C9A42B]">{editSubmitting ? "Guardando..." : <><Save className="mr-2 h-4 w-4" /> Guardar cambios</>}</Button></DialogFooter>
               </DialogContent>
             </Dialog>
             <button className="flex items-center gap-2 rounded-lg border border-[#E0E0E0] bg-white px-4 py-2 text-sm font-medium text-[#5C5C5C] hover:bg-[#F7F7F7]">
@@ -858,7 +1104,7 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div>
                       <h3 className="text-sm font-bold uppercase tracking-wide text-[#5C5C5C] mb-2">
-                        Territorios
+                        Territorios / departamentos
                       </h3>
                       <div className="flex flex-wrap gap-2">
                         {proyecto.territorios.map(t => (
@@ -874,15 +1120,15 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                         <h3 className="text-sm font-bold uppercase tracking-wide text-[#5C5C5C]">
                           Instituciones Miembro
                         </h3>
-                        <MockDataTag />
+                        {proyecto.fuenteDatos !== "api" && <MockDataTag />}
                       </div>
                       <div className="flex flex-wrap gap-2">
-                        {proyecto.institucionesMiembro.map(i => (
+                        {proyecto.institucionesMiembro.length > 0 ? proyecto.institucionesMiembro.map(i => (
                           <span key={i} className="inline-flex items-center gap-1 rounded-full bg-[#FFD600]/10 px-3 py-1 text-xs text-[#C9A42B]">
                             <Building2 className="h-3 w-3" />
                             {i}
                           </span>
-                        ))}
+                        )) : <span className="text-sm text-[#5C5C5C]">Sin instituciones vinculadas</span>}
                       </div>
                     </div>
                   </div>
@@ -1041,7 +1287,7 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                         </div>
                         <div className="grid gap-2">
                           <Label htmlFor="edit-estado">Estado</Label>
-                          <Select value={editForm.estado} onValueChange={v => setEditForm(f => ({ ...f, estado: v as "PENDIENTE" | "EN_CURSO" | "FINALIZADA" }))}>
+                          <Select value={editForm.estado} onValueChange={v => setEditForm(f => ({ ...f, estado: v as EstadoActividad }))}>
                             <SelectTrigger id="edit-estado"><SelectValue /></SelectTrigger>
                             <SelectContent>
                               <SelectItem value="PENDIENTE">Pendiente</SelectItem>
@@ -1681,16 +1927,15 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                             )}
                           </div>
                           <div className="grid gap-2">
-                            <Label htmlFor="miembro-rol">Rol en el proyecto</Label>
+                            <Label htmlFor="miembro-rol">Rol en el proyecto <span className="text-[#C8102E]">*</span></Label>
                             <Select value={nuevoMiembroRol} onValueChange={setNuevoMiembroRol}>
                               <SelectTrigger id="miembro-rol">
                                 <SelectValue placeholder="Seleccione un rol" />
                               </SelectTrigger>
                               <SelectContent>
-                                <SelectItem value="Equipo Técnico">Equipo Técnico</SelectItem>
-                                <SelectItem value="Coordinador">Coordinador</SelectItem>
-                                <SelectItem value="Asesor">Asesor</SelectItem>
-                                <SelectItem value="Observador">Observador</SelectItem>
+                                {ROLES_PROYECTO.map(rol => (
+                                  <SelectItem key={rol} value={rol}>{rol}</SelectItem>
+                                ))}
                               </SelectContent>
                             </Select>
                           </div>
@@ -1817,7 +2062,7 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                 <div>
                   <p className="text-xs text-[#5C5C5C]">Periodo</p>
                   <p className="text-sm text-[#1A1A1A]">
-                    {new Date(proyecto.fechaInicio).toLocaleDateString("es-PE")} - {new Date(proyecto.fechaFin).toLocaleDateString("es-PE")}
+                    {formatLocalDate(proyecto.fechaInicio)} - {formatLocalDate(proyecto.fechaFin)}
                   </p>
                 </div>
               </div>
@@ -1866,17 +2111,42 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
 
           {/* Progress card */}
           <div className="rounded-lg border border-[#E0E0E0] bg-white p-5 shadow-sm">
-            <h3 className="text-sm font-bold uppercase tracking-wide text-[#5C5C5C] mb-4">
+            <h3 className="mb-4 text-sm font-bold uppercase tracking-wide text-[#5C5C5C]">
               Avance
             </h3>
-            <div className="text-center mb-4">
+            <div className="mb-4 text-center">
               <span className="text-4xl font-bold text-[#1A1A1A]">{proyecto.avance}%</span>
             </div>
             <ProgressBar value={proyecto.avance} showLabel={false} size="lg" />
+            {apiProyecto && (
+              <div className="mt-4 space-y-2">
+                <Label htmlFor="avance-directo" className="text-xs text-[#5C5C5C]">Actualizar avance (%)</Label>
+                <div className="flex gap-2">
+                  <Input
+                    id="avance-directo"
+                    type="number"
+                    min="0"
+                    max="100"
+                    step="1"
+                    value={avanceDirecto}
+                    onChange={e => setAvanceDirecto(e.target.value)}
+                  />
+                  <Button
+                    type="button"
+                    onClick={guardarAvanceProyecto}
+                    disabled={avanceSubmitting}
+                    className="bg-[#FFD600] text-[#1A1A1A] hover:bg-[#C9A42B]"
+                  >
+                    {avanceSubmitting ? "..." : "Guardar"}
+                  </Button>
+                </div>
+                {avanceError && <p className="text-xs text-[#C8102E]">{avanceError}</p>}
+              </div>
+            )}
           </div>
 
           {/* Alerts card */}
-          {proyecto.estado === "En riesgo" && (
+          {proyecto.estado === "SUSPENDIDO" && (
             <div className="rounded-lg border border-[#C8102E]/20 bg-[#C8102E]/5 p-5">
               <div className="flex items-center gap-2 text-[#C8102E] mb-2">
                 <AlertTriangle className="h-4 w-4" />

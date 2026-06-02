@@ -50,7 +50,7 @@ export default function DashboardPage() {
   
   // Proyectos con alertas (en riesgo o con poco tiempo)
   const proyectosConAlertas = proyectos
-    .filter(p => p.estado === "En riesgo" || p.estado === "Activo")
+    .filter(p => p.estado === "Activo" || p.estado === "Suspendido")
     .slice(0, 5)
     .map(p => {
       const fechaFin = new Date(p.fechaFin)

@@ -8,8 +8,10 @@ import { AppLayout } from "@/components/layout/app-layout"
 import { Spinner } from "@/components/ui/spinner"
 import { api, ApiError } from "@/lib/api"
 import type {
+  AsociarInstitucionesRequest,
   EjeTematico,
   EstadoProyecto,
+  Institucion,
   Macroregion,
   PageResponse,
   ProyectoCreate,
@@ -17,12 +19,7 @@ import type {
   Territorio,
   UsuarioResponse,
 } from "@/lib/types"
-
-const ESTADOS: Array<{ value: EstadoProyecto; label: string }> = [
-  { value: "PENDIENTE", label: "Pendiente" },
-  { value: "EN_CURSO", label: "En curso" },
-  { value: "FINALIZADO", label: "Finalizado" },
-]
+import { ESTADOS_PROYECTO } from "@/lib/project-status"
 
 const PRIORIDADES = [
   { value: "", label: "Sin prioridad" },
@@ -39,6 +36,7 @@ interface FormState {
   idMacroregiones: string[]
   idEjeTematico: string
   idTerritorios: string[]
+  idInstituciones: string[]
   idResponsablePrincipal: string
   fechaInicio: string
   fechaFinEstimada: string
@@ -55,10 +53,11 @@ const initialFormState: FormState = {
   idMacroregiones: [],
   idEjeTematico: "",
   idTerritorios: [],
+  idInstituciones: [],
   idResponsablePrincipal: "",
   fechaInicio: "",
   fechaFinEstimada: "",
-  estado: "PENDIENTE",
+  estado: "ACTIVO",
   nivelPrioridad: "",
   presupuesto: "",
 }
@@ -73,15 +72,23 @@ function nombreCompleto(usuario: UsuarioResponse): string {
   return `${usuario.nombres} ${usuario.apellidos}`.trim()
 }
 
+function normalizeSearch(value: string): string {
+  return value.trim().toLowerCase()
+}
+
 export default function NuevoProyectoPage() {
   const router = useRouter()
   const [formData, setFormData] = useState<FormState>(initialFormState)
   const [macroregiones, setMacroregiones] = useState<Macroregion[]>([])
   const [ejesTematicos, setEjesTematicos] = useState<EjeTematico[]>([])
   const [territorios, setTerritorios] = useState<Territorio[]>([])
+  const [instituciones, setInstituciones] = useState<Institucion[]>([])
   const [usuarios, setUsuarios] = useState<UsuarioResponse[]>([])
   const [loadingCatalogos, setLoadingCatalogos] = useState(true)
   const [loadingUsuarios, setLoadingUsuarios] = useState(true)
+  const [territorioSearch, setTerritorioSearch] = useState("")
+  const [institucionSearch, setInstitucionSearch] = useState("")
+  const [responsableSearch, setResponsableSearch] = useState("")
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -92,16 +99,18 @@ export default function NuevoProyectoPage() {
       setLoadingCatalogos(true)
       setError(null)
       try {
-        const [macroregionesData, ejesData, territoriosData] = await Promise.all([
+        const [macroregionesData, ejesData, territoriosData, institucionesData] = await Promise.all([
           api.get<Macroregion[]>("/macroregiones"),
           api.get<EjeTematico[]>("/ejes-tematicos"),
           api.get<Territorio[]>("/territorios"),
+          api.get<Institucion[]>("/instituciones"),
         ])
 
         if (!cancelled) {
           setMacroregiones(macroregionesData)
           setEjesTematicos(ejesData)
           setTerritorios(territoriosData)
+          setInstituciones(institucionesData)
         }
       } catch (err) {
         if (!cancelled) {
@@ -162,6 +171,16 @@ export default function NuevoProyectoPage() {
     }))
   }
 
+  const toggleInstitucion = (id: number) => {
+    const value = String(id)
+    setFormData((current) => ({
+      ...current,
+      idInstituciones: current.idInstituciones.includes(value)
+        ? current.idInstituciones.filter((item) => item !== value)
+        : [...current.idInstituciones, value],
+    }))
+  }
+
   const buildPayload = (): ProyectoCreate => {
     const payload: ProyectoCreate = {
       nombre: formData.nombre.trim(),
@@ -201,6 +220,27 @@ export default function NuevoProyectoPage() {
     return payload
   }
 
+  const territoriosFiltrados = territorios.filter((territorio) =>
+    normalizeSearch(territorio.nombre).includes(normalizeSearch(territorioSearch)),
+  )
+
+  const institucionesFiltradas = instituciones.filter((institucion) =>
+    normalizeSearch(institucion.nombre).includes(normalizeSearch(institucionSearch)),
+  )
+
+  const responsablesFiltrados = usuarios.filter((usuario) => {
+    const texto = `${usuario.nombres} ${usuario.apellidos} ${usuario.email}`
+    return normalizeSearch(texto).includes(normalizeSearch(responsableSearch))
+  })
+
+  const responsableSeleccionado = usuarios.find((usuario) =>
+    String(usuario.id) === formData.idResponsablePrincipal,
+  )
+
+  const responsablesVisibles = responsableSeleccionado && !responsablesFiltrados.some((usuario) => usuario.id === responsableSeleccionado.id)
+    ? [responsableSeleccionado, ...responsablesFiltrados]
+    : responsablesFiltrados
+
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     setError(null)
@@ -209,6 +249,7 @@ export default function NuevoProyectoPage() {
       formData.idMacroregiones.length === 0 ||
       !formData.idEjeTematico ||
       !formData.fechaInicio ||
+      !formData.idResponsablePrincipal ||
       !formData.nombre.trim() ||
       !formData.codigoInterno.trim()
     ) {
@@ -228,6 +269,15 @@ export default function NuevoProyectoPage() {
     setSubmitting(true)
     try {
       const creado = await api.post<ProyectoResponse>("/proyectos", buildPayload())
+      if (formData.idInstituciones.length > 0) {
+        const institucionesPayload: AsociarInstitucionesRequest = {
+          instituciones: formData.idInstituciones.map((idInstitucion) => ({
+            idInstitucion: Number(idInstitucion),
+            tipoParticipacion: "Miembro",
+          })),
+        }
+        await api.post<void>(`/proyectos/${creado.id}/instituciones`, institucionesPayload)
+      }
       router.push(`/proyectos/${creado.id}`)
     } catch (err) {
       const message =
@@ -410,67 +460,154 @@ export default function NuevoProyectoPage() {
 
                 <div>
                   <label className="mb-1.5 block text-xs font-medium text-[#5C5C5C]">
-                    Responsable principal
+                    Responsable principal *
                   </label>
-                  <select
-                    value={formData.idResponsablePrincipal}
-                    onChange={(event) =>
-                      updateField("idResponsablePrincipal", event.target.value)
-                    }
-                    disabled={loadingUsuarios || usuarios.length === 0}
-                    className="w-full rounded-lg border border-[#E0E0E0] px-4 py-2.5 text-sm text-[#1A1A1A] focus:border-[#FFD600] focus:outline-none focus:ring-1 focus:ring-[#FFD600] disabled:opacity-60"
-                  >
-                    <option value="">
-                      {usuarios.length === 0
-                        ? "Sin usuarios disponibles"
-                        : "Seleccionar responsable"}
-                    </option>
-                    {usuarios.map((usuario) => (
-                      <option key={usuario.id} value={usuario.id}>
-                        {nombreCompleto(usuario)}
-                      </option>
-                    ))}
-                  </select>
+                  <input
+                    type="search"
+                    value={responsableSearch}
+                    onChange={(event) => setResponsableSearch(event.target.value)}
+                    className="mb-2 w-full rounded-lg border border-[#E0E0E0] px-4 py-2 text-sm text-[#1A1A1A] focus:border-[#FFD600] focus:outline-none focus:ring-1 focus:ring-[#FFD600]"
+                    placeholder="Buscar responsable por nombre o correo..."
+                  />
+                  {loadingUsuarios ? (
+                    <div className="flex items-center gap-2 text-sm text-[#5C5C5C]">
+                      <Spinner />
+                      Cargando responsables...
+                    </div>
+                  ) : usuarios.length > 0 ? (
+                    <div className="flex max-h-32 flex-wrap gap-2 overflow-y-auto rounded-lg border border-[#E0E0E0] p-3">
+                      {responsablesVisibles.length > 0 ? responsablesVisibles.map((usuario) => {
+                        const selected = formData.idResponsablePrincipal === String(usuario.id)
+                        return (
+                          <button
+                            key={usuario.id}
+                            type="button"
+                            onClick={() => updateField("idResponsablePrincipal", String(usuario.id))}
+                            className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+                              selected
+                                ? "bg-[#FFD600] text-[#1A1A1A]"
+                                : "border border-[#E0E0E0] text-[#5C5C5C] hover:bg-[#F7F7F7]"
+                            }`}
+                          >
+                            {nombreCompleto(usuario)}
+                          </button>
+                        )
+                      }) : (
+                        <p className="text-sm text-[#5C5C5C]">No se encontraron responsables.</p>
+                      )}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-[#5C5C5C]">Sin usuarios disponibles.</p>
+                  )}
                 </div>
               </div>
 
               <div>
                 <label className="mb-2 block text-xs font-medium text-[#5C5C5C]">
-                  Territorios involucrados
+                  Territorios involucrados (departamentos)
                 </label>
                 {loadingCatalogos ? (
                   <div className="flex items-center gap-2 text-sm text-[#5C5C5C]">
                     <Spinner />
-                    Cargando territorios...
+                    Cargando departamentos...
                   </div>
                 ) : territorios.length > 0 ? (
-                  <div className="flex flex-wrap gap-2">
-                    {territorios.map((territorio) => {
-                      const selected = formData.idTerritorios.includes(
-                        String(territorio.id),
-                      )
-                      return (
-                        <button
-                          key={territorio.id}
-                          type="button"
-                          onClick={() => toggleTerritorio(territorio.id)}
-                          className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
-                            selected
-                              ? "bg-[#FFD600] text-[#1A1A1A]"
-                              : "border border-[#E0E0E0] text-[#5C5C5C] hover:bg-[#F7F7F7]"
-                          }`}
-                        >
-                          {territorio.nombre}
-                        </button>
-                      )
-                    })}
+                  <div className="space-y-2">
+                    <input
+                      type="search"
+                      value={territorioSearch}
+                      onChange={(event) => setTerritorioSearch(event.target.value)}
+                      className="w-full rounded-lg border border-[#E0E0E0] px-4 py-2 text-sm text-[#1A1A1A] focus:border-[#FFD600] focus:outline-none focus:ring-1 focus:ring-[#FFD600]"
+                      placeholder="Buscar territorio..."
+                    />
+                    <div className="flex max-h-40 flex-wrap gap-2 overflow-y-auto rounded-lg border border-[#E0E0E0] p-3">
+                      {territoriosFiltrados.length > 0 ? territoriosFiltrados.map((territorio) => {
+                        const selected = formData.idTerritorios.includes(
+                          String(territorio.id),
+                        )
+                        return (
+                          <button
+                            key={territorio.id}
+                            type="button"
+                            onClick={() => toggleTerritorio(territorio.id)}
+                            className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+                              selected
+                                ? "bg-[#FFD600] text-[#1A1A1A]"
+                                : "border border-[#E0E0E0] text-[#5C5C5C] hover:bg-[#F7F7F7]"
+                            }`}
+                          >
+                            {territorio.nombre}
+                          </button>
+                        )
+                      }) : (
+                        <p className="text-sm text-[#5C5C5C]">No se encontraron territorios.</p>
+                      )}
+                    </div>
+                    {formData.idTerritorios.length > 0 && (
+                      <p className="text-xs text-[#5C5C5C]">
+                        {formData.idTerritorios.length} departamento(s) seleccionado(s)
+                      </p>
+                    )}
                   </div>
                 ) : (
                   <p className="text-sm text-[#5C5C5C]">
-                    No hay territorios configurados todavía.
+                    No hay departamentos configurados todavía.
                   </p>
                 )}
               </div>
+
+              <div>
+                <label className="mb-2 block text-xs font-medium text-[#5C5C5C]">
+                  Instituciones miembro
+                </label>
+                {loadingCatalogos ? (
+                  <div className="flex items-center gap-2 text-sm text-[#5C5C5C]">
+                    <Spinner />
+                    Cargando instituciones...
+                  </div>
+                ) : instituciones.length > 0 ? (
+                  <div className="space-y-2">
+                    <input
+                      type="search"
+                      value={institucionSearch}
+                      onChange={(event) => setInstitucionSearch(event.target.value)}
+                      className="w-full rounded-lg border border-[#E0E0E0] px-4 py-2 text-sm text-[#1A1A1A] focus:border-[#FFD600] focus:outline-none focus:ring-1 focus:ring-[#FFD600]"
+                      placeholder="Buscar institución..."
+                    />
+                    <div className="flex max-h-40 flex-wrap gap-2 overflow-y-auto rounded-lg border border-[#E0E0E0] p-3">
+                      {institucionesFiltradas.length > 0 ? institucionesFiltradas.map((institucion) => {
+                        const selected = formData.idInstituciones.includes(String(institucion.id))
+                        return (
+                          <button
+                            key={institucion.id}
+                            type="button"
+                            onClick={() => toggleInstitucion(institucion.id)}
+                            className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+                              selected
+                                ? "bg-[#FFD600] text-[#1A1A1A]"
+                                : "border border-[#E0E0E0] text-[#5C5C5C] hover:bg-[#F7F7F7]"
+                            }`}
+                          >
+                            {institucion.nombre}
+                          </button>
+                        )
+                      }) : (
+                        <p className="text-sm text-[#5C5C5C]">No se encontraron instituciones.</p>
+                      )}
+                    </div>
+                    {formData.idInstituciones.length > 0 && (
+                      <p className="text-xs text-[#5C5C5C]">
+                        {formData.idInstituciones.length} institución(es) seleccionada(s) como miembro.
+                      </p>
+                    )}
+                  </div>
+                ) : (
+                  <p className="text-sm text-[#5C5C5C]">
+                    No hay instituciones configuradas todavía.
+                  </p>
+                )}
+              </div>
+
             </div>
           </section>
 
@@ -523,7 +660,7 @@ export default function NuevoProyectoPage() {
                     }
                     className="w-full rounded-lg border border-[#E0E0E0] px-4 py-2.5 text-sm text-[#1A1A1A] focus:border-[#FFD600] focus:outline-none focus:ring-1 focus:ring-[#FFD600]"
                   >
-                    {ESTADOS.map((estado) => (
+                    {ESTADOS_PROYECTO.map((estado) => (
                       <option key={estado.value} value={estado.value}>
                         {estado.label}
                       </option>
