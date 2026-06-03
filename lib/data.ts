@@ -2,7 +2,7 @@
 
 export type Macroregion = "Norte" | "Centro" | "Sur"
 export type EjeTematico = "Agua y Territorio" | "Derechos Humanos" | "Minería Artesanal (MAPE)" | "Vigilancia Ambiental" | "Incidencia Política" | "Fortalecimiento Organizacional"
-export type EstadoProyecto = "Activo" | "En riesgo" | "Cerrado" | "Suspendido"
+export type EstadoProyecto = "Activo" | "Cerrado" | "Suspendido"
 export type EstadoDocumento = "Borrador" | "En revisión" | "Publicado"
 export type TipoDocumento = "Informe" | "Pronunciamiento" | "Investigación" | "Manual" | "Cartilla" | "Resumen técnico"
 export type RolUsuario = "Administrador" | "Secretaría Ejecutiva" | "Equipo Técnico" | "Coordinación Macroregional" | "Institución Miembro" | "Solo lectura"
@@ -172,7 +172,7 @@ export const proyectos: Proyecto[] = [
     fechaInicio: "2024-02-01",
     fechaFin: "2025-03-15",
     avance: 78,
-    estado: "En riesgo",
+    estado: "Suspendido",
     institucionesMiembro: ["Labor Pasco", "CooperAcción"],
     presupuesto: 55000
   },

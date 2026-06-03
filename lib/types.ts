@@ -116,7 +116,7 @@ export interface EjeTematico {
 
 // ----- Proyecto -----
 
-export type EstadoProyecto = "PENDIENTE" | "EN_CURSO" | "FINALIZADO"
+export type EstadoProyecto = "ACTIVO" | "CERRADO" | "SUSPENDIDO"
 
 export interface UsuarioSummary {
   id: number
@@ -133,6 +133,12 @@ export interface TerritorioRef {
 export interface MacroregionRef {
   id: number
   nombre: string
+}
+
+export interface InstitucionProyectoRef {
+  id: number
+  nombre: string
+  tipoParticipacion: string | null
 }
 
 export interface ProyectoResponse {
@@ -154,6 +160,7 @@ export interface ProyectoResponse {
   idEjeTematico: number | null
   responsablePrincipal: UsuarioSummary | null
   territorios: TerritorioRef[]
+  instituciones: InstitucionProyectoRef[]
 }
 
 export interface ProyectoCreate {
@@ -171,6 +178,19 @@ export interface ProyectoCreate {
   idEjeTematico?: number
   idResponsablePrincipal?: number
   idTerritorios?: number[]
+}
+
+export interface ProyectoUpdate extends ProyectoCreate {
+  porcentajeAvance?: number
+}
+
+export interface InstitucionParticipacion {
+  idInstitucion: number
+  tipoParticipacion?: string | null
+}
+
+export interface AsociarInstitucionesRequest {
+  instituciones: InstitucionParticipacion[]
 }
 
 // ----- Actividad y Subactividad -----
@@ -256,6 +276,55 @@ export interface HitoCreate {
   descripcion?: string | null
   fechaClave: string
   estado: EstadoHito
+}
+
+// ----- Documento -----
+
+// Alineado con el enum EstadoDocumento del backend.
+// NOTA: el workflow de 3 estados (EN_REVISION) es RF-056 de LS; aquí solo
+// existen los valores actuales del enum Java.
+export type EstadoDocumento = "BORRADOR" | "PUBLICADO"
+
+// Tipos de documento permitidos al registrar (RF-046).
+// Debe mantenerse IDÉNTICO al Set TIPOS_PERMITIDOS del backend (DocumentoService).
+export const TIPOS_DOCUMENTO = [
+  "Informe",
+  "Pronunciamiento",
+  "Investigación",
+  "Manual",
+  "Cartilla",
+  "Resumen técnico",
+] as const
+
+export type TipoDocumento = (typeof TIPOS_DOCUMENTO)[number]
+
+export interface DocumentoResponse {
+  id: number
+  titulo: string
+  descripcion: string | null
+  tipo: string | null
+  estado: EstadoDocumento
+  tipoArchivo: string | null
+  fechaCarga: string
+  enlace: string | null
+  version: number
+  idProyecto: number | null
+  idEjeTematico: number | null
+  idRespElaboracion: number | null
+  idRespValidacion: number | null
+  idTerritorios: number[]
+}
+
+export interface DocumentoCreate {
+  titulo: string
+  tipo: string
+  descripcion?: string
+  estado?: EstadoDocumento
+  idProyecto?: number
+  idEjeTematico?: number
+  idRespElaboracion: number
+  idRespValidacion?: number
+  idTerritorios?: number[]
 }
 
 // ----- Bitacora -----

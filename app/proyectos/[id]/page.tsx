@@ -1,8 +1,8 @@
 "use client"
 
 import React, { useEffect, useMemo, useState, use } from "react"
-import { AppLayout } from "@/components/layout/app-layout"
 import { PermissionGuard } from "@/components/auth/permission-guard"
+import { AppLayout } from "@/components/layout/app-layout"
 import { StatusBadge, MacroregionBadge, TypeBadge } from "@/components/ui/status-badge"
 import { ProgressBar } from "@/components/ui/progress-bar"
 import {
@@ -14,26 +14,35 @@ import {
 } from "@/lib/data"
 import type { Hito as HitoMock, Proyecto as ProyectoMock } from "@/lib/data"
 import { api, ApiError } from "@/lib/api"
+import { ESTADOS_PROYECTO, normalizarEstadoProyecto } from "@/lib/project-status"
 import type {
-  Macroregion,
   MacroregionRef,
+  Macroregion,
+  EjeTematico,
+  Territorio,
+  Institucion,
   ProyectoResponse,
   ActividadResponse,
+  EstadoActividad,
+  SubactividadCreate,
+  SubactividadResponse,
   UsuarioResponse,
   PageResponse,
   HitoCreate,
   HitoResponse,
   EstadoHito,
-  EstadoActividad,
-  SubactividadCreate,
-  SubactividadResponse,
+  EstadoProyecto,
+  ProyectoUpdate,
+  AsociarInstitucionesRequest
 } from "@/lib/types"
 import {
   ChevronRight,
+  ChevronDown,
   Pencil,
   Download,
   Archive,
   Calendar,
+  Save,
   User,
   MapPin,
   Building2,
@@ -49,13 +58,13 @@ import {
 } from "lucide-react"
 import Link from "next/link"
 import { notFound } from "next/navigation"
+import { useAuth } from "@/hooks/useAuth"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogTrigger, DialogClose } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { useAuth } from "@/hooks/useAuth"
 
 type TabType = "resumen" | "actividades" | "hitos" | "informes" | "equipo" | "bitacora"
 type HitoEstadoUi = "Pendiente" | "En curso" | "Finalizado"
@@ -94,11 +103,22 @@ function getDiasHastaFecha(date: string, today = startOfToday()): number {
   return Math.ceil((fechaFin.getTime() - today.getTime()) / (1000 * 60 * 60 * 24))
 }
 
+function formatLocalDate(date: string | null | undefined): string {
+  if (!date) return "—"
+  const [year, month, day] = date.split("-")
+  if (!year || !month || !day) return date
+  return `${day}/${month}/${year}`
+}
+
+function normalizeSearch(value: string): string {
+  return value.trim().toLowerCase()
+}
+
 function getAlertaVencimientoActividad(actividad: {
   fechaFin: string | null
   estado: string
 }) {
-  if (actividad.estado === "Completada") return null
+  if (actividad.estado === "FINALIZADA" || actividad.estado === "COMPLETADA") return null
   if (!actividad.fechaFin) return null
 
   const diasRestantes = getDiasHastaFecha(actividad.fechaFin)
@@ -131,7 +151,7 @@ function getAlertaVencimientoHito(hito: {
   fecha: string
   estado: string
 }) {
-  if (hito.estado === "Completado") return null
+  if (hito.estado === "Finalizado") return null
 
   const diasRestantes = getDiasHastaFecha(hito.fecha)
 
@@ -157,6 +177,26 @@ function getAlertaVencimientoHito(hito: {
   }
 
   return null
+}
+
+
+const PRIORIDADES_PROYECTO = [
+  { value: "", label: "Sin prioridad" },
+  { value: "1", label: "Baja" },
+  { value: "2", label: "Media" },
+  { value: "3", label: "Alta" },
+]
+
+const ROLES_PROYECTO = ["Equipo Técnico", "Coordinador", "Asesor", "Observador"]
+
+function estadoProyectoParaFormulario(estado: string): EstadoProyecto {
+  return normalizarEstadoProyecto(estado)
+}
+
+function optionalNumber(value: string): number | undefined {
+  if (value === "") return undefined
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : undefined
 }
 
 function apiMacroregiones(proyecto: ProyectoResponse): MacroregionRef[] {
@@ -192,7 +232,7 @@ function proyectoDesdeApi(apiProyecto: ProyectoResponse): ProyectoDetalle {
     fechaFin: apiProyecto.fechaFinEstimada ?? apiProyecto.fechaInicio,
     avance: apiProyecto.porcentajeAvance ?? 0,
     estado: apiProyecto.estado,
-    institucionesMiembro: [],
+    institucionesMiembro: apiProyecto.instituciones?.map(i => i.nombre) ?? [],
     presupuesto: apiProyecto.presupuesto ?? undefined,
     fuentesDonantes: [],
     fuenteDatos: "api",
@@ -219,7 +259,7 @@ function combinarProyecto(
     ...mockProyecto,
     ...real,
     equipo: mockProyecto.equipo,
-    institucionesMiembro: mockProyecto.institucionesMiembro,
+    institucionesMiembro: real.institucionesMiembro.length > 0 ? real.institucionesMiembro : mockProyecto.institucionesMiembro,
     fuentesDonantes: mockProyecto.fuentesDonantes,
     fuenteDatos: "mixto",
   }
@@ -297,32 +337,6 @@ function MockDataTag() {
   )
 }
 
-function ApiSourceTag({
-  loading,
-  error,
-  source,
-}: {
-  loading: boolean
-  error: string | null
-  source: ProyectoDetalle["fuenteDatos"]
-}) {
-  const label = loading
-    ? "Sincronizando API"
-    : error
-      ? "Mock con API no disponible"
-      : source === "mock"
-        ? "Mock referencial"
-        : source === "mixto"
-          ? "Datos base API"
-          : "API real"
-
-  return (
-    <span className="inline-flex items-center rounded-full border border-[#E0E0E0] bg-white px-2.5 py-1 text-xs font-medium text-[#5C5C5C]">
-      {label}
-    </span>
-  )
-}
-
 export default function ProyectoDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params)
   const { loading: authLoading, hasPermission } = useAuth()
@@ -334,9 +348,12 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
   const [apiProyecto, setApiProyecto] = useState<ProyectoResponse | null>(null)
   const [apiActividades, setApiActividades] = useState<ActividadResponse[]>([])
   const [usuariosSistema, setUsuariosSistema] = useState<UsuarioResponse[]>([])
+  const [macroregionesCatalogo, setMacroregionesCatalogo] = useState<Macroregion[]>([])
+  const [ejesCatalogo, setEjesCatalogo] = useState<EjeTematico[]>([])
+  const [territoriosCatalogo, setTerritoriosCatalogo] = useState<Territorio[]>([])
+  const [institucionesCatalogo, setInstitucionesCatalogo] = useState<Institucion[]>([])
   const [apiLoading, setApiLoading] = useState(true)
   const [apiError, setApiError] = useState<string | null>(null)
-  const [macroregionesList, setMacroregionesList] = useState<Macroregion[]>([])
   const proyecto = useMemo(
     () => combinarProyecto(mockProyecto, apiProyecto),
     [mockProyecto, apiProyecto],
@@ -347,9 +364,36 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
   )
   const [apiEquipo, setApiEquipo] = useState<{ idUsuario: number; rolEnProyecto: string }[]>([])
   const [nuevoMiembroNombre, setNuevoMiembroNombre] = useState("")
-  const [nuevoMiembroRol, setNuevoMiembroRol] = useState("Equipo T\u00e9cnico")
+  const [nuevoMiembroRol, setNuevoMiembroRol] = useState("Equipo Técnico")
   const [addMemberOpen, setAddMemberOpen] = useState(false)
   const [editModalOpen, setEditModalOpen] = useState(false)
+  const [editSubmitting, setEditSubmitting] = useState(false)
+  const [editError, setEditError] = useState<string | null>(null)
+  const [editFieldErrors, setEditFieldErrors] = useState<Record<string, string>>({})
+  const [editSuccessModalOpen, setEditSuccessModalOpen] = useState(false)
+  const [territorioSearch, setTerritorioSearch] = useState("")
+  const [institucionSearch, setInstitucionSearch] = useState("")
+  const [responsableSearch, setResponsableSearch] = useState("")
+  const [avanceDirecto, setAvanceDirecto] = useState("0")
+  const [avanceSubmitting, setAvanceSubmitting] = useState(false)
+  const [avanceError, setAvanceError] = useState<string | null>(null)
+  const [editFormProyecto, setEditFormProyecto] = useState({
+    nombre: "",
+    codigoInterno: "",
+    descripcion: "",
+    objetivoGeneral: "",
+    fechaInicio: "",
+    fechaFinEstimada: "",
+    estado: "ACTIVO" as EstadoProyecto,
+    nivelPrioridad: "",
+    porcentajeAvance: "0",
+    presupuesto: "",
+    idMacroregiones: [] as number[],
+    idEjeTematico: "",
+    idResponsablePrincipal: "",
+    idTerritorios: [] as number[],
+    instituciones: [] as Array<{ idInstitucion: number; tipoParticipacion: string }>,
+  })
 
   // State for hitos
   const hitosData = getHitosByProyecto(id)
@@ -362,6 +406,9 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
   const [addHitoOpen, setAddHitoOpen] = useState(false)
   const [editHito, setEditHito] = useState<HitoDetalle | null>(null)
   const [hitoForm, setHitoForm] = useState<HitoForm>(hitoFormInicial)
+  const [hitoFieldErrors, setHitoFieldErrors] = useState<Record<string, string>>({})
+  const [hitoSuccessModalOpen, setHitoSuccessModalOpen] = useState(false)
+  const [hitoEsEdicion, setHitoEsEdicion] = useState(false)
 
   // ── Actividades desde API ──
   const [actividadesApi, setActividadesApi] = useState<ActividadResponse[]>([])
@@ -371,12 +418,16 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
 
   const [createActividadOpen, setCreateActividadOpen] = useState(false)
   const [creandoActividad, setCreandoActividad] = useState(false)
+  const [actFieldErrors, setActFieldErrors] = useState<Record<string, string>>({})
+  const [actResponsableSearch, setActResponsableSearch] = useState("")
+  const [actSuccessModalOpen, setActSuccessModalOpen] = useState(false)
   const [actForm, setActForm] = useState({
     nombre: "",
     descripcion: "",
     fechaInicio: "",
     fechaFin: "",
     idResponsables: [] as number[],
+    estado: "PENDIENTE" as string,
   })
 
   // ── Editar actividad ──
@@ -391,6 +442,9 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
     estado: "PENDIENTE" as EstadoActividad,
     idResponsables: [] as number[],
   })
+  const [editActFieldErrors, setEditActFieldErrors] = useState<Record<string, string>>({})
+  const [editActSuccessModalOpen, setEditActSuccessModalOpen] = useState(false)
+  const [editActResponsableSearch, setEditActResponsableSearch] = useState("")
 
   // ── Crear Subactividad ──
   const [createSubactOpen, setCreateSubactOpen] = useState(false)
@@ -406,6 +460,307 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
     fechaFin: "",
     descripcion: "",
   })
+  const [subactFieldErrors, setSubactFieldErrors] = useState<Record<string, string>>({})
+  const [subactSuccessModalOpen, setSubactSuccessModalOpen] = useState(false)
+  const [subactResponsableSearch, setSubactResponsableSearch] = useState("")
+
+  // ── Editar Subactividad ──
+  const [editSubactOpen, setEditSubactOpen] = useState(false)
+  const [editandoSubact, setEditandoSubact] = useState(false)
+  const [editingSubact, setEditingSubact] = useState<{ sub: SubactividadResponse; actId: number } | null>(null)
+  const [editSubactForm, setEditSubactForm] = useState({
+    nombre: "",
+    idResponsable: "",
+    presupuesto: "",
+    hombresInvolucrados: "",
+    mujeresInvolucradas: "",
+    fechaInicio: "",
+    fechaFin: "",
+    descripcion: "",
+  })
+  const [editSubactFieldErrors, setEditSubactFieldErrors] = useState<Record<string, string>>({})
+  const [editSubactSuccessModalOpen, setEditSubactSuccessModalOpen] = useState(false)
+  const [editSubactResponsableSearch, setEditSubactResponsableSearch] = useState("")
+
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false)
+  const [confirmDeleteTarget, setConfirmDeleteTarget] = useState<"actividad" | "hito" | "subactividad" | null>(null)
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
+  const [confirmDeleteNombre, setConfirmDeleteNombre] = useState("")
+  const [confirmDeleteInput, setConfirmDeleteInput] = useState("")
+  const [confirmDeleteParentId, setConfirmDeleteParentId] = useState<number | null>(null)
+  const [expandedRespAct, setExpandedRespAct] = useState<Set<number>>(new Set())
+
+  const prepararFormularioEdicionProyecto = (proyectoApi: ProyectoResponse) => {
+    setEditError(null)
+    setEditFormProyecto({
+      nombre: proyectoApi.nombre ?? "",
+      codigoInterno: proyectoApi.codigoInterno ?? "",
+      descripcion: proyectoApi.descripcion ?? "",
+      objetivoGeneral: proyectoApi.objetivoGeneral ?? "",
+      fechaInicio: proyectoApi.fechaInicio ?? "",
+      fechaFinEstimada: proyectoApi.fechaFinEstimada ?? "",
+      estado: estadoProyectoParaFormulario(proyectoApi.estado),
+      nivelPrioridad: proyectoApi.nivelPrioridad ? String(proyectoApi.nivelPrioridad) : "",
+      porcentajeAvance: String(proyectoApi.porcentajeAvance ?? 0),
+      presupuesto: proyectoApi.presupuesto != null ? String(proyectoApi.presupuesto) : "",
+      idMacroregiones: proyectoApi.macroregiones?.map(m => m.id) ?? [],
+      idEjeTematico: proyectoApi.idEjeTematico ? String(proyectoApi.idEjeTematico) : "",
+      idResponsablePrincipal: proyectoApi.responsablePrincipal ? String(proyectoApi.responsablePrincipal.id) : "",
+      idTerritorios: proyectoApi.territorios?.map(t => t.id) ?? [],
+      instituciones: proyectoApi.instituciones?.map(i => ({
+        idInstitucion: i.id,
+        tipoParticipacion: "Miembro",
+      })) ?? [],
+    })
+  }
+
+  const toggleEditMacroregion = (idMacroregion: number) => {
+    setEditFormProyecto(prev => ({
+      ...prev,
+      idMacroregiones: prev.idMacroregiones.includes(idMacroregion)
+        ? prev.idMacroregiones.filter(id => id !== idMacroregion)
+        : [...prev.idMacroregiones, idMacroregion],
+    }))
+    setEditFieldErrors(p => {
+      const { "edit-idMacroregiones": _, ...r } = p
+      return r
+    })
+  }
+
+  const toggleEditTerritorio = (idTerritorio: number) => {
+    setEditFormProyecto(prev => ({
+      ...prev,
+      idTerritorios: prev.idTerritorios.includes(idTerritorio)
+        ? prev.idTerritorios.filter(id => id !== idTerritorio)
+        : [...prev.idTerritorios, idTerritorio],
+    }))
+  }
+
+  const toggleEditInstitucion = (idInstitucion: number) => {
+    setEditFormProyecto(prev => ({
+      ...prev,
+      instituciones: prev.instituciones.some(item => item.idInstitucion === idInstitucion)
+        ? prev.instituciones.filter(item => item.idInstitucion !== idInstitucion)
+        : [...prev.instituciones, { idInstitucion, tipoParticipacion: "Miembro" }],
+    }))
+  }
+
+  const guardarAvanceProyecto = async () => {
+    if (!apiProyecto) return
+    const porcentajeAvance = Number(avanceDirecto)
+    if (!Number.isFinite(porcentajeAvance) || porcentajeAvance < 0 || porcentajeAvance > 100) {
+      setAvanceError("El avance debe estar entre 0 y 100.")
+      return
+    }
+
+    setAvanceSubmitting(true)
+    setAvanceError(null)
+    try {
+      const actualizado = await api.patch<ProyectoResponse>(`/proyectos/${id}/avance?porcentajeAvance=${porcentajeAvance}`)
+      setApiProyecto(actualizado)
+      setAvanceDirecto(String(actualizado.porcentajeAvance ?? porcentajeAvance))
+      prepararFormularioEdicionProyecto(actualizado)
+    } catch (error) {
+      setAvanceError(getApiErrorMessage(error))
+    } finally {
+      setAvanceSubmitting(false)
+    }
+  }
+
+  const validarEditForm = (): Record<string, string> => {
+    const errors: Record<string, string> = {}
+    if (!editFormProyecto.nombre.trim()) {
+      errors["edit-nombre"] = "El nombre del proyecto es obligatorio"
+    }
+    if (!editFormProyecto.codigoInterno.trim()) {
+      errors["edit-codigoInterno"] = "El código interno es obligatorio"
+    }
+    if (!editFormProyecto.fechaInicio) {
+      errors["edit-fechaInicio"] = "La fecha de inicio es obligatoria"
+    }
+    if (!editFormProyecto.idResponsablePrincipal) {
+      errors["edit-idResponsablePrincipal"] = "Selecciona un responsable principal"
+    }
+    if (editFormProyecto.idMacroregiones.length === 0) {
+      errors["edit-idMacroregiones"] = "Selecciona al menos una macrorregión"
+    }
+    if (
+      editFormProyecto.fechaFinEstimada &&
+      editFormProyecto.fechaInicio &&
+      editFormProyecto.fechaFinEstimada < editFormProyecto.fechaInicio
+    ) {
+      errors["edit-fechaFinEstimada"] =
+        "La fecha de fin estimada no puede ser anterior a la fecha de inicio"
+    }
+    const pct = Number(editFormProyecto.porcentajeAvance)
+    if (!Number.isFinite(pct) || pct < 0 || pct > 100) {
+      errors["edit-porcentajeAvance"] = "El porcentaje de avance debe estar entre 0 y 100"
+    }
+    if (editFormProyecto.presupuesto && Number(editFormProyecto.presupuesto) < 0) {
+      errors["edit-presupuesto"] = "El presupuesto no puede ser negativo"
+    }
+    return errors
+  }
+
+  const validarActForm = (): Record<string, string> => {
+    const errors: Record<string, string> = {}
+    if (!actForm.nombre.trim()) {
+      errors["act-nombre"] = "El nombre de la actividad es obligatorio"
+    }
+    if (actForm.idResponsables.length === 0) {
+      errors["act-idResponsables"] = "Selecciona al menos un responsable"
+    }
+    if (!actForm.fechaInicio) {
+      errors["act-fechaInicio"] = "La fecha de inicio es obligatoria"
+    }
+    if (actForm.fechaInicio && actForm.fechaFin && actForm.fechaFin < actForm.fechaInicio) {
+      errors["act-fechaFin"] = "La fecha de fin no puede ser anterior a la fecha de inicio"
+    }
+    return errors
+  }
+
+  const validarHitoForm = (): Record<string, string> => {
+    const errors: Record<string, string> = {}
+    if (!hitoForm.nombre.trim()) {
+      errors["hito-nombre"] = "El nombre del hito es obligatorio"
+    }
+    if (!hitoForm.fecha) {
+      errors["hito-fecha"] = "La fecha clave es obligatoria"
+    }
+    return errors
+  }
+
+  const validarEditActForm = (): Record<string, string> => {
+    const errors: Record<string, string> = {}
+    if (!editForm.nombre.trim()) {
+      errors["edit-nombre"] = "El nombre de la actividad es obligatorio"
+    }
+    if (editForm.idResponsables.length === 0) {
+      errors["edit-idResponsables"] = "Selecciona al menos un responsable"
+    }
+    if (!editForm.fechaInicio) {
+      errors["edit-inicio"] = "La fecha de inicio es obligatoria"
+    }
+    if (editForm.fechaInicio && editForm.fechaFin && editForm.fechaFin < editForm.fechaInicio) {
+      errors["edit-fin"] = "La fecha de fin no puede ser anterior a la fecha de inicio"
+    }
+    return errors
+  }
+
+  const validarSubactForm = (): Record<string, string> => {
+    const errors: Record<string, string> = {}
+    if (!subactForm.nombre.trim()) {
+      errors["sub-nombre"] = "El nombre de la subactividad es obligatorio"
+    }
+    if (!subactForm.idResponsable) {
+      errors["sub-idResponsable"] = "Selecciona un responsable"
+    }
+    if (!subactForm.fechaInicio) {
+      errors["sub-inicio"] = "La fecha de inicio es obligatoria"
+    }
+    if (subactForm.fechaInicio && subactForm.fechaFin && subactForm.fechaFin < subactForm.fechaInicio) {
+      errors["sub-fin"] = "La fecha de fin no puede ser anterior a la fecha de inicio"
+    }
+    if (subactForm.presupuesto && Number(subactForm.presupuesto) < 0) {
+      errors["sub-presu"] = "El presupuesto no puede ser negativo"
+    }
+    if (subactForm.hombresInvolucrados && Number(subactForm.hombresInvolucrados) < 0) {
+      errors["sub-hombres"] = "El número no puede ser negativo"
+    }
+    if (subactForm.mujeresInvolucradas && Number(subactForm.mujeresInvolucradas) < 0) {
+      errors["sub-mujeres"] = "El número no puede ser negativo"
+    }
+    return errors
+  }
+
+  const validarEditSubactForm = (): Record<string, string> => {
+    const errors: Record<string, string> = {}
+    if (!editSubactForm.nombre.trim()) {
+      errors["edit-sub-nombre"] = "El nombre de la subactividad es obligatorio"
+    }
+    if (!editSubactForm.idResponsable) {
+      errors["edit-sub-idResponsable"] = "Selecciona un responsable"
+    }
+    if (!editSubactForm.fechaInicio) {
+      errors["edit-sub-inicio"] = "La fecha de inicio es obligatoria"
+    }
+    if (editSubactForm.fechaInicio && editSubactForm.fechaFin && editSubactForm.fechaFin < editSubactForm.fechaInicio) {
+      errors["edit-sub-fin"] = "La fecha de fin no puede ser anterior a la fecha de inicio"
+    }
+    if (editSubactForm.presupuesto && Number(editSubactForm.presupuesto) < 0) {
+      errors["edit-sub-presu"] = "El presupuesto no puede ser negativo"
+    }
+    if (editSubactForm.hombresInvolucrados && Number(editSubactForm.hombresInvolucrados) < 0) {
+      errors["edit-sub-hombres"] = "El número no puede ser negativo"
+    }
+    if (editSubactForm.mujeresInvolucradas && Number(editSubactForm.mujeresInvolucradas) < 0) {
+      errors["edit-sub-mujeres"] = "El número no puede ser negativo"
+    }
+    return errors
+  }
+
+  const guardarEdicionProyecto = async () => {
+    if (!apiProyecto) return
+    setEditError(null)
+    setEditFieldErrors({})
+
+    const errors = validarEditForm()
+    if (Object.keys(errors).length > 0) {
+      setEditFieldErrors(errors)
+      const firstField = Object.keys(errors)[0]
+      const el = document.querySelector(`[data-field="${firstField}"]`)
+      el?.scrollIntoView({ behavior: "smooth", block: "center" })
+      const input = el?.querySelector("input, select, textarea, button")
+      if (input instanceof HTMLElement) input.focus()
+      return
+    }
+
+    const porcentajeAvance = Number(editFormProyecto.porcentajeAvance)
+
+    const payload: ProyectoUpdate = {
+      nombre: editFormProyecto.nombre.trim(),
+      codigoInterno: editFormProyecto.codigoInterno.trim(),
+      descripcion: editFormProyecto.descripcion.trim() || undefined,
+      objetivoGeneral: editFormProyecto.objetivoGeneral.trim() || undefined,
+      fechaInicio: editFormProyecto.fechaInicio,
+      fechaFinEstimada: editFormProyecto.fechaFinEstimada || undefined,
+      estado: editFormProyecto.estado,
+      nivelPrioridad: optionalNumber(editFormProyecto.nivelPrioridad),
+      porcentajeAvance,
+      presupuesto: optionalNumber(editFormProyecto.presupuesto),
+      idMacroregiones: editFormProyecto.idMacroregiones,
+      idEjeTematico: editFormProyecto.idEjeTematico ? Number(editFormProyecto.idEjeTematico) : undefined,
+      idResponsablePrincipal: editFormProyecto.idResponsablePrincipal ? Number(editFormProyecto.idResponsablePrincipal) : undefined,
+      idTerritorios: editFormProyecto.idTerritorios,
+    }
+
+    setEditSubmitting(true)
+    try {
+      let actualizado = await api.put<ProyectoResponse>(`/proyectos/${id}`, payload)
+      const institucionesPayload: AsociarInstitucionesRequest = {
+        instituciones: Array.from(
+          new Map(
+            editFormProyecto.instituciones.map(item => [
+              item.idInstitucion,
+              {
+                idInstitucion: item.idInstitucion,
+                tipoParticipacion: "Miembro",
+              },
+            ]),
+          ).values(),
+        ),
+      }
+      await api.post<void>(`/proyectos/${id}/instituciones`, institucionesPayload)
+      actualizado = await api.get<ProyectoResponse>(`/proyectos/${id}`)
+      setApiProyecto(actualizado)
+      setEditModalOpen(false)
+      setEditSuccessModalOpen(true)
+    } catch (error) {
+      setEditError(getApiErrorMessage(error))
+    } finally {
+      setEditSubmitting(false)
+    }
+  }
 
   useEffect(() => {
     if (authLoading || !puedeVerProyectos) return
@@ -420,23 +775,43 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
         let acts: ActividadResponse[] = []
         let users: PageResponse<UsuarioResponse> = { content: [], page: 0, size: 0, totalElements: 0, totalPages: 0, first: true, last: true }
         let teamData: { idUsuario: number; rolEnProyecto: string }[] = []
-        let macros: Macroregion[] = []
+        let macroregionesData: Macroregion[] = []
+        let ejesData: EjeTematico[] = []
+        let territoriosData: Territorio[] = []
+        let institucionesData: Institucion[] = []
         try {
-          acts = await api.get<ActividadResponse[]>(`/proyectos/${id}/actividades`)
-          teamData = await api.get<{ idUsuario: number; rolEnProyecto: string }[]>(`/proyectos/${id}/equipo`)
-          macros = await api.get<Macroregion[]>("/macroregiones")
-          if (puedeVerUsuarios) {
-            users = await api.get<PageResponse<UsuarioResponse>>(`/usuarios`)
-          }
+          const [actsResponse, usersResponse, teamResponse, macrosResponse, ejesResponse, territoriosResponse, institucionesResponse] = await Promise.all([
+            api.get<ActividadResponse[]>(`/proyectos/${id}/actividades`),
+            puedeVerUsuarios
+              ? api.get<PageResponse<UsuarioResponse>>(`/usuarios?page=0&size=100&sort=apellidos,asc`)
+              : Promise.resolve({ content: [], page: 0, size: 0, totalElements: 0, totalPages: 0, first: true, last: true }),
+            api.get<{ idUsuario: number; rolEnProyecto: string }[]>(`/proyectos/${id}/equipo`),
+            api.get<Macroregion[]>(`/macroregiones`),
+            api.get<EjeTematico[]>(`/ejes-tematicos`),
+            api.get<Territorio[]>(`/territorios`),
+            api.get<Institucion[]>(`/instituciones`),
+          ])
+          acts = actsResponse
+          users = usersResponse
+          teamData = teamResponse
+          macroregionesData = macrosResponse
+          ejesData = ejesResponse
+          territoriosData = territoriosResponse
+          institucionesData = institucionesResponse
         } catch (e) {
-          console.error("Error al cargar actividades, usuarios o equipo", e)
+          console.error("Error al cargar actividades, usuarios, equipo o catálogos", e)
         }
         if (!cancelled) {
           setApiProyecto(data)
+          setAvanceDirecto(String(data.porcentajeAvance ?? 0))
+          prepararFormularioEdicionProyecto(data)
           setApiActividades(acts)
           setUsuariosSistema(users.content)
           setApiEquipo(teamData)
-          setMacroregionesList(macros)
+          setMacroregionesCatalogo(macroregionesData)
+          setEjesCatalogo(ejesData)
+          setTerritoriosCatalogo(territoriosData)
+          setInstitucionesCatalogo(institucionesData)
         }
       } catch (error) {
         if (!cancelled) {
@@ -525,6 +900,8 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
     setHitoForm(hitoFormInicial)
     setEditHito(null)
     setHitosError(null)
+    setHitoFieldErrors({})
+    setHitoEsEdicion(false)
     setAddHitoOpen(true)
   }
 
@@ -537,12 +914,21 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
       descripcion: hito.descripcion,
     })
     setHitosError(null)
+    setHitoFieldErrors({})
+    setHitoEsEdicion(true)
     setAddHitoOpen(true)
   }
 
   const guardarHito = async () => {
-    if (!hitoForm.nombre.trim() || !hitoForm.fecha) {
-      setHitosError("Completa el nombre y la fecha programada del hito")
+    setHitoFieldErrors({})
+    const errors = validarHitoForm()
+    if (Object.keys(errors).length > 0) {
+      setHitoFieldErrors(errors)
+      const firstField = Object.keys(errors)[0]
+      const el = document.querySelector(`[data-field="${firstField}"]`)
+      el?.scrollIntoView({ behavior: "smooth", block: "center" })
+      const input = el?.querySelector("input, select, textarea, button")
+      if (input instanceof HTMLElement) input.focus()
       return
     }
 
@@ -574,6 +960,7 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
       setAddHitoOpen(false)
       setEditHito(null)
       setHitoForm(hitoFormInicial)
+      setHitoSuccessModalOpen(true)
     } catch (error) {
       setHitosError(getApiErrorMessage(error))
     } finally {
@@ -581,18 +968,50 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
     }
   }
 
-  const eliminarHito = async (hito: HitoDetalle) => {
-    const previous = hitosState
-    setHitosState(prev => prev.filter(item => item.id !== hito.id))
+  const handleConfirmDelete = async () => {
+    if (!confirmDeleteTarget || !confirmDeleteId) return
 
-    if (hito.fuenteDatos !== "api") return
+    if (confirmDeleteTarget === "hito") {
+      const previous = hitosState
+      setHitosState(prev => prev.filter(item => item.id !== confirmDeleteId))
 
-    try {
-      await api.delete<void>(`/proyectos/${id}/hitos/${hito.id}`)
-    } catch (error) {
-      setHitosState(previous)
-      setHitosError(getApiErrorMessage(error))
+      const esMock = previous.find(h => h.id === confirmDeleteId)?.fuenteDatos !== "api"
+      if (esMock) {
+        setConfirmDeleteOpen(false)
+        setConfirmDeleteInput("")
+        return
+      }
+
+      try {
+        await api.delete<void>(`/proyectos/${id}/hitos/${confirmDeleteId}`)
+      } catch (error) {
+        setHitosState(previous)
+        setHitosError(getApiErrorMessage(error))
+      }
+    } else if (confirmDeleteTarget === "actividad") {
+      const previous = actividadesApi
+      setActividadesApi(prev => prev.filter(a => String(a.id) !== confirmDeleteId))
+      try {
+        await api.delete<void>(`/actividades/${confirmDeleteId}`)
+      } catch (error) {
+        setActividadesApi(previous)
+        setActividadesError(getApiErrorMessage(error))
+      }
+    } else if (confirmDeleteTarget === "subactividad") {
+      const parentId = confirmDeleteParentId
+      if (!parentId) return
+      const previous = actividadesApi
+      setActividadesApi(prev => prev.map(a => a.id === parentId ? { ...a, subactividades: (a.subactividades || []).filter(s => String(s.id) !== confirmDeleteId) } : a))
+      try {
+        await api.delete<void>(`/actividades/${parentId}/subactividades/${confirmDeleteId}`)
+      } catch (error) {
+        setActividadesApi(previous)
+        setActividadesError(getApiErrorMessage(error))
+      }
     }
+
+    setConfirmDeleteOpen(false)
+    setConfirmDeleteInput("")
   }
 
   const actividades = useMemo(() =>
@@ -676,10 +1095,27 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
     })
     : equipo.map((e, idx) => ({ id: idx, nombre: e.nombre, rol: e.rol }))
 
-  // Calculate days remaining
-  const fechaFin = new Date(proyecto.fechaFin)
-  const hoy = new Date()
-  const diasRestantes = Math.ceil((fechaFin.getTime() - hoy.getTime()) / (1000 * 60 * 60 * 24))
+  const territoriosFiltrados = territoriosCatalogo.filter(territorio =>
+    normalizeSearch(territorio.nombre).includes(normalizeSearch(territorioSearch)),
+  )
+  const institucionesFiltradas = institucionesCatalogo.filter(institucion =>
+    normalizeSearch(institucion.nombre).includes(normalizeSearch(institucionSearch)),
+  )
+  const responsablesFiltrados = usuariosSistema.filter(usuario => {
+    const texto = `${usuario.nombres} ${usuario.apellidos} ${usuario.email}`
+    return normalizeSearch(texto).includes(normalizeSearch(responsableSearch))
+  })
+
+  const responsableSeleccionado = usuariosSistema.find(usuario =>
+    String(usuario.id) === editFormProyecto.idResponsablePrincipal,
+  )
+
+  const responsablesEdicionVisibles = responsableSeleccionado && !responsablesFiltrados.some(usuario => usuario.id === responsableSeleccionado.id)
+    ? [responsableSeleccionado, ...responsablesFiltrados]
+    : responsablesFiltrados
+
+  // Calculate days remaining without shifting LocalDate values by timezone
+  const diasRestantes = getDiasHastaFecha(proyecto.fechaFin)
 
   const tabs = [
     { id: "resumen" as TabType, label: "Resumen" },
@@ -705,133 +1141,186 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
         {/* Header */}
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div className="space-y-3">
-            <h1 className="text-2xl font-bold text-[#1A1A1A]">{proyecto.nombre}</h1>
+            <div className="space-y-1">
+              <h1 className="text-2xl font-bold text-[#1A1A1A]">{proyecto.nombre}</h1>
+              <p className="inline-flex items-center rounded-md border border-[#E0E0E0] bg-white px-2.5 py-1 text-xs font-medium text-[#5C5C5C]">
+                Código interno: <span className="ml-1 font-semibold text-[#1A1A1A]">{proyecto.codigo || "Sin código"}</span>
+              </p>
+            </div>
             <div className="flex flex-wrap items-center gap-2">
               {(proyecto.macroregiones?.length ? proyecto.macroregiones : [{ id: 0, nombre: proyecto.macroregion }]).map((macroregion) => (
                 <MacroregionBadge key={macroregion.id} macroregion={macroregion.nombre} />
               ))}
               <TypeBadge tipo={proyecto.ejeTematico} />
               <StatusBadge estado={proyecto.estado} />
-              <ApiSourceTag loading={apiLoading} error={apiError} source={proyecto.fuenteDatos} />
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <Dialog open={editModalOpen} onOpenChange={setEditModalOpen}>
+            {puedeActualizarProyectos && (
+            <>
+            <Dialog open={editModalOpen} onOpenChange={(open) => {
+              if (open && apiProyecto) {
+                prepararFormularioEdicionProyecto(apiProyecto)
+                setEditFieldErrors({})
+              }
+              setEditModalOpen(open)
+            }}>
               <DialogTrigger asChild>
                 <button className="flex items-center gap-2 rounded-lg border border-[#E0E0E0] bg-white px-4 py-2 text-sm font-medium text-[#5C5C5C] hover:bg-[#F7F7F7]">
                   <Pencil className="h-4 w-4" />
                   Editar
                 </button>
               </DialogTrigger>
-              <DialogContent className="overflow-y-auto sm:max-w-md">
-                <form onSubmit={async (e) => {
-                  e.preventDefault();
-                  if (!apiProyecto) {
-                    setEditModalOpen(false);
-                    return;
-                  }
-                  const formData = new FormData(e.currentTarget);
-
-                  const payload = {
-                    nombre: formData.get("nombre"),
-                    descripcion: formData.get("descripcion"),
-                    objetivoGeneral: apiProyecto.objetivoGeneral || "Sin objetivo",
-                    fechaInicio: formData.get("fechaInicio") || apiProyecto.fechaInicio,
-                    fechaFinEstimada: formData.get("fechaFin") || apiProyecto.fechaFinEstimada,
-                    estado: formData.get("estado") as string || "PENDIENTE",
-                    nivelPrioridad: apiProyecto.nivelPrioridad || 1,
-                    porcentajeAvance: apiProyecto.porcentajeAvance,
-                    presupuesto: parseFloat(formData.get("presupuesto") as string) || 0,
-                    idMacroregion: null,
-                    idMacroregiones: formData.getAll("macroregiones").map(Number),
-                    idEjeTematico: apiProyecto.idEjeTematico || null,
-                    idResponsablePrincipal: apiProyecto.responsablePrincipal?.id || null,
-                    idTerritorios: apiProyecto.territorios?.map(t => t.id) || []
-                  };
-
-                  try {
-                    const data = await api.put<ProyectoResponse>(`/proyectos/${id}`, payload);
-                    setApiProyecto(data);
-                    setEditModalOpen(false);
-                  } catch (err) {
-                    console.error("Error updating project", err);
-                  }
-                }}>
-                  <DialogHeader>
-                    <DialogTitle>Editar Proyecto</DialogTitle>
-                    <DialogDescription>
-                      Modifica los datos generales del proyecto aquí. Haz clic en guardar al finalizar.
-                    </DialogDescription>
-                  </DialogHeader>
-                  <div className="grid gap-4 py-6">
-                    <div className="grid gap-2">
-                      <Label htmlFor="nombre">Nombre del Proyecto</Label>
-                      <Input id="nombre" name="nombre" defaultValue={proyecto.nombre} required />
+              <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-4xl">
+                <DialogHeader>
+                  <DialogTitle>Editar Proyecto</DialogTitle>
+                  <DialogDescription>Actualiza todos los campos vinculados al proyecto.</DialogDescription>
+                </DialogHeader>
+                {editError && <div className="rounded-lg border border-[#C8102E]/20 bg-[#C8102E]/5 px-4 py-3 text-sm text-[#C8102E]">{editError}</div>}
+                <div className="grid gap-5 py-4">
+                  <section className="grid gap-4 rounded-lg border border-[#E0E0E0] p-4">
+                    <h3 className="text-xs font-bold uppercase tracking-wide text-[#5C5C5C]">Información general</h3>
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <div className="grid gap-2 md:col-span-2" data-field="edit-nombre"><Label htmlFor="edit-proyecto-nombre">Nombre del proyecto <span className="text-[#C8102E]">*</span></Label><Input id="edit-proyecto-nombre" maxLength={50} value={editFormProyecto.nombre} onChange={e => { setEditFormProyecto(f => ({ ...f, nombre: e.target.value })); setEditFieldErrors(p => { const { "edit-nombre": _, ...r } = p; return r }) }} className={editFieldErrors["edit-nombre"] ? "border-[#C8102E]" : ""} />{editFieldErrors["edit-nombre"] && <p className="text-xs text-[#C8102E]">{editFieldErrors["edit-nombre"]}</p>}</div>
+                      <div className="grid gap-2" data-field="edit-codigoInterno"><Label htmlFor="edit-proyecto-codigo">Código interno <span className="text-[#C8102E]">*</span></Label><Input id="edit-proyecto-codigo" disabled value={editFormProyecto.codigoInterno} className="cursor-not-allowed border-[#E0E0E0] bg-gray-50 text-[#5C5C5C] opacity-70" /><div className="min-h-5"></div></div>
+                      <div className="grid gap-2"><Label htmlFor="edit-proyecto-eje">Eje temático</Label><Select value={editFormProyecto.idEjeTematico || "sin-eje"} onValueChange={v => setEditFormProyecto(f => ({ ...f, idEjeTematico: v === "sin-eje" ? "" : v }))}><SelectTrigger id="edit-proyecto-eje"><SelectValue placeholder="Seleccionar eje" /></SelectTrigger><SelectContent><SelectItem value="sin-eje">Sin eje temático</SelectItem>{ejesCatalogo.map(eje => <SelectItem key={eje.id} value={String(eje.id)}>{eje.nombre}</SelectItem>)}</SelectContent></Select><div className="min-h-5"></div></div>
+                      <div className="grid gap-2 md:col-span-2"><Label htmlFor="edit-proyecto-descripcion">Descripción</Label><Textarea id="edit-proyecto-descripcion" rows={3} maxLength={200} value={editFormProyecto.descripcion} onChange={e => setEditFormProyecto(f => ({ ...f, descripcion: e.target.value }))} /><div className="flex justify-end"><span className={`text-xs ${editFormProyecto.descripcion.length >= 200 ? "text-[#C8102E]" : editFormProyecto.descripcion.length > 160 ? "text-[#C9A42B]" : "text-[#9CA3AF]"}`}>{editFormProyecto.descripcion.length}/200</span></div></div>
+                      <div className="grid gap-2 md:col-span-2"><Label htmlFor="edit-proyecto-objetivo">Objetivo general</Label><Textarea id="edit-proyecto-objetivo" rows={2} maxLength={200} value={editFormProyecto.objetivoGeneral} onChange={e => setEditFormProyecto(f => ({ ...f, objetivoGeneral: e.target.value }))} /><div className="flex justify-end"><span className={`text-xs ${editFormProyecto.objetivoGeneral.length >= 200 ? "text-[#C8102E]" : editFormProyecto.objetivoGeneral.length > 160 ? "text-[#C9A42B]" : "text-[#9CA3AF]"}`}>{editFormProyecto.objetivoGeneral.length}/200</span></div></div>
                     </div>
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="grid gap-2">
-                        <Label htmlFor="codigo">Código (Solo lectura)</Label>
-                        <Input id="codigo" defaultValue={proyecto.codigo} disabled />
-                      </div>
-                      <div className="grid gap-2">
-                        <Label htmlFor="presupuesto">Presupuesto (S/)</Label>
-                        <Input id="presupuesto" name="presupuesto" type="number" defaultValue={proyecto.presupuesto} />
-                      </div>
+                  </section>
+                  <section className="grid gap-4 rounded-lg border border-[#E0E0E0] p-4">
+                    <h3 className="text-xs font-bold uppercase tracking-wide text-[#5C5C5C]">Fechas, estado, prioridad, avance y presupuesto</h3>
+                    <div className="grid gap-4 md:grid-cols-3">
+                      <div className="grid gap-2" data-field="edit-fechaInicio"><Label>Fecha de inicio <span className="text-[#C8102E]">*</span></Label><Input type="date" value={editFormProyecto.fechaInicio} onChange={e => { const v = e.target.value; setEditFormProyecto(f => ({ ...f, fechaInicio: v })); setEditFieldErrors(p => { const { "edit-fechaInicio": _, "edit-fechaFinEstimada": __, ...r } = p; if (v && editFormProyecto.fechaFinEstimada && editFormProyecto.fechaFinEstimada < v) { r["edit-fechaFinEstimada"] = "La fecha de fin estimada no puede ser anterior a la fecha de inicio" }; return r }) }} className={editFieldErrors["edit-fechaInicio"] ? "border-[#C8102E]" : ""} />{editFieldErrors["edit-fechaInicio"] && <p className="text-xs text-[#C8102E]">{editFieldErrors["edit-fechaInicio"]}</p>}<div className="min-h-5"></div></div>
+                      <div className="grid gap-2" data-field="edit-fechaFinEstimada"><Label>Fecha de fin estimada</Label><Input type="date" value={editFormProyecto.fechaFinEstimada} onChange={e => { const v = e.target.value; setEditFormProyecto(f => ({ ...f, fechaFinEstimada: v })); setEditFieldErrors(p => { const { "edit-fechaFinEstimada": _, ...r } = p; if (v && editFormProyecto.fechaInicio && v < editFormProyecto.fechaInicio) { r["edit-fechaFinEstimada"] = "La fecha de fin estimada no puede ser anterior a la fecha de inicio" }; return r }) }} className={editFieldErrors["edit-fechaFinEstimada"] ? "border-[#C8102E]" : ""} />{editFieldErrors["edit-fechaFinEstimada"] && <p className="text-xs text-[#C8102E]">{editFieldErrors["edit-fechaFinEstimada"]}</p>}<div className="min-h-5"></div></div>
+                      <div className="grid gap-2"><Label>Estado <span className="text-[#C8102E]">*</span></Label><Select value={editFormProyecto.estado} onValueChange={v => setEditFormProyecto(f => ({ ...f, estado: v as EstadoProyecto }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{ESTADOS_PROYECTO.map(estado => <SelectItem key={estado.value} value={estado.value}>{estado.label}</SelectItem>)}</SelectContent></Select><div className="min-h-5"></div></div>
+                      <div className="grid gap-2"><Label>Prioridad</Label><Select value={editFormProyecto.nivelPrioridad || "sin-prioridad"} onValueChange={v => setEditFormProyecto(f => ({ ...f, nivelPrioridad: v === "sin-prioridad" ? "" : v }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{PRIORIDADES_PROYECTO.map(prioridad => <SelectItem key={prioridad.value || "sin-prioridad"} value={prioridad.value || "sin-prioridad"}>{prioridad.label}</SelectItem>)}</SelectContent></Select><div className="min-h-5"></div></div>
+                      <div className="grid gap-2" data-field="edit-porcentajeAvance"><Label>Avance (%) <span className="text-[#C8102E]">*</span></Label><Input type="number" min="0" max="100" step="1" value={editFormProyecto.porcentajeAvance} onChange={e => { const v = e.target.value; setEditFormProyecto(f => ({ ...f, porcentajeAvance: v })); setEditFieldErrors(p => { const { "edit-porcentajeAvance": _, ...r } = p; const pct = Number(v); if (v && (!Number.isFinite(pct) || pct < 0 || pct > 100)) { r["edit-porcentajeAvance"] = "El porcentaje de avance debe estar entre 0 y 100" }; return r }) }} className={editFieldErrors["edit-porcentajeAvance"] ? "border-[#C8102E]" : ""} />{editFieldErrors["edit-porcentajeAvance"] && <p className="text-xs text-[#C8102E]">{editFieldErrors["edit-porcentajeAvance"]}</p>}<div className="min-h-5"></div></div>
+                      <div className="grid gap-2" data-field="edit-presupuesto"><Label>Presupuesto</Label><Input type="number" min="0" step="0.01" value={editFormProyecto.presupuesto} onChange={e => { const v = e.target.value; setEditFormProyecto(f => ({ ...f, presupuesto: v })); setEditFieldErrors(p => { const { "edit-presupuesto": _, ...r } = p; if (v && Number(v) < 0) { r["edit-presupuesto"] = "El presupuesto no puede ser negativo" }; return r }) }} className={editFieldErrors["edit-presupuesto"] ? "border-[#C8102E]" : ""} />{editFieldErrors["edit-presupuesto"] && <p className="text-xs text-[#C8102E]">{editFieldErrors["edit-presupuesto"]}</p>}<div className="min-h-5"></div></div>
                     </div>
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="grid gap-2">
-                        <Label htmlFor="fechaInicio">Fecha de Inicio</Label>
-                        <Input id="fechaInicio" name="fechaInicio" type="date" defaultValue={proyecto.fechaInicio?.split('T')[0]} required />
-                      </div>
-                      <div className="grid gap-2">
-                        <Label htmlFor="fechaFin">Fecha de Fin</Label>
-                        <Input id="fechaFin" name="fechaFin" type="date" defaultValue={proyecto.fechaFin?.split('T')[0]} />
-                      </div>
-                    </div>
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="grid gap-2">
-                        <Label>Macroregión</Label>
-                        <div className="flex flex-col gap-2 rounded-md border border-[#E0E0E0] bg-[#FAFAFA] p-3 max-h-40 overflow-y-auto">
-                          {macroregionesList.length > 0 ? macroregionesList.map((region) => (
-                            <label key={region.id} className="flex items-center gap-2 cursor-pointer">
-                              <input
-                                type="checkbox"
-                                name="macroregiones"
-                                value={region.id}
-                                className="h-4 w-4 rounded border-[#E0E0E0] accent-[#FFD600]"
-                                defaultChecked={proyecto.macroregiones?.some(m => m.id === region.id) ?? false}
-                              />
-                              <span className="text-sm text-[#1A1A1A]">{region.nombre}</span>
-                            </label>
-                          )) : (
-                            <span className="text-sm text-[#5C5C5C]">Cargando...</span>
-                          )}
+                  </section>
+                  <section className="grid gap-4 rounded-lg border border-[#E0E0E0] p-4">
+                    <h3 className="text-xs font-bold uppercase tracking-wide text-[#5C5C5C]">Clasificación y relaciones</h3>
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <div className="grid gap-2" data-field="edit-idMacroregiones">
+                        <Label>Macroregiones <span className="text-[#C8102E]">*</span></Label>
+                        <div className={`flex min-h-24 flex-wrap items-center gap-2 rounded-md border p-3 ${editFieldErrors["edit-idMacroregiones"] ? "border-[#C8102E]" : "border-[#E0E0E0]"}`}>
+                          {macroregionesCatalogo.map(m => (
+                            <button
+                              key={m.id}
+                              type="button"
+                              onClick={() => toggleEditMacroregion(m.id)}
+                              className={`rounded-full px-3 py-1 text-xs font-medium ${editFormProyecto.idMacroregiones.includes(m.id) ? "bg-[#FFD600] text-[#1A1A1A]" : "border border-[#E0E0E0] text-[#5C5C5C]"}`}
+                            >
+                              {m.nombre}
+                            </button>
+                          ))}
                         </div>
+                        {editFieldErrors["edit-idMacroregiones"] && <p className="text-xs text-[#C8102E]">{editFieldErrors["edit-idMacroregiones"]}</p>}<div className="min-h-5"></div>
+                      </div>
+                      <div className="grid gap-2" data-field="edit-idResponsablePrincipal">
+                        <Label>Responsable principal <span className="text-[#C8102E]">*</span></Label>
+                        <Input
+                          placeholder="Buscar responsable..."
+                          value={responsableSearch}
+                          onChange={e => setResponsableSearch(e.target.value)}
+                        />
+                        <div className={`flex max-h-32 flex-wrap gap-2 overflow-y-auto rounded-md border p-3 ${editFieldErrors["edit-idResponsablePrincipal"] ? "border-[#C8102E]" : "border-[#E0E0E0]"}`}>
+                          {responsablesEdicionVisibles.length > 0 ? responsablesEdicionVisibles.map(u => {
+                            const selected = editFormProyecto.idResponsablePrincipal === String(u.id)
+                            return (
+                              <button
+                                key={u.id}
+                                type="button"
+                                onClick={() => { setEditFormProyecto(f => ({ ...f, idResponsablePrincipal: String(u.id) })); setEditFieldErrors(p => { const { "edit-idResponsablePrincipal": _, ...r } = p; return r }) }}
+                                className={`rounded-full px-3 py-1 text-xs font-medium ${selected ? "bg-[#FFD600] text-[#1A1A1A]" : "border border-[#E0E0E0] text-[#5C5C5C]"}`}
+                              >
+                                {u.nombres} {u.apellidos}
+                              </button>
+                            )
+                          }) : <span className="text-xs text-[#5C5C5C]">No se encontraron responsables.</span>}
+                        </div>
+                        {editFieldErrors["edit-idResponsablePrincipal"] && <p className="text-xs text-[#C8102E]">{editFieldErrors["edit-idResponsablePrincipal"]}</p>}<div className="min-h-5"></div>
                       </div>
                       <div className="grid gap-2">
-                        <Label>Estado</Label>
-                        <Select name="estado" defaultValue={proyecto.estado}>
-                          <SelectTrigger><SelectValue placeholder="Seleccione" /></SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="PENDIENTE">Pendiente</SelectItem>
-                            <SelectItem value="EN_CURSO">En curso</SelectItem>
-                            <SelectItem value="FINALIZADO">Finalizado</SelectItem>
-                          </SelectContent>
-                        </Select>
+                        <Label>Territorios (departamentos)</Label>
+                        <Input
+                          placeholder="Buscar departamento..."
+                          value={territorioSearch}
+                          onChange={e => setTerritorioSearch(e.target.value)}
+                        />
+                        <div className="flex max-h-40 flex-wrap gap-2 overflow-y-auto rounded-md border border-[#E0E0E0] p-3">
+                          {territoriosFiltrados.length > 0 ? territoriosFiltrados.map(t => (
+                            <button
+                              key={t.id}
+                              type="button"
+                              onClick={() => toggleEditTerritorio(t.id)}
+                              className={`rounded-full px-3 py-1 text-xs font-medium ${editFormProyecto.idTerritorios.includes(t.id) ? "bg-[#FFD600] text-[#1A1A1A]" : "border border-[#E0E0E0] text-[#5C5C5C]"}`}
+                            >
+                              {t.nombre}
+                            </button>
+                          )) : <span className="text-xs text-[#5C5C5C]">No se encontraron departamentos.</span>}
+                        </div>
+                        {editFormProyecto.idTerritorios.length > 0 && (
+                          <p className="text-xs text-[#5C5C5C]">{editFormProyecto.idTerritorios.length} departamento(s) seleccionado(s)</p>
+                        )}
+                      </div>
+                      <div className="grid gap-2">
+                        <Label>Instituciones miembro</Label>
+                        <Input
+                          placeholder="Buscar institución..."
+                          value={institucionSearch}
+                          onChange={e => setInstitucionSearch(e.target.value)}
+                        />
+                        <div className="flex max-h-40 flex-wrap gap-2 overflow-y-auto rounded-md border border-[#E0E0E0] p-3">
+                          {institucionesFiltradas.length > 0 ? institucionesFiltradas.map(inst => {
+                            const selected = editFormProyecto.instituciones.some(item => item.idInstitucion === inst.id)
+                            return (
+                              <button
+                                key={inst.id}
+                                type="button"
+                                onClick={() => toggleEditInstitucion(inst.id)}
+                                className={`rounded-full px-3 py-1 text-xs font-medium ${selected ? "bg-[#FFD600] text-[#1A1A1A]" : "border border-[#E0E0E0] text-[#5C5C5C]"}`}
+                              >
+                                {inst.nombre}
+                              </button>
+                            )
+                          }) : <span className="text-xs text-[#5C5C5C]">No se encontraron instituciones.</span>}
+                        </div>
+                        {editFormProyecto.instituciones.length > 0 && (
+                          <p className="text-xs text-[#5C5C5C]">{editFormProyecto.instituciones.length} institución(es) seleccionada(s) como miembro.</p>
+                        )}
                       </div>
                     </div>
-                    <div className="grid gap-2">
-                      <Label htmlFor="desc">Descripción</Label>
-                      <Textarea id="desc" name="descripcion" defaultValue={proyecto.descripcion} rows={4} className="resize-none" />
-                    </div>
-                  </div>
-                  <DialogFooter>
-                    <Button variant="outline" type="button" onClick={() => setEditModalOpen(false)}>Cancelar</Button>
-                    <Button type="submit" className="bg-[#FFD600] text-[#1A1A1A] hover:bg-[#C9A42B]">Guardar</Button>
-                  </DialogFooter>
-                </form>
+                  </section>
+                </div>
+                <DialogFooter><Button variant="outline" type="button" onClick={() => setEditModalOpen(false)} disabled={editSubmitting}>Cancelar</Button><Button type="button" onClick={guardarEdicionProyecto} disabled={editSubmitting} className="bg-[#FFD600] text-[#1A1A1A] hover:bg-[#C9A42B]">{editSubmitting ? "Guardando..." : <><Save className="mr-2 h-4 w-4" /> Guardar cambios</>}</Button></DialogFooter>
               </DialogContent>
             </Dialog>
+
+            <Dialog open={editSuccessModalOpen} onOpenChange={setEditSuccessModalOpen}>
+              <DialogContent className="sm:max-w-md" showCloseButton={false}>
+                <DialogHeader>
+                  <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-green-100">
+                    <CheckCircle2 className="h-8 w-8 text-green-600" />
+                  </div>
+                  <DialogTitle className="text-center text-lg">
+                    Proyecto actualizado exitosamente
+                  </DialogTitle>
+                  <DialogDescription className="text-center">
+                    Los cambios se han guardado correctamente.
+                  </DialogDescription>
+                </DialogHeader>
+                <DialogFooter className="sm:justify-center">
+                  <Button type="button" onClick={() => setEditSuccessModalOpen(false)} className="bg-[#FFD600] text-[#1A1A1A] hover:bg-[#C9A42B]">
+                    Aceptar
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+            </>
+            )}
+
             <button className="flex items-center gap-2 rounded-lg border border-[#E0E0E0] bg-white px-4 py-2 text-sm font-medium text-[#5C5C5C] hover:bg-[#F7F7F7]">
               <Download className="h-4 w-4" />
               Exportar
@@ -886,7 +1375,7 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div>
                       <h3 className="text-sm font-bold uppercase tracking-wide text-[#5C5C5C] mb-2">
-                        Territorios
+                        Territorios / departamentos
                       </h3>
                       <div className="flex flex-wrap gap-2">
                         {proyecto.territorios.map(t => (
@@ -902,15 +1391,15 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                         <h3 className="text-sm font-bold uppercase tracking-wide text-[#5C5C5C]">
                           Instituciones Miembro
                         </h3>
-                        <MockDataTag />
+                        {proyecto.fuenteDatos !== "api" && <MockDataTag />}
                       </div>
                       <div className="flex flex-wrap gap-2">
-                        {proyecto.institucionesMiembro.map(i => (
+                        {proyecto.institucionesMiembro.length > 0 ? proyecto.institucionesMiembro.map(i => (
                           <span key={i} className="inline-flex items-center gap-1 rounded-full bg-[#FFD600]/10 px-3 py-1 text-xs text-[#C9A42B]">
                             <Building2 className="h-3 w-3" />
                             {i}
                           </span>
-                        ))}
+                        )) : <span className="text-sm text-[#5C5C5C]">Sin instituciones vinculadas</span>}
                       </div>
                     </div>
                   </div>
@@ -929,7 +1418,7 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                         <span className="text-xs text-[#5C5C5C]">Sincronizando...</span>
                       )}
                     </div>
-                    <Dialog open={createActividadOpen} onOpenChange={setCreateActividadOpen}>
+                    <Dialog open={createActividadOpen} onOpenChange={(open) => { setCreateActividadOpen(open); if (open) { setActForm({ nombre: "", descripcion: "", fechaInicio: "", fechaFin: "", idResponsables: [], estado: "PENDIENTE" }); setActFieldErrors({}); setActResponsableSearch("") } }}>
                       <DialogTrigger asChild>
                         <button className="flex items-center gap-2 rounded-lg bg-[#FFD600] px-3 py-1.5 text-xs font-bold text-[#1A1A1A] hover:bg-[#C9A42B]">
                           <Plus className="h-3.5 w-3.5" />
@@ -942,76 +1431,107 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                           <DialogDescription>Detalle la nueva actividad a registrar para este proyecto.</DialogDescription>
                         </DialogHeader>
                         <div className="grid gap-4 py-6">
-                          <div className="grid gap-2">
-                            <Label htmlFor="act-nombre">Nombre de la actividad</Label>
-                            <Input id="act-nombre" placeholder="Ej. Taller de sensibilización" value={actForm.nombre} onChange={e => setActForm(f => ({ ...f, nombre: e.target.value }))} />
+                          <div className="grid gap-2" data-field="act-nombre">
+                            <Label htmlFor="act-nombre">Nombre de la actividad <span className="text-[#C8102E]">*</span></Label>
+                            <div className="relative">
+                              <Input id="act-nombre" maxLength={50} placeholder="Ej. Taller de sensibilización" value={actForm.nombre} onChange={e => { setActForm(f => ({ ...f, nombre: e.target.value })); setActFieldErrors(p => { const { "act-nombre": _, ...r } = p; return r }) }} className={actFieldErrors["act-nombre"] ? "border-[#C8102E] pr-16" : "pr-16"} />
+                              <span className={`absolute right-3 top-1/2 -translate-y-1/2 text-xs ${actForm.nombre.length >= 50 ? "text-[#C8102E]" : actForm.nombre.length >= 40 ? "text-[#C9A42B]" : "text-[#9CA3AF]"}`}>{actForm.nombre.length}/50</span>
+                            </div>
+                            {actFieldErrors["act-nombre"] && <p className="text-xs text-[#C8102E]">{actFieldErrors["act-nombre"]}</p>}
                           </div>
                           <div className="grid gap-2">
                             <Label htmlFor="act-descripcion">Descripción</Label>
-                            <Textarea id="act-descripcion" placeholder="Descripción de la actividad..." value={actForm.descripcion} onChange={e => setActForm(f => ({ ...f, descripcion: e.target.value }))} />
+                            <Textarea id="act-descripcion" maxLength={200} rows={3} placeholder="Descripción de la actividad..." value={actForm.descripcion} onChange={e => setActForm(f => ({ ...f, descripcion: e.target.value }))} />
+                            <div className="flex justify-end">
+                              <span className={`text-xs ${actForm.descripcion.length >= 200 ? "text-[#C8102E]" : actForm.descripcion.length > 160 ? "text-[#C9A42B]" : "text-[#9CA3AF]"}`}>{actForm.descripcion.length}/200</span>
+                            </div>
                           </div>
-                          <div className="grid gap-2">
-                            <Label>Responsable(s)</Label>
-                            <div className="flex flex-wrap gap-2 rounded-md border border-[#E0E0E0] bg-white p-3 max-h-40 overflow-y-auto">
+                          <div className="grid gap-2" data-field="act-idResponsables">
+                            <Label>Responsable(s) <span className="text-[#C8102E]">*</span></Label>
+                            <Input
+                              type="search"
+                              placeholder="Buscar responsable..."
+                              value={actResponsableSearch}
+                              onChange={e => setActResponsableSearch(e.target.value)}
+                            />
+                            <div className={`flex max-h-32 flex-wrap gap-2 overflow-y-auto rounded-md border p-3 ${actFieldErrors["act-idResponsables"] ? "border-[#C8102E]" : "border-[#E0E0E0]"}`}>
                               {Array.from(usuariosMap.entries()).length > 0 ? (
-                                Array.from(usuariosMap.entries()).map(([id, nombre]) => (
-                                  <label key={id} className="flex items-center gap-2 cursor-pointer">
-                                    <input
-                                      type="checkbox"
-                                      className="h-4 w-4 rounded border-[#E0E0E0] accent-[#FFD600]"
-                                      checked={actForm.idResponsables.includes(id)}
-                                      onChange={e => {
-                                        if (e.target.checked) {
-                                          setActForm(f => ({ ...f, idResponsables: [...f.idResponsables, id] }))
-                                        } else {
-                                          setActForm(f => ({ ...f, idResponsables: f.idResponsables.filter(i => i !== id) }))
-                                        }
-                                      }}
-                                    />
-                                    <span className="text-sm text-[#1A1A1A]">{nombre}</span>
-                                  </label>
-                                ))
+                                Array.from(usuariosMap.entries())
+                                  .filter(([, nombre]) => nombre.toLowerCase().includes(actResponsableSearch.toLowerCase()))
+                                  .map(([id, nombre]) => {
+                                    const selected = actForm.idResponsables.includes(id)
+                                    return (
+                                      <button
+                                        key={id}
+                                        type="button"
+                                        onClick={() => { setActForm(f => ({ ...f, idResponsables: selected ? f.idResponsables.filter(i => i !== id) : [...f.idResponsables, id] })); setActFieldErrors(p => { const { "act-idResponsables": _, ...r } = p; return r }) }}
+                                        className={`rounded-full px-3 py-1 text-xs font-medium ${selected ? "bg-[#FFD600] text-[#1A1A1A]" : "border border-[#E0E0E0] text-[#5C5C5C]"}`}
+                                      >
+                                        {nombre}
+                                      </button>
+                                    )
+                                  })
                               ) : (
                                 <span className="text-sm text-[#5C5C5C]">Cargando usuarios...</span>
                               )}
                             </div>
+                            {actFieldErrors["act-idResponsables"] && <p className="text-xs text-[#C8102E]">{actFieldErrors["act-idResponsables"]}</p>}
+                          </div>
+                          <div className="grid gap-2">
+                            <Label>Estado</Label>
+                            <Select value={actForm.estado} onValueChange={v => setActForm(f => ({ ...f, estado: v }))}>
+                              <SelectTrigger><SelectValue /></SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="PENDIENTE">Pendiente</SelectItem>
+                                <SelectItem value="EN_CURSO">En curso</SelectItem>
+                                <SelectItem value="FINALIZADA">Finalizada</SelectItem>
+                              </SelectContent>
+                            </Select>
                           </div>
                           <div className="grid grid-cols-2 gap-4">
-                            <div className="grid gap-2">
-                              <Label htmlFor="act-inicio">Fecha de Inicio</Label>
-                              <Input id="act-inicio" type="date" value={actForm.fechaInicio} onChange={e => setActForm(f => ({ ...f, fechaInicio: e.target.value }))} />
+                            <div className="grid gap-2" data-field="act-fechaInicio">
+                              <Label htmlFor="act-inicio">Fecha de Inicio <span className="text-[#C8102E]">*</span></Label>
+                              <Input id="act-inicio" type="date" value={actForm.fechaInicio} onChange={e => { const v = e.target.value; setActForm(f => ({ ...f, fechaInicio: v })); setActFieldErrors(p => { const { "act-fechaInicio": _, "act-fechaFin": __, ...r } = p; if (v && actForm.fechaFin && actForm.fechaFin < v) { r["act-fechaFin"] = "La fecha de fin no puede ser anterior a la fecha de inicio" }; return r }) }} className={actFieldErrors["act-fechaInicio"] ? "border-[#C8102E]" : ""} />
+                              {actFieldErrors["act-fechaInicio"] && <p className="text-xs text-[#C8102E]">{actFieldErrors["act-fechaInicio"]}</p>}
                             </div>
-                            <div className="grid gap-2">
+                            <div className="grid gap-2" data-field="act-fechaFin">
                               <Label htmlFor="act-fin">Fecha de Fin</Label>
-                              <Input id="act-fin" type="date" value={actForm.fechaFin} onChange={e => setActForm(f => ({ ...f, fechaFin: e.target.value }))} />
+                              <Input id="act-fin" type="date" value={actForm.fechaFin} onChange={e => { const v = e.target.value; setActForm(f => ({ ...f, fechaFin: v })); setActFieldErrors(p => { const { "act-fechaFin": _, ...r } = p; if (v && actForm.fechaInicio && v < actForm.fechaInicio) { r["act-fechaFin"] = "La fecha de fin no puede ser anterior a la fecha de inicio" }; return r }) }} className={actFieldErrors["act-fechaFin"] ? "border-[#C8102E]" : ""} />
+                              {actFieldErrors["act-fechaFin"] && <p className="text-xs text-[#C8102E]">{actFieldErrors["act-fechaFin"]}</p>}
                             </div>
                           </div>
-                          {(() => {
-                            const invalida = actForm.fechaInicio && actForm.fechaFin && actForm.fechaFin < actForm.fechaInicio
-                            return invalida ? <p className="text-xs text-[#C8102E]">La fecha de fin no puede ser anterior a la fecha de inicio.</p> : null
-                          })()}
                         </div>
                         <DialogFooter>
                           <Button variant="outline" onClick={() => setCreateActividadOpen(false)}>Cancelar</Button>
                           <Button
                             className="bg-[#FFD600] text-[#1A1A1A] hover:bg-[#C9A42B]"
-                            disabled={!!(creandoActividad || !actForm.nombre.trim() || (actForm.fechaInicio && actForm.fechaFin && actForm.fechaFin < actForm.fechaInicio))}
+                            disabled={creandoActividad}
                             onClick={async () => {
-                              if (!actForm.nombre.trim()) return
-                              if (actForm.fechaInicio && actForm.fechaFin && actForm.fechaFin < actForm.fechaInicio) return
+                              const errors = validarActForm()
+                              if (Object.keys(errors).length > 0) {
+                                setActFieldErrors(errors)
+                                const firstField = Object.keys(errors)[0]
+                                const el = document.querySelector(`[data-field="${firstField}"]`)
+                                el?.scrollIntoView({ behavior: "smooth", block: "center" })
+                                const input = el?.querySelector("input, select, textarea, button")
+                                if (input instanceof HTMLElement) input.focus()
+                                return
+                              }
                               setCreandoActividad(true)
                               try {
                                 const creada = await api.post<ActividadResponse>("/actividades", {
-                                  nombre: actForm.nombre,
-                                  descripcion: actForm.descripcion || undefined,
+                                  nombre: actForm.nombre.trim(),
+                                  descripcion: actForm.descripcion.trim() || undefined,
                                   fechaInicio: actForm.fechaInicio || undefined,
                                   fechaFin: actForm.fechaFin || undefined,
+                                  estado: actForm.estado as EstadoActividad,
                                   idProyecto: Number(id),
                                   idResponsables: actForm.idResponsables.length > 0 ? actForm.idResponsables : undefined,
                                 })
                                 setActividadesApi(prev => [...prev, creada])
-                                setActForm({ nombre: "", descripcion: "", fechaInicio: "", fechaFin: "", idResponsables: [] })
+                                setActForm({ nombre: "", descripcion: "", fechaInicio: "", fechaFin: "", idResponsables: [], estado: "PENDIENTE" })
                                 setCreateActividadOpen(false)
+                                setActSuccessModalOpen(true)
                               } catch (err) {
                                 console.error(err)
                               } finally {
@@ -1025,51 +1545,84 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                     </DialogContent>
                   </Dialog>
 
+                  <Dialog open={actSuccessModalOpen} onOpenChange={setActSuccessModalOpen}>
+                    <DialogContent className="sm:max-w-md" showCloseButton={false}>
+                      <DialogHeader>
+                        <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-green-100">
+                          <CheckCircle2 className="h-8 w-8 text-green-600" />
+                        </div>
+                        <DialogTitle className="text-center text-lg">
+                          Actividad creada exitosamente
+                        </DialogTitle>
+                        <DialogDescription className="text-center">
+                          La actividad se ha registrado correctamente.
+                        </DialogDescription>
+                      </DialogHeader>
+                      <DialogFooter className="sm:justify-center">
+                        <Button type="button" onClick={() => setActSuccessModalOpen(false)} className="bg-[#FFD600] text-[#1A1A1A] hover:bg-[#C9A42B]">
+                          Aceptar
+                        </Button>
+                      </DialogFooter>
+                    </DialogContent>
+                  </Dialog>
+
                   {/* ── EDITAR ACTIVIDAD ── */}
-                  <Dialog open={editActividadOpen} onOpenChange={setEditActividadOpen}>
+                  <Dialog open={editActividadOpen} onOpenChange={(open) => { setEditActividadOpen(open); if (open) { setEditActFieldErrors({}); setEditActResponsableSearch("") } }}>
                     <DialogContent className="overflow-y-auto sm:max-w-lg">
                       <DialogHeader>
                         <DialogTitle>Editar Actividad</DialogTitle>
                         <DialogDescription>Modifica los datos de la actividad seleccionada.</DialogDescription>
                       </DialogHeader>
                       <div className="grid gap-4 py-6">
-                        <div className="grid gap-2">
-                          <Label htmlFor="edit-nombre">Nombre de la actividad</Label>
-                          <Input id="edit-nombre" placeholder="Ej. Taller de sensibilización" value={editForm.nombre} onChange={e => setEditForm(f => ({ ...f, nombre: e.target.value }))} />
+                        <div className="grid gap-2" data-field="edit-nombre">
+                          <Label htmlFor="edit-nombre">Nombre de la actividad <span className="text-[#C8102E]">*</span></Label>
+                          <div className="relative">
+                            <Input id="edit-nombre" maxLength={50} placeholder="Ej. Taller de sensibilización" value={editForm.nombre} onChange={e => { setEditForm(f => ({ ...f, nombre: e.target.value })); setEditActFieldErrors(p => { const { "edit-nombre": _, ...r } = p; return r }) }} className={`${editActFieldErrors["edit-nombre"] ? "border-[#C8102E] pr-16" : "pr-16"}`} />
+                            <span className={`absolute right-3 top-1/2 -translate-y-1/2 text-xs ${editForm.nombre.length >= 50 ? "text-[#C8102E]" : editForm.nombre.length >= 40 ? "text-[#C9A42B]" : "text-[#9CA3AF]"}`}>{editForm.nombre.length}/50</span>
+                          </div>
+                          {editActFieldErrors["edit-nombre"] && <p className="text-xs text-[#C8102E]">{editActFieldErrors["edit-nombre"]}</p>}
                         </div>
                         <div className="grid gap-2">
                           <Label htmlFor="edit-descripcion">Descripción</Label>
-                          <Textarea id="edit-descripcion" placeholder="Descripción de la actividad..." value={editForm.descripcion} onChange={e => setEditForm(f => ({ ...f, descripcion: e.target.value }))} />
+                          <Textarea id="edit-descripcion" maxLength={200} rows={3} placeholder="Descripción de la actividad..." value={editForm.descripcion} onChange={e => setEditForm(f => ({ ...f, descripcion: e.target.value }))} />
+                          <div className="flex justify-end">
+                            <span className={`text-xs ${editForm.descripcion.length >= 200 ? "text-[#C8102E]" : editForm.descripcion.length > 160 ? "text-[#C9A42B]" : "text-[#9CA3AF]"}`}>{editForm.descripcion.length}/200</span>
+                          </div>
                         </div>
-                        <div className="grid gap-2">
-                          <Label>Responsable(s)</Label>
-                          <div className="flex flex-wrap gap-2 rounded-md border border-[#E0E0E0] bg-white p-3 max-h-40 overflow-y-auto">
+                        <div className="grid gap-2" data-field="edit-idResponsables">
+                          <Label>Responsable(s) <span className="text-[#C8102E]">*</span></Label>
+                          <Input
+                            type="search"
+                            placeholder="Buscar responsable..."
+                            value={editActResponsableSearch}
+                            onChange={e => setEditActResponsableSearch(e.target.value)}
+                          />
+                          <div className={`flex max-h-32 flex-wrap gap-2 overflow-y-auto rounded-md border p-3 ${editActFieldErrors["edit-idResponsables"] ? "border-[#C8102E]" : "border-[#E0E0E0]"}`}>
                             {Array.from(usuariosMap.entries()).length > 0 ? (
-                              Array.from(usuariosMap.entries()).map(([id, nombre]) => (
-                                <label key={id} className="flex items-center gap-2 cursor-pointer">
-                                  <input
-                                    type="checkbox"
-                                    className="h-4 w-4 rounded border-[#E0E0E0] accent-[#FFD600]"
-                                    checked={editForm.idResponsables.includes(id)}
-                                    onChange={e => {
-                                      if (e.target.checked) {
-                                        setEditForm(f => ({ ...f, idResponsables: [...f.idResponsables, id] }))
-                                      } else {
-                                        setEditForm(f => ({ ...f, idResponsables: f.idResponsables.filter(i => i !== id) }))
-                                      }
-                                    }}
-                                  />
-                                  <span className="text-sm text-[#1A1A1A]">{nombre}</span>
-                                </label>
-                              ))
+                              Array.from(usuariosMap.entries())
+                                .filter(([, nombre]) => nombre.toLowerCase().includes(editActResponsableSearch.toLowerCase()))
+                                .map(([id, nombre]) => {
+                                  const selected = editForm.idResponsables.includes(id)
+                                  return (
+                                    <button
+                                      key={id}
+                                      type="button"
+                                      onClick={() => { setEditForm(f => ({ ...f, idResponsables: selected ? f.idResponsables.filter(i => i !== id) : [...f.idResponsables, id] })); setEditActFieldErrors(p => { const { "edit-idResponsables": _, ...r } = p; return r }) }}
+                                      className={`rounded-full px-3 py-1 text-xs font-medium ${selected ? "bg-[#FFD600] text-[#1A1A1A]" : "border border-[#E0E0E0] text-[#5C5C5C]"}`}
+                                    >
+                                      {nombre}
+                                    </button>
+                                  )
+                                })
                             ) : (
                               <span className="text-sm text-[#5C5C5C]">Cargando usuarios...</span>
                             )}
                           </div>
+                          {editActFieldErrors["edit-idResponsables"] && <p className="text-xs text-[#C8102E]">{editActFieldErrors["edit-idResponsables"]}</p>}
                         </div>
                         <div className="grid gap-2">
                           <Label htmlFor="edit-estado">Estado</Label>
-                          <Select value={editForm.estado} onValueChange={v => setEditForm(f => ({ ...f, estado: v as "PENDIENTE" | "EN_CURSO" | "FINALIZADA" }))}>
+                          <Select value={editForm.estado} onValueChange={v => setEditForm(f => ({ ...f, estado: v as EstadoActividad }))}>
                             <SelectTrigger id="edit-estado"><SelectValue /></SelectTrigger>
                             <SelectContent>
                               <SelectItem value="PENDIENTE">Pendiente</SelectItem>
@@ -1079,33 +1632,39 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                           </Select>
                         </div>
                         <div className="grid grid-cols-2 gap-4">
-                          <div className="grid gap-2">
-                            <Label htmlFor="edit-inicio">Fecha de Inicio</Label>
-                            <Input id="edit-inicio" type="date" value={editForm.fechaInicio} onChange={e => setEditForm(f => ({ ...f, fechaInicio: e.target.value }))} />
+                          <div className="grid gap-2" data-field="edit-inicio">
+                            <Label htmlFor="edit-inicio">Fecha de Inicio <span className="text-[#C8102E]">*</span></Label>
+                            <Input id="edit-inicio" type="date" value={editForm.fechaInicio} onChange={e => { const v = e.target.value; setEditForm(f => ({ ...f, fechaInicio: v })); setEditActFieldErrors(p => { const { "edit-inicio": _, "edit-fin": __, ...r } = p; if (v && editForm.fechaFin && editForm.fechaFin < v) { r["edit-fin"] = "La fecha de fin no puede ser anterior a la fecha de inicio" }; return r }) }} className={editActFieldErrors["edit-inicio"] ? "border-[#C8102E]" : ""} />
+                            {editActFieldErrors["edit-inicio"] && <p className="text-xs text-[#C8102E]">{editActFieldErrors["edit-inicio"]}</p>}
                           </div>
-                          <div className="grid gap-2">
+                          <div className="grid gap-2" data-field="edit-fin">
                             <Label htmlFor="edit-fin">Fecha de Fin</Label>
-                            <Input id="edit-fin" type="date" value={editForm.fechaFin} onChange={e => setEditForm(f => ({ ...f, fechaFin: e.target.value }))} />
+                            <Input id="edit-fin" type="date" value={editForm.fechaFin} onChange={e => { const v = e.target.value; setEditForm(f => ({ ...f, fechaFin: v })); setEditActFieldErrors(p => { const { "edit-fin": _, ...r } = p; if (v && editForm.fechaInicio && v < editForm.fechaInicio) { r["edit-fin"] = "La fecha de fin no puede ser anterior a la fecha de inicio" }; return r }) }} className={editActFieldErrors["edit-fin"] ? "border-[#C8102E]" : ""} />
+                            {editActFieldErrors["edit-fin"] && <p className="text-xs text-[#C8102E]">{editActFieldErrors["edit-fin"]}</p>}
                           </div>
                         </div>
-                        {(() => {
-                          const invalida = editForm.fechaInicio && editForm.fechaFin && editForm.fechaFin < editForm.fechaInicio
-                          return invalida ? <p className="text-xs text-[#C8102E]">La fecha de fin no puede ser anterior a la fecha de inicio.</p> : null
-                        })()}
                       </div>
                       <DialogFooter>
                         <Button variant="outline" onClick={() => setEditActividadOpen(false)}>Cancelar</Button>
                         <Button
                           className="bg-[#FFD600] text-[#1A1A1A] hover:bg-[#C9A42B]"
-                          disabled={!!(editandoActividad || !editForm.nombre.trim() || (editForm.fechaInicio && editForm.fechaFin && editForm.fechaFin < editForm.fechaInicio))}
+                          disabled={editandoActividad}
                           onClick={async () => {
-                            if (!editForm.nombre.trim() || !editingActividad) return
-                            if (editForm.fechaInicio && editForm.fechaFin && editForm.fechaFin < editForm.fechaInicio) return
+                            setEditActFieldErrors({})
+                            const errors = validarEditActForm()
+                            if (Object.keys(errors).length > 0) {
+                              setEditActFieldErrors(errors)
+                              const firstField = Object.keys(errors)[0]
+                              const el = document.querySelector(`[data-field="${firstField}"]`)
+                              el?.scrollIntoView({ behavior: "smooth", block: "center" })
+                              return
+                            }
+                            if (!editingActividad) return
                             setEditandoActividad(true)
                             try {
                               const actualizada = await api.put<ActividadResponse>("/actividades/" + editingActividad.id, {
-                                nombre: editForm.nombre,
-                                descripcion: editForm.descripcion || undefined,
+                                nombre: editForm.nombre.trim(),
+                                descripcion: editForm.descripcion.trim() || undefined,
                                 fechaInicio: editForm.fechaInicio || undefined,
                                 fechaFin: editForm.fechaFin || undefined,
                                 estado: editForm.estado,
@@ -1115,6 +1674,7 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                               setActividadesApi(prev => prev.map(a => a.id === actualizada.id ? actualizada : a))
                               setEditActividadOpen(false)
                               setEditingActividad(null)
+                              setEditActSuccessModalOpen(true)
                             } catch (err) {
                               console.error(err)
                             } finally {
@@ -1128,96 +1688,331 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                     </DialogContent>
                   </Dialog>
 
+                  <Dialog open={editActSuccessModalOpen} onOpenChange={setEditActSuccessModalOpen}>
+                    <DialogContent className="sm:max-w-md" showCloseButton={false}>
+                      <DialogHeader>
+                        <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-green-100">
+                          <CheckCircle2 className="h-8 w-8 text-green-600" />
+                        </div>
+                        <DialogTitle className="text-center text-lg">
+                          Actividad actualizada exitosamente
+                        </DialogTitle>
+                        <DialogDescription className="text-center">
+                          Los cambios se han guardado correctamente.
+                        </DialogDescription>
+                      </DialogHeader>
+                      <DialogFooter className="sm:justify-center">
+                        <Button type="button" onClick={() => setEditActSuccessModalOpen(false)} className="bg-[#FFD600] text-[#1A1A1A] hover:bg-[#C9A42B]">
+                          Aceptar
+                        </Button>
+                      </DialogFooter>
+                    </DialogContent>
+                  </Dialog>
+
                   {/* ── CREAR SUBACTIVIDAD ── */}
-                  <Dialog open={createSubactOpen} onOpenChange={setCreateSubactOpen}>
+                  <Dialog open={createSubactOpen} onOpenChange={(open) => { setCreateSubactOpen(open); if (open) { setSubactForm({ nombre: "", idResponsable: "", presupuesto: "", hombresInvolucrados: "", mujeresInvolucradas: "", fechaInicio: "", fechaFin: "", descripcion: "" }); setSubactFieldErrors({}); setSubactResponsableSearch("") } }}>
                     <DialogContent className="overflow-y-auto sm:max-w-lg">
                       <DialogHeader>
                         <DialogTitle>Nueva Subactividad</DialogTitle>
                         <DialogDescription>Añadir una subactividad a la actividad seleccionada.</DialogDescription>
                       </DialogHeader>
-                      <div className="grid gap-4 py-6">
-                        <div className="grid gap-2">
-                          <Label htmlFor="sub-nombre">Nombre de la subactividad</Label>
-                          <Input id="sub-nombre" placeholder="Ej. Sesión teórica" value={subactForm.nombre} onChange={e => setSubactForm(f => ({ ...f, nombre: e.target.value }))} />
-                        </div>
-                        <div className="grid gap-2">
-                          <Label htmlFor="sub-descripcion">Descripción</Label>
-                          <Textarea id="sub-descripcion" placeholder="Descripción..." value={subactForm.descripcion} onChange={e => setSubactForm(f => ({ ...f, descripcion: e.target.value }))} />
-                        </div>
-                        <div className="grid gap-2">
-                          <Label htmlFor="sub-resp">Responsable</Label>
-                          <Select value={subactForm.idResponsable} onValueChange={v => setSubactForm(f => ({ ...f, idResponsable: v }))}>
-                            <SelectTrigger id="sub-resp"><SelectValue placeholder="Seleccionar responsable" /></SelectTrigger>
-                            <SelectContent>
-                              {Array.from(usuariosMap.entries()).map(([id, nombre]) => (
-                                <SelectItem key={id} value={String(id)}>{nombre}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        <div className="grid grid-cols-2 gap-4">
-                          <div className="grid gap-2">
-                            <Label htmlFor="sub-inicio">Fecha de Inicio</Label>
-                            <Input id="sub-inicio" type="date" value={subactForm.fechaInicio} onChange={e => setSubactForm(f => ({ ...f, fechaInicio: e.target.value }))} />
+                      <form onSubmit={e => e.preventDefault()} noValidate>
+                        <div className="grid gap-4 py-6">
+                          <div className="grid gap-2" data-field="sub-nombre">
+                            <Label htmlFor="sub-nombre">Nombre de la subactividad <span className="text-[#C8102E]">*</span></Label>
+                            <div className="relative">
+                              <Input id="sub-nombre" maxLength={50} placeholder="Ej. Sesión teórica" value={subactForm.nombre} onChange={e => { setSubactForm(f => ({ ...f, nombre: e.target.value })); setSubactFieldErrors(p => { const { "sub-nombre": _, ...r } = p; return r }) }} className={subactFieldErrors["sub-nombre"] ? "border-[#C8102E] pr-16" : "pr-16"} />
+                              <span className={`absolute right-3 top-1/2 -translate-y-1/2 text-xs ${subactForm.nombre.length >= 50 ? "text-[#C8102E]" : subactForm.nombre.length >= 40 ? "text-[#C9A42B]" : "text-[#9CA3AF]"}`}>{subactForm.nombre.length}/50</span>
+                            </div>
+                            {subactFieldErrors["sub-nombre"] && <p className="text-xs text-[#C8102E]">{subactFieldErrors["sub-nombre"]}</p>}
                           </div>
                           <div className="grid gap-2">
-                            <Label htmlFor="sub-fin">Fecha de Fin</Label>
-                            <Input id="sub-fin" type="date" value={subactForm.fechaFin} onChange={e => setSubactForm(f => ({ ...f, fechaFin: e.target.value }))} />
+                            <Label htmlFor="sub-descripcion">Descripción</Label>
+                            <Textarea id="sub-descripcion" maxLength={200} rows={3} placeholder="Descripción..." value={subactForm.descripcion} onChange={e => setSubactForm(f => ({ ...f, descripcion: e.target.value }))} />
+                            <div className="flex justify-end">
+                              <span className={`text-xs ${subactForm.descripcion.length >= 200 ? "text-[#C8102E]" : subactForm.descripcion.length > 160 ? "text-[#C9A42B]" : "text-[#9CA3AF]"}`}>{subactForm.descripcion.length}/200</span>
+                            </div>
+                          </div>
+                          <div className="grid gap-2" data-field="sub-idResponsable">
+                            <Label>Responsable <span className="text-[#C8102E]">*</span></Label>
+                            <Input
+                              type="search"
+                              placeholder="Buscar responsable..."
+                              value={subactResponsableSearch}
+                              onChange={e => setSubactResponsableSearch(e.target.value)}
+                            />
+                            <div className={`flex max-h-32 flex-wrap gap-2 overflow-y-auto rounded-md border p-3 ${subactFieldErrors["sub-idResponsable"] ? "border-[#C8102E]" : "border-[#E0E0E0]"}`}>
+                              {Array.from(usuariosMap.entries()).length > 0 ? (
+                                Array.from(usuariosMap.entries())
+                                  .filter(([, nombre]) => nombre.toLowerCase().includes(subactResponsableSearch.toLowerCase()))
+                                  .map(([id, nombre]) => {
+                                    const selected = subactForm.idResponsable === String(id)
+                                    return (
+                                      <button
+                                        key={id}
+                                        type="button"
+                                        onClick={() => { setSubactForm(f => ({ ...f, idResponsable: selected ? "" : String(id) })); setSubactFieldErrors(p => { const { "sub-idResponsable": _, ...r } = p; return r }) }}
+                                        className={`rounded-full px-3 py-1 text-xs font-medium ${selected ? "bg-[#FFD600] text-[#1A1A1A]" : "border border-[#E0E0E0] text-[#5C5C5C]"}`}
+                                      >
+                                        {nombre}
+                                      </button>
+                                    )
+                                  })
+                              ) : (
+                                <span className="text-sm text-[#5C5C5C]">Cargando usuarios...</span>
+                              )}
+                            </div>
+                            {subactFieldErrors["sub-idResponsable"] && <p className="text-xs text-[#C8102E]">{subactFieldErrors["sub-idResponsable"]}</p>}
+                          </div>
+                          <div className="grid grid-cols-2 gap-4">
+                            <div className="grid gap-2" data-field="sub-inicio">
+                              <Label htmlFor="sub-inicio">Fecha de Inicio <span className="text-[#C8102E]">*</span></Label>
+                              <Input id="sub-inicio" type="date" value={subactForm.fechaInicio} onChange={e => { const v = e.target.value; setSubactForm(f => ({ ...f, fechaInicio: v })); setSubactFieldErrors(p => { const { "sub-inicio": _, "sub-fin": __, ...r } = p; if (v && subactForm.fechaFin && subactForm.fechaFin < v) { r["sub-fin"] = "La fecha de fin no puede ser anterior a la fecha de inicio" }; return r }) }} className={subactFieldErrors["sub-inicio"] ? "border-[#C8102E]" : ""} />
+                              {subactFieldErrors["sub-inicio"] && <p className="text-xs text-[#C8102E]">{subactFieldErrors["sub-inicio"]}</p>}
+                            </div>
+                            <div className="grid gap-2" data-field="sub-fin">
+                              <Label htmlFor="sub-fin">Fecha de Fin</Label>
+                              <Input id="sub-fin" type="date" value={subactForm.fechaFin} onChange={e => { const v = e.target.value; setSubactForm(f => ({ ...f, fechaFin: v })); setSubactFieldErrors(p => { const { "sub-fin": _, ...r } = p; if (v && subactForm.fechaInicio && v < subactForm.fechaInicio) { r["sub-fin"] = "La fecha de fin no puede ser anterior a la fecha de inicio" }; return r }) }} className={subactFieldErrors["sub-fin"] ? "border-[#C8102E]" : ""} />
+                              {subactFieldErrors["sub-fin"] && <p className="text-xs text-[#C8102E]">{subactFieldErrors["sub-fin"]}</p>}
+                            </div>
+                          </div>
+                          <div className="grid grid-cols-3 gap-4">
+                            <div className="grid gap-2" data-field="sub-presu">
+                              <Label htmlFor="sub-presu">Presupuesto (S/)</Label>
+                              <Input id="sub-presu" type="number" min="0" value={subactForm.presupuesto} onChange={e => { const v = e.target.value; setSubactForm(f => ({ ...f, presupuesto: v })); setSubactFieldErrors(p => { const { "sub-presu": _, ...r } = p; if (v && Number(v) < 0) { r["sub-presu"] = "El presupuesto no puede ser negativo" }; return r }) }} className={subactFieldErrors["sub-presu"] ? "border-[#C8102E]" : ""} />
+                              {subactFieldErrors["sub-presu"] && <p className="text-xs text-[#C8102E]">{subactFieldErrors["sub-presu"]}</p>}
+                            </div>
+                            <div className="grid gap-2">
+                              <Label htmlFor="sub-hombres">Hombres Involucrados</Label>
+                              <Input id="sub-hombres" type="number" min="0" value={subactForm.hombresInvolucrados} onChange={e => setSubactForm(f => ({ ...f, hombresInvolucrados: e.target.value }))} />
+                            </div>
+                            <div className="grid gap-2">
+                              <Label htmlFor="sub-mujeres">Mujeres Involucradas</Label>
+                              <Input id="sub-mujeres" type="number" min="0" value={subactForm.mujeresInvolucradas} onChange={e => setSubactForm(f => ({ ...f, mujeresInvolucradas: e.target.value }))} />
+                            </div>
                           </div>
                         </div>
-                        <div className="grid grid-cols-3 gap-4">
-                          <div className="grid gap-2">
-                            <Label htmlFor="sub-presu">Presupuesto (S/)</Label>
-                            <Input id="sub-presu" type="number" min="0" value={subactForm.presupuesto} onChange={e => setSubactForm(f => ({ ...f, presupuesto: e.target.value }))} />
-                          </div>
-                          <div className="grid gap-2">
-                            <Label htmlFor="sub-hombres">Hombres Involucrados</Label>
-                            <Input id="sub-hombres" type="number" min="0" value={subactForm.hombresInvolucrados} onChange={e => setSubactForm(f => ({ ...f, hombresInvolucrados: e.target.value }))} />
-                          </div>
-                          <div className="grid gap-2">
-                            <Label htmlFor="sub-mujeres">Mujeres Involucradas</Label>
-                            <Input id="sub-mujeres" type="number" min="0" value={subactForm.mujeresInvolucradas} onChange={e => setSubactForm(f => ({ ...f, mujeresInvolucradas: e.target.value }))} />
-                          </div>
-                        </div>
-                        {(() => {
-                          const invalida = subactForm.fechaInicio && subactForm.fechaFin && subactForm.fechaFin < subactForm.fechaInicio
-                          return invalida ? <p className="text-xs text-[#C8102E]">La fecha de fin no puede ser anterior a la fecha de inicio.</p> : null
-                        })()}
-                      </div>
-                      <DialogFooter>
-                        <Button variant="outline" onClick={() => setCreateSubactOpen(false)}>Cancelar</Button>
-                        <Button
-                          className="bg-[#FFD600] text-[#1A1A1A] hover:bg-[#C9A42B]"
-                          disabled={!!(creandoSubact || !subactForm.nombre.trim() || !subactForm.idResponsable || (subactForm.fechaInicio && subactForm.fechaFin && subactForm.fechaFin < subactForm.fechaInicio))}
-                          onClick={async () => {
-                            if (!subactForm.nombre.trim() || !subactForm.idResponsable || !targetActividadId) return
-                            if (subactForm.fechaInicio && subactForm.fechaFin && subactForm.fechaFin < subactForm.fechaInicio) return
-                            setCreandoSubact(true)
-                            try {
-                              const nuevaSub: SubactividadCreate = {
-                                nombre: subactForm.nombre,
-                                idResponsable: Number(subactForm.idResponsable),
-                                presupuesto: subactForm.presupuesto ? Number(subactForm.presupuesto) : undefined,
-                                hombresInvolucrados: subactForm.hombresInvolucrados ? Number(subactForm.hombresInvolucrados) : undefined,
-                                mujeresInvolucradas: subactForm.mujeresInvolucradas ? Number(subactForm.mujeresInvolucradas) : undefined,
-                                fechaInicio: subactForm.fechaInicio || undefined,
-                                fechaFin: subactForm.fechaFin || undefined,
-                                descripcion: subactForm.descripcion || undefined,
+                        <DialogFooter>
+                          <Button variant="outline" onClick={() => setCreateSubactOpen(false)}>Cancelar</Button>
+                          <Button
+                            className="bg-[#FFD600] text-[#1A1A1A] hover:bg-[#C9A42B]"
+                            disabled={creandoSubact}
+                            onClick={async () => {
+                              setSubactFieldErrors({})
+                              const errors = validarSubactForm()
+                              if (Object.keys(errors).length > 0) {
+                                setSubactFieldErrors(errors)
+                                const firstField = Object.keys(errors)[0]
+                                const el = document.querySelector(`[data-field="${firstField}"]`)
+                                el?.scrollIntoView({ behavior: "smooth", block: "center" })
+                                return
                               }
-                              const creada = await api.post<SubactividadResponse>(`/actividades/${targetActividadId}/subactividades`, nuevaSub)
-                              setActividadesApi(prev => prev.map(a => a.id === targetActividadId ? { ...a, subactividades: [...(a.subactividades || []), creada] } : a))
-                              setCreateSubactOpen(false)
-                              setSubactForm({
-                                nombre: "", idResponsable: "", presupuesto: "", hombresInvolucrados: "", mujeresInvolucradas: "", fechaInicio: "", fechaFin: "", descripcion: ""
-                              })
-                            } catch (err) {
-                              console.error(err)
-                            } finally {
-                              setCreandoSubact(false)
-                            }
-                          }}
-                        >
-                          {creandoSubact ? "Guardando..." : "Crear subactividad"}
+                              if (!targetActividadId) return
+                              setCreandoSubact(true)
+                              try {
+                                const nuevaSub: SubactividadCreate = {
+                                  nombre: subactForm.nombre.trim(),
+                                  idResponsable: Number(subactForm.idResponsable),
+                                  presupuesto: subactForm.presupuesto ? Number(subactForm.presupuesto) : undefined,
+                                  hombresInvolucrados: subactForm.hombresInvolucrados ? Number(subactForm.hombresInvolucrados) : undefined,
+                                  mujeresInvolucradas: subactForm.mujeresInvolucradas ? Number(subactForm.mujeresInvolucradas) : undefined,
+                                  fechaInicio: subactForm.fechaInicio || undefined,
+                                  fechaFin: subactForm.fechaFin || undefined,
+                                  descripcion: subactForm.descripcion.trim() || undefined,
+                                }
+                                const creada = await api.post<SubactividadResponse>(`/actividades/${targetActividadId}/subactividades`, nuevaSub)
+                                setActividadesApi(prev => prev.map(a => a.id === targetActividadId ? { ...a, subactividades: [...(a.subactividades || []), creada] } : a))
+                                setCreateSubactOpen(false)
+                                setSubactForm({
+                                  nombre: "", idResponsable: "", presupuesto: "", hombresInvolucrados: "", mujeresInvolucradas: "", fechaInicio: "", fechaFin: "", descripcion: ""
+                                })
+                                setSubactSuccessModalOpen(true)
+                              } catch (err) {
+                                console.error(err)
+                              } finally {
+                                setCreandoSubact(false)
+                              }
+                            }}
+                          >
+                            {creandoSubact ? "Guardando..." : "Crear subactividad"}
+                          </Button>
+                        </DialogFooter>
+                      </form>
+                    </DialogContent>
+                  </Dialog>
+
+                  {/* ── EDITAR SUBACTIVIDAD ── */}
+                  <Dialog open={editSubactOpen} onOpenChange={(open) => { setEditSubactOpen(open); if (open) { setEditSubactFieldErrors({}); setEditSubactResponsableSearch("") } }}>
+                    <DialogContent className="overflow-y-auto sm:max-w-lg">
+                      <DialogHeader>
+                        <DialogTitle>Editar Subactividad</DialogTitle>
+                        <DialogDescription>Modifica los datos de la subactividad seleccionada.</DialogDescription>
+                      </DialogHeader>
+                      <form onSubmit={e => e.preventDefault()} noValidate>
+                        <div className="grid gap-4 py-6">
+                          <div className="grid gap-2" data-field="edit-sub-nombre">
+                            <Label htmlFor="edit-sub-nombre">Nombre de la subactividad <span className="text-[#C8102E]">*</span></Label>
+                            <div className="relative">
+                              <Input id="edit-sub-nombre" maxLength={50} placeholder="Ej. Sesión teórica" value={editSubactForm.nombre} onChange={e => { setEditSubactForm(f => ({ ...f, nombre: e.target.value })); setEditSubactFieldErrors(p => { const { "edit-sub-nombre": _, ...r } = p; return r }) }} className={editSubactFieldErrors["edit-sub-nombre"] ? "border-[#C8102E] pr-16" : "pr-16"} />
+                              <span className={`absolute right-3 top-1/2 -translate-y-1/2 text-xs ${editSubactForm.nombre.length >= 50 ? "text-[#C8102E]" : editSubactForm.nombre.length >= 40 ? "text-[#C9A42B]" : "text-[#9CA3AF]"}`}>{editSubactForm.nombre.length}/50</span>
+                            </div>
+                            {editSubactFieldErrors["edit-sub-nombre"] && <p className="text-xs text-[#C8102E]">{editSubactFieldErrors["edit-sub-nombre"]}</p>}
+                          </div>
+                          <div className="grid gap-2">
+                            <Label htmlFor="edit-sub-descripcion">Descripción</Label>
+                            <Textarea id="edit-sub-descripcion" maxLength={200} rows={3} placeholder="Descripción..." value={editSubactForm.descripcion} onChange={e => setEditSubactForm(f => ({ ...f, descripcion: e.target.value }))} />
+                            <div className="flex justify-end">
+                              <span className={`text-xs ${editSubactForm.descripcion.length >= 200 ? "text-[#C8102E]" : editSubactForm.descripcion.length > 160 ? "text-[#C9A42B]" : "text-[#9CA3AF]"}`}>{editSubactForm.descripcion.length}/200</span>
+                            </div>
+                          </div>
+                          <div className="grid gap-2" data-field="edit-sub-idResponsable">
+                            <Label>Responsable <span className="text-[#C8102E]">*</span></Label>
+                            <Input
+                              type="search"
+                              placeholder="Buscar responsable..."
+                              value={editSubactResponsableSearch}
+                              onChange={e => setEditSubactResponsableSearch(e.target.value)}
+                            />
+                            <div className={`flex max-h-32 flex-wrap gap-2 overflow-y-auto rounded-md border p-3 ${editSubactFieldErrors["edit-sub-idResponsable"] ? "border-[#C8102E]" : "border-[#E0E0E0]"}`}>
+                              {Array.from(usuariosMap.entries()).length > 0 ? (
+                                Array.from(usuariosMap.entries())
+                                  .filter(([, nombre]) => nombre.toLowerCase().includes(editSubactResponsableSearch.toLowerCase()))
+                                  .map(([id, nombre]) => {
+                                    const selected = editSubactForm.idResponsable === String(id)
+                                    return (
+                                      <button
+                                        key={id}
+                                        type="button"
+                                        onClick={() => { setEditSubactForm(f => ({ ...f, idResponsable: selected ? "" : String(id) })); setEditSubactFieldErrors(p => { const { "edit-sub-idResponsable": _, ...r } = p; return r }) }}
+                                        className={`rounded-full px-3 py-1 text-xs font-medium ${selected ? "bg-[#FFD600] text-[#1A1A1A]" : "border border-[#E0E0E0] text-[#5C5C5C]"}`}
+                                      >
+                                        {nombre}
+                                      </button>
+                                    )
+                                  })
+                              ) : (
+                                <span className="text-sm text-[#5C5C5C]">Cargando usuarios...</span>
+                              )}
+                            </div>
+                            {editSubactFieldErrors["edit-sub-idResponsable"] && <p className="text-xs text-[#C8102E]">{editSubactFieldErrors["edit-sub-idResponsable"]}</p>}
+                          </div>
+                          <div className="grid grid-cols-2 gap-4">
+                            <div className="grid gap-2" data-field="edit-sub-inicio">
+                              <Label htmlFor="edit-sub-inicio">Fecha de Inicio <span className="text-[#C8102E]">*</span></Label>
+                              <Input id="edit-sub-inicio" type="date" value={editSubactForm.fechaInicio} onChange={e => { const v = e.target.value; setEditSubactForm(f => ({ ...f, fechaInicio: v })); setEditSubactFieldErrors(p => { const { "edit-sub-inicio": _, "edit-sub-fin": __, ...r } = p; if (v && editSubactForm.fechaFin && editSubactForm.fechaFin < v) { r["edit-sub-fin"] = "La fecha de fin no puede ser anterior a la fecha de inicio" }; return r }) }} className={editSubactFieldErrors["edit-sub-inicio"] ? "border-[#C8102E]" : ""} />
+                              {editSubactFieldErrors["edit-sub-inicio"] && <p className="text-xs text-[#C8102E]">{editSubactFieldErrors["edit-sub-inicio"]}</p>}
+                            </div>
+                            <div className="grid gap-2" data-field="edit-sub-fin">
+                              <Label htmlFor="edit-sub-fin">Fecha de Fin</Label>
+                              <Input id="edit-sub-fin" type="date" value={editSubactForm.fechaFin} onChange={e => { const v = e.target.value; setEditSubactForm(f => ({ ...f, fechaFin: v })); setEditSubactFieldErrors(p => { const { "edit-sub-fin": _, ...r } = p; if (v && editSubactForm.fechaInicio && v < editSubactForm.fechaInicio) { r["edit-sub-fin"] = "La fecha de fin no puede ser anterior a la fecha de inicio" }; return r }) }} className={editSubactFieldErrors["edit-sub-fin"] ? "border-[#C8102E]" : ""} />
+                              {editSubactFieldErrors["edit-sub-fin"] && <p className="text-xs text-[#C8102E]">{editSubactFieldErrors["edit-sub-fin"]}</p>}
+                            </div>
+                          </div>
+                          <div className="grid grid-cols-3 gap-4">
+                            <div className="grid gap-2" data-field="edit-sub-presu">
+                              <Label htmlFor="edit-sub-presu">Presupuesto (S/)</Label>
+                              <Input id="edit-sub-presu" type="number" min="0" value={editSubactForm.presupuesto} onChange={e => { const v = e.target.value; setEditSubactForm(f => ({ ...f, presupuesto: v })); setEditSubactFieldErrors(p => { const { "edit-sub-presu": _, ...r } = p; if (v && Number(v) < 0) { r["edit-sub-presu"] = "El presupuesto no puede ser negativo" }; return r }) }} className={editSubactFieldErrors["edit-sub-presu"] ? "border-[#C8102E]" : ""} />
+                              {editSubactFieldErrors["edit-sub-presu"] && <p className="text-xs text-[#C8102E]">{editSubactFieldErrors["edit-sub-presu"]}</p>}
+                            </div>
+                            <div className="grid gap-2" data-field="edit-sub-hombres">
+                              <Label htmlFor="edit-sub-hombres">Hombres Involucrados</Label>
+                              <Input id="edit-sub-hombres" type="number" min="0" value={editSubactForm.hombresInvolucrados} onChange={e => { setEditSubactForm(f => ({ ...f, hombresInvolucrados: e.target.value })); setEditSubactFieldErrors(p => { const { "edit-sub-hombres": _, ...r } = p; return r }) }} className={editSubactFieldErrors["edit-sub-hombres"] ? "border-[#C8102E]" : ""} />
+                              {editSubactFieldErrors["edit-sub-hombres"] && <p className="text-xs text-[#C8102E]">{editSubactFieldErrors["edit-sub-hombres"]}</p>}
+                            </div>
+                            <div className="grid gap-2" data-field="edit-sub-mujeres">
+                              <Label htmlFor="edit-sub-mujeres">Mujeres Involucradas</Label>
+                              <Input id="edit-sub-mujeres" type="number" min="0" value={editSubactForm.mujeresInvolucradas} onChange={e => { setEditSubactForm(f => ({ ...f, mujeresInvolucradas: e.target.value })); setEditSubactFieldErrors(p => { const { "edit-sub-mujeres": _, ...r } = p; return r }) }} className={editSubactFieldErrors["edit-sub-mujeres"] ? "border-[#C8102E]" : ""} />
+                              {editSubactFieldErrors["edit-sub-mujeres"] && <p className="text-xs text-[#C8102E]">{editSubactFieldErrors["edit-sub-mujeres"]}</p>}
+                            </div>
+                          </div>
+                        </div>
+                        <DialogFooter>
+                          <Button variant="outline" onClick={() => setEditSubactOpen(false)}>Cancelar</Button>
+                          <Button
+                            className="bg-[#FFD600] text-[#1A1A1A] hover:bg-[#C9A42B]"
+                            disabled={editandoSubact}
+                            onClick={async () => {
+                              setEditSubactFieldErrors({})
+                              const errors = validarEditSubactForm()
+                              if (Object.keys(errors).length > 0) {
+                                setEditSubactFieldErrors(errors)
+                                const firstField = Object.keys(errors)[0]
+                                const el = document.querySelector(`[data-field="${firstField}"]`)
+                                el?.scrollIntoView({ behavior: "smooth", block: "center" })
+                                return
+                              }
+                              if (!editingSubact) return
+                              setEditandoSubact(true)
+                              try {
+                                const { sub, actId } = editingSubact
+                                const actualizada = await api.put<SubactividadResponse>(`/actividades/${actId}/subactividades/${sub.id}`, {
+                                  nombre: editSubactForm.nombre.trim(),
+                                  idResponsable: Number(editSubactForm.idResponsable),
+                                  presupuesto: editSubactForm.presupuesto ? Number(editSubactForm.presupuesto) : undefined,
+                                  hombresInvolucrados: editSubactForm.hombresInvolucrados ? Number(editSubactForm.hombresInvolucrados) : undefined,
+                                  mujeresInvolucradas: editSubactForm.mujeresInvolucradas ? Number(editSubactForm.mujeresInvolucradas) : undefined,
+                                  fechaInicio: editSubactForm.fechaInicio || undefined,
+                                  fechaFin: editSubactForm.fechaFin || undefined,
+                                  descripcion: editSubactForm.descripcion.trim() || undefined,
+                                })
+                                setActividadesApi(prev => prev.map(a => a.id === actId ? {
+                                  ...a,
+                                  subactividades: (a.subactividades || []).map(s => s.id === actualizada.id ? actualizada : s)
+                                } : a))
+                                setEditSubactOpen(false)
+                                setEditingSubact(null)
+                                setEditSubactSuccessModalOpen(true)
+                              } catch (err) {
+                                console.error(err)
+                              } finally {
+                                setEditandoSubact(false)
+                              }
+                            }}
+                          >
+                            {editandoSubact ? "Guardando..." : "Guardar cambios"}
+                          </Button>
+                        </DialogFooter>
+                      </form>
+                    </DialogContent>
+                  </Dialog>
+
+                  <Dialog open={subactSuccessModalOpen} onOpenChange={setSubactSuccessModalOpen}>
+                    <DialogContent className="sm:max-w-md" showCloseButton={false}>
+                      <DialogHeader>
+                        <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-green-100">
+                          <CheckCircle2 className="h-8 w-8 text-green-600" />
+                        </div>
+                        <DialogTitle className="text-center text-lg">
+                          Subactividad creada exitosamente
+                        </DialogTitle>
+                        <DialogDescription className="text-center">
+                          La subactividad se ha registrado correctamente.
+                        </DialogDescription>
+                      </DialogHeader>
+                      <DialogFooter className="sm:justify-center">
+                        <Button type="button" onClick={() => setSubactSuccessModalOpen(false)} className="bg-[#FFD600] text-[#1A1A1A] hover:bg-[#C9A42B]">
+                          Aceptar
+                        </Button>
+                      </DialogFooter>
+                    </DialogContent>
+                  </Dialog>
+
+                  <Dialog open={editSubactSuccessModalOpen} onOpenChange={setEditSubactSuccessModalOpen}>
+                    <DialogContent className="sm:max-w-md" showCloseButton={false}>
+                      <DialogHeader>
+                        <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-green-100">
+                          <CheckCircle2 className="h-8 w-8 text-green-600" />
+                        </div>
+                        <DialogTitle className="text-center text-lg">
+                          Subactividad actualizada exitosamente
+                        </DialogTitle>
+                        <DialogDescription className="text-center">
+                          Los cambios se han guardado correctamente.
+                        </DialogDescription>
+                      </DialogHeader>
+                      <DialogFooter className="sm:justify-center">
+                        <Button type="button" onClick={() => setEditSubactSuccessModalOpen(false)} className="bg-[#FFD600] text-[#1A1A1A] hover:bg-[#C9A42B]">
+                          Aceptar
                         </Button>
                       </DialogFooter>
                     </DialogContent>
@@ -1268,22 +2063,22 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                         <thead>
                           <tr className="border-b border-[#E0E0E0]">
                             <th className="pb-3 text-left text-xs font-semibold uppercase tracking-wide text-[#5C5C5C]">Actividad</th>
-                            <th className="pb-3 text-left text-xs font-semibold uppercase tracking-wide text-[#5C5C5C]">Responsable</th>
-                            <th className="pb-3 text-left text-xs font-semibold uppercase tracking-wide text-[#5C5C5C]">Fecha</th>
+                            <th className="w-48 pb-3 text-left text-xs font-semibold uppercase tracking-wide text-[#5C5C5C]">Responsable</th>
+                            <th className="pb-3 text-left text-xs font-semibold uppercase tracking-wide text-[#5C5C5C]">Inicio</th>
+                            <th className="pb-3 text-left text-xs font-semibold uppercase tracking-wide text-[#5C5C5C]">Fin</th>
                             <th className="pb-3 text-left text-xs font-semibold uppercase tracking-wide text-[#5C5C5C]">Avance</th>
                             <th className="pb-3 text-left text-xs font-semibold uppercase tracking-wide text-[#5C5C5C]">Estado</th>
-                            <th className="pb-3 text-left text-xs font-semibold uppercase tracking-wide text-[#5C5C5C]">Acciones</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-[#E0E0E0]">
                           {actividadesConAlertas.map(act => (
                             <React.Fragment key={act.id}>
                               <tr className={
-                                act.alertaVencimiento?.tipo === "vencida"
+                                (act.alertaVencimiento?.tipo === "vencida"
                                   ? "bg-[#C8102E]/5 hover:bg-[#C8102E]/10"
                                   : act.alertaVencimiento
                                     ? "bg-[#F57C00]/5 hover:bg-[#F57C00]/10"
-                                    : "hover:bg-[#FFFDE7]"
+                                    : "hover:bg-[#FFFDE7]") + " group"
                               }>
                                 <td className="py-3 text-sm font-medium text-[#1A1A1A]">
                                   <div className="flex flex-col gap-1">
@@ -1303,12 +2098,46 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                                     )}
                                   </div>
                                 </td>
-                                <td className="py-3 text-sm text-[#5C5C5C]">{act.responsableDisplay}</td>
+                                <td className="py-3 pr-4 text-sm text-[#5C5C5C] max-w-48">
+                                  {(() => {
+                                    const nombres = act.responsableDisplay.split(", ")
+                                    const expanded = expandedRespAct.has(act.id)
+                                    const visible = nombres.slice(0, 2)
+                                    const rest = nombres.slice(2)
+                                    return (
+                                      <div>
+                                        <div className="flex flex-wrap items-center gap-x-1">
+                                          <span title={act.responsableDisplay}>{visible.join(", ")}</span>
+                                          {rest.length > 0 && (
+                                            <button
+                                              type="button"
+                                              onClick={() => setExpandedRespAct(prev => { const n = new Set(prev); n.has(act.id) ? n.delete(act.id) : n.add(act.id); return n })}
+                                              className="inline-flex items-center gap-0.5 rounded-full bg-[#F7F7F7] px-2 py-0.5 text-[11px] font-medium text-[#5C5C5C] hover:bg-[#E0E0E0] transition-colors shrink-0"
+                                            >
+                                              +{rest.length}
+                                              <ChevronDown className={`h-3 w-3 transition-transform ${expanded ? "rotate-180" : ""}`} />
+                                            </button>
+                                          )}
+                                        </div>
+                                        {expanded && rest.length > 0 && (
+                                          <div className="mt-1.5 space-y-0.5 border-t border-[#E0E0E0] pt-1.5">
+                                            {rest.map((nombre, i) => (
+                                              <div key={i} className="text-xs text-[#5C5C5C]">{nombre}</div>
+                                            ))}
+                                          </div>
+                                        )}
+                                      </div>
+                                    )
+                                  })()}
+                                </td>
+                                <td className="py-3 text-xs text-[#5C5C5C]">
+                                  {act.fechaInicio ? act.fechaInicio.split('-').reverse().join('/') : "—"}
+                                </td>
                                 <td className="py-3 text-xs text-[#5C5C5C]">
                                   {act.fechaFin ? act.fechaFin.split('-').reverse().join('/') : "—"}
                                 </td>
                                 <td className="py-3">
-                                  <div className="w-20">
+                                  <div className="w-24">
                                     <ProgressBar value={0} size="sm" />
                                   </div>
                                 </td>
@@ -1316,29 +2145,38 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                                   <StatusBadge estado={act.estado} />
                                 </td>
                                 <td className="py-3">
-                                  <button
-                                    className="flex items-center gap-1 rounded-lg border border-[#E0E0E0] bg-white px-2 py-1 text-xs font-medium text-[#5C5C5C] hover:bg-[#F7F7F7]"
-                                    onClick={() => {
-                                      setEditingActividad(act)
-                                      setEditForm({
-                                        nombre: act.nombre,
-                                        descripcion: act.descripcion ?? "",
-                                        fechaInicio: act.fechaInicio ?? "",
-                                        fechaFin: act.fechaFin ?? "",
-                                        estado: act.estado,
-                                        idResponsables: [...act.idResponsables],
-                                      })
-                                      setEditActividadOpen(true)
-                                    }}
-                                  >
-                                    <Pencil className="h-3 w-3" />
-                                    Editar
-                                  </button>
+                                  <div className="flex items-center gap-1">
+                                    <button
+                                      className="opacity-0 group-hover:opacity-100 transition-opacity flex h-7 w-7 items-center justify-center rounded-full text-[#5C5C5C] hover:bg-[#F7F7F7]"
+                                      title="Editar actividad"
+                                      onClick={() => {
+                                        setEditingActividad(act)
+                                        setEditForm({
+                                          nombre: act.nombre,
+                                          descripcion: act.descripcion ?? "",
+                                          fechaInicio: act.fechaInicio ?? "",
+                                          fechaFin: act.fechaFin ?? "",
+                                          estado: act.estado,
+                                          idResponsables: [...act.idResponsables],
+                                        })
+                                        setEditActividadOpen(true)
+                                      }}
+                                    >
+                                      <Pencil className="h-3.5 w-3.5" />
+                                    </button>
+                                    <button
+                                      className="opacity-0 group-hover:opacity-100 transition-opacity flex h-7 w-7 items-center justify-center rounded-full text-[#C8102E] hover:bg-[#C8102E]/10"
+                                      title="Eliminar actividad"
+                                      onClick={() => { setConfirmDeleteTarget("actividad"); setConfirmDeleteId(String(act.id)); setConfirmDeleteNombre(act.nombre); setConfirmDeleteInput(""); setConfirmDeleteOpen(true) }}
+                                    >
+                                      <Trash2 className="h-3.5 w-3.5" />
+                                    </button>
+                                  </div>
                                 </td>
                               </tr>
                               {/* Render Subactividades */}
                               {act.subactividades?.map((sub) => (
-                                <tr key={`sub-${sub.id}`} className="bg-[#FAFAFA] border-none">
+                                <tr key={`sub-${sub.id}`} className="bg-[#FAFAFA] border-none group">
                                   <td className="py-2 pl-8 text-xs font-medium text-[#5C5C5C] relative">
                                     <div className="absolute left-4 top-0 bottom-0 w-px bg-[#E0E0E0]" />
                                     <div className="flex flex-col gap-0.5">
@@ -1349,27 +2187,66 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                                   </td>
                                   <td className="py-2 text-xs text-[#5C5C5C]">{sub.responsable || "—"}</td>
                                   <td className="py-2 text-xs text-[#5C5C5C]">
+                                    {sub.fechaInicio ? sub.fechaInicio.split('-').reverse().join('/') : "—"}
+                                  </td>
+                                  <td className="py-2 text-xs text-[#5C5C5C]">
                                     {sub.fechaFin ? sub.fechaFin.split('-').reverse().join('/') : "—"}
                                   </td>
+                                  <td className="py-2 text-xs text-[#5C5C5C]">—</td>
+                                  <td className="py-2 text-xs text-[#5C5C5C]">—</td>
                                   <td className="py-2">
-                                    <span className="text-xs text-[#5C5C5C]">
-                                      {sub.presupuesto ? `S/ ${sub.presupuesto}` : "—"}
-                                    </span>
-                                  </td>
-                                  <td className="py-2" colSpan={2}>
-                                    {/* Action buttons o badge if needed */}
+                                    <div className="flex items-center gap-1">
+                                      <button
+                                        className="opacity-0 group-hover:opacity-100 transition-opacity flex h-7 w-7 items-center justify-center rounded-full text-[#5C5C5C] hover:bg-[#F7F7F7]"
+                                        title="Editar subactividad"
+                                        onClick={() => {
+                                          let responsableId = ""
+                                          if (sub.responsable) {
+                                            for (const [id, nombre] of usuariosMap.entries()) {
+                                              if (nombre === sub.responsable) { responsableId = String(id); break }
+                                            }
+                                          }
+                                          setEditingSubact({ sub, actId: act.id })
+                                          setEditSubactForm({
+                                            nombre: sub.nombre,
+                                            idResponsable: responsableId,
+                                            presupuesto: sub.presupuesto ? String(sub.presupuesto) : "",
+                                            hombresInvolucrados: sub.hombresInvolucrados ? String(sub.hombresInvolucrados) : "",
+                                            mujeresInvolucradas: sub.mujeresInvolucradas ? String(sub.mujeresInvolucradas) : "",
+                                            fechaInicio: sub.fechaInicio ?? "",
+                                            fechaFin: sub.fechaFin ?? "",
+                                            descripcion: sub.descripcion ?? "",
+                                          })
+                                          setEditSubactResponsableSearch("")
+                                          setEditSubactFieldErrors({})
+                                          setEditSubactOpen(true)
+                                        }}
+                                      >
+                                        <Pencil className="h-3.5 w-3.5" />
+                                      </button>
+                                      <button
+                                        className="opacity-0 group-hover:opacity-100 transition-opacity flex h-7 w-7 items-center justify-center rounded-full text-[#C8102E] hover:bg-[#C8102E]/10"
+                                        title="Eliminar subactividad"
+                                        onClick={() => { setConfirmDeleteTarget("subactividad"); setConfirmDeleteId(String(sub.id)); setConfirmDeleteNombre(sub.nombre); setConfirmDeleteInput(""); setConfirmDeleteParentId(act.id); setConfirmDeleteOpen(true) }}
+                                      >
+                                        <Trash2 className="h-3.5 w-3.5" />
+                                      </button>
+                                    </div>
                                   </td>
                                 </tr>
                               ))}
                               {/* Agregar subactividad */}
                               <tr className="bg-[#FAFAFA] border-none">
-                                <td colSpan={6} className="py-2 pl-8 relative">
+                                <td colSpan={7} className="py-2 pl-8 relative">
                                   <div className="absolute left-4 top-0 bottom-1/2 w-px bg-[#E0E0E0]" />
                                   <div className="flex items-center gap-2 relative before:content-[''] before:absolute before:-left-4 before:top-3 before:w-3 before:h-px before:bg-[#E0E0E0]">
                                     <button
                                       className="flex items-center gap-1 text-xs font-medium text-[#C9A42B] hover:text-[#1A1A1A] transition-colors"
                                       onClick={() => {
                                         setTargetActividadId(act.id)
+                                        setSubactForm({ nombre: "", idResponsable: "", presupuesto: "", hombresInvolucrados: "", mujeresInvolucradas: "", fechaInicio: "", fechaFin: "", descripcion: "" })
+                                        setSubactFieldErrors({})
+                                        setSubactResponsableSearch("")
                                         setCreateSubactOpen(true)
                                       }}
                                     >
@@ -1393,6 +2270,44 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
               ) : null}
             </div>
               )}
+
+            <Dialog open={confirmDeleteOpen} onOpenChange={(open) => { setConfirmDeleteOpen(open); if (!open) setConfirmDeleteInput("") }}>
+              <DialogContent className="sm:max-w-md">
+                <DialogHeader>
+                  <DialogTitle>Eliminar {confirmDeleteTarget === "actividad" ? "actividad" : confirmDeleteTarget === "hito" ? "hito" : "subactividad"}</DialogTitle>
+                  <DialogDescription>
+                    Esta accion no se puede deshacer. Se eliminara permanentemente <strong>{confirmDeleteNombre}</strong> y todos sus datos asociados.
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="grid gap-4 py-4">
+                  <p className="text-sm text-[#5C5C5C]">
+                    Escribe <strong>ELIMINAR</strong> para confirmar:
+                  </p>
+                  <Input
+                    value={confirmDeleteInput}
+                    onChange={e => setConfirmDeleteInput(e.target.value)}
+                    onPaste={e => e.preventDefault()}
+                    placeholder="Escribe ELIMINAR"
+                    className={confirmDeleteInput && confirmDeleteInput !== "ELIMINAR" ? "border-[#C8102E]" : ""}
+                  />
+                  {confirmDeleteInput && confirmDeleteInput !== "ELIMINAR" && (
+                    <p className="text-xs text-[#C8102E]">Debes escribir exactamente "ELIMINAR" para confirmar</p>
+                  )}
+                </div>
+                <DialogFooter>
+                  <Button variant="outline" onClick={() => { setConfirmDeleteOpen(false); setConfirmDeleteInput("") }}>
+                    Cancelar
+                  </Button>
+                  <Button
+                    className="bg-[#C8102E] text-white hover:bg-[#A00D24]"
+                    disabled={confirmDeleteInput !== "ELIMINAR"}
+                    onClick={handleConfirmDelete}
+                  >
+                    Eliminar
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
 
             {/* Hitos Tab */}
             {activeTab === "hitos" && (
@@ -1422,7 +2337,7 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                 )}
 
                 {/* Dialog agregar / editar hito */}
-                <Dialog open={addHitoOpen} onOpenChange={setAddHitoOpen}>
+                <Dialog open={addHitoOpen} onOpenChange={(open) => { setAddHitoOpen(open); if (open) { setHitoFieldErrors({}); setHitosError(null) } }}>
                   <DialogContent className="overflow-y-auto sm:max-w-lg">
                     <DialogHeader>
                       <DialogTitle>{editHito ? "Editar Hito" : "Nuevo Hito"}</DialogTitle>
@@ -1431,34 +2346,60 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                       </DialogDescription>
                     </DialogHeader>
                     <div className="grid gap-4 py-4">
-                      <div className="grid gap-2">
-                        <Label htmlFor="hito-nombre">Nombre del hito</Label>
-                        <Input
-                          id="hito-nombre"
-                          placeholder="Ej. Entrega de informe final"
-                          value={hitoForm.nombre}
-                          onChange={e => setHitoForm(f => ({ ...f, nombre: e.target.value }))}
-                        />
+                      <div data-field="hito-nombre" className="grid gap-2">
+                        <Label htmlFor="hito-nombre">Nombre del hito <span className="text-[#C8102E]">*</span></Label>
+                        <div className="relative">
+                          <Input
+                            id="hito-nombre"
+                            maxLength={50}
+                            placeholder="Ej. Entrega de informe final"
+                            value={hitoForm.nombre}
+                            onChange={e => {
+                              setHitoForm(f => ({ ...f, nombre: e.target.value }))
+                              setHitoFieldErrors(p => { const { "hito-nombre": _, ...r } = p; return r })
+                            }}
+                            className={hitoFieldErrors["hito-nombre"] ? "border-[#C8102E] pr-16" : "pr-16"}
+                          />
+                          <span className={`absolute right-3 top-1/2 -translate-y-1/2 text-xs ${hitoForm.nombre.length >= 50 ? "text-[#C8102E]" : hitoForm.nombre.length >= 40 ? "text-[#C9A42B]" : "text-[#9CA3AF]"}`}>
+                            {hitoForm.nombre.length}/50
+                          </span>
+                        </div>
+                        {hitoFieldErrors["hito-nombre"] && <p className="text-xs text-[#C8102E]">{hitoFieldErrors["hito-nombre"]}</p>}
                       </div>
-                      <div className="grid gap-2">
+                      <div data-field="hito-descripcion" className="grid gap-2">
                         <Label htmlFor="hito-descripcion">Descripcion</Label>
-                        <Textarea
-                          id="hito-descripcion"
-                          placeholder="Objetivo o alcance del hito"
-                          value={hitoForm.descripcion}
-                          onChange={e => setHitoForm(f => ({ ...f, descripcion: e.target.value }))}
-                          rows={3}
-                          className="resize-none"
-                        />
+                        <div className="relative">
+                          <Textarea
+                            id="hito-descripcion"
+                            maxLength={200}
+                            placeholder="Objetivo o alcance del hito"
+                            value={hitoForm.descripcion}
+                            onChange={e => {
+                              setHitoForm(f => ({ ...f, descripcion: e.target.value }))
+                              setHitoFieldErrors(p => { const { "hito-descripcion": _, ...r } = p; return r })
+                            }}
+                            rows={3}
+                            className={`resize-none ${hitoFieldErrors["hito-descripcion"] ? "border-[#C8102E]" : ""}`}
+                          />
+                          <span className={`absolute right-3 bottom-3 text-xs ${hitoForm.descripcion.length >= 200 ? "text-[#C8102E]" : hitoForm.descripcion.length >= 180 ? "text-[#C9A42B]" : "text-[#9CA3AF]"}`}>
+                            {hitoForm.descripcion.length}/200
+                          </span>
+                        </div>
+                        {hitoFieldErrors["hito-descripcion"] && <p className="text-xs text-[#C8102E]">{hitoFieldErrors["hito-descripcion"]}</p>}
                       </div>
-                      <div className="grid gap-2">
-                        <Label htmlFor="hito-fecha">Fecha clave</Label>
+                      <div data-field="hito-fecha" className="grid gap-2">
+                        <Label htmlFor="hito-fecha">Fecha clave <span className="text-[#C8102E]">*</span></Label>
                         <Input
                           id="hito-fecha"
                           type="date"
                           value={hitoForm.fecha}
-                          onChange={e => setHitoForm(f => ({ ...f, fecha: e.target.value }))}
+                          onChange={e => {
+                            setHitoForm(f => ({ ...f, fecha: e.target.value }))
+                            setHitoFieldErrors(p => { const { "hito-fecha": _, ...r } = p; return r })
+                          }}
+                          className={hitoFieldErrors["hito-fecha"] ? "border-[#C8102E]" : ""}
                         />
+                        {hitoFieldErrors["hito-fecha"] && <p className="text-xs text-[#C8102E]">{hitoFieldErrors["hito-fecha"]}</p>}
                       </div>
                       <div className="grid gap-2">
                         <Label htmlFor="hito-estado">Estado</Label>
@@ -1483,6 +2424,27 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                         disabled={hitoSubmitting}
                       >
                         {hitoSubmitting ? "Guardando..." : editHito ? "Guardar cambios" : "Crear hito"}
+                      </Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
+
+                <Dialog open={hitoSuccessModalOpen} onOpenChange={setHitoSuccessModalOpen}>
+                  <DialogContent className="sm:max-w-md" showCloseButton={false}>
+                    <DialogHeader>
+                      <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-green-100">
+                        <CheckCircle2 className="h-8 w-8 text-green-600" />
+                      </div>
+                      <DialogTitle className="text-center text-lg">
+                        {hitoEsEdicion ? "Hito actualizado exitosamente" : "Hito creado exitosamente"}
+                      </DialogTitle>
+                      <DialogDescription className="text-center">
+                        El hito se ha registrado correctamente en el cronograma.
+                      </DialogDescription>
+                    </DialogHeader>
+                    <DialogFooter className="sm:justify-center">
+                      <Button type="button" onClick={() => setHitoSuccessModalOpen(false)} className="bg-[#FFD600] text-[#1A1A1A] hover:bg-[#C9A42B]">
+                        Aceptar
                       </Button>
                     </DialogFooter>
                   </DialogContent>
@@ -1575,7 +2537,7 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                                     <Pencil className="h-3.5 w-3.5" />
                                   </button>
                                   <button
-                                    onClick={() => eliminarHito(hito)}
+                                    onClick={() => { setConfirmDeleteTarget("hito"); setConfirmDeleteId(hito.id); setConfirmDeleteNombre(hito.nombre); setConfirmDeleteInput(""); setConfirmDeleteOpen(true) }}
                                     className="opacity-0 group-hover:opacity-100 transition-opacity flex h-7 w-7 items-center justify-center rounded-full text-[#C8102E] hover:bg-[#C8102E]/10"
                                     title="Eliminar hito"
                                   >
@@ -1709,16 +2671,15 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                             )}
                           </div>
                           <div className="grid gap-2">
-                            <Label htmlFor="miembro-rol">Rol en el proyecto</Label>
+                            <Label htmlFor="miembro-rol">Rol en el proyecto <span className="text-[#C8102E]">*</span></Label>
                             <Select value={nuevoMiembroRol} onValueChange={setNuevoMiembroRol}>
                               <SelectTrigger id="miembro-rol">
                                 <SelectValue placeholder="Seleccione un rol" />
                               </SelectTrigger>
                               <SelectContent>
-                                <SelectItem value="Equipo Técnico">Equipo Técnico</SelectItem>
-                                <SelectItem value="Coordinador">Coordinador</SelectItem>
-                                <SelectItem value="Asesor">Asesor</SelectItem>
-                                <SelectItem value="Observador">Observador</SelectItem>
+                                {ROLES_PROYECTO.map(rol => (
+                                  <SelectItem key={rol} value={rol}>{rol}</SelectItem>
+                                ))}
                               </SelectContent>
                             </Select>
                           </div>
@@ -1845,7 +2806,7 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                 <div>
                   <p className="text-xs text-[#5C5C5C]">Periodo</p>
                   <p className="text-sm text-[#1A1A1A]">
-                    {new Date(proyecto.fechaInicio).toLocaleDateString("es-PE")} - {new Date(proyecto.fechaFin).toLocaleDateString("es-PE")}
+                    {formatLocalDate(proyecto.fechaInicio)} - {formatLocalDate(proyecto.fechaFin)}
                   </p>
                 </div>
               </div>
@@ -1894,17 +2855,42 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
 
           {/* Progress card */}
           <div className="rounded-lg border border-[#E0E0E0] bg-white p-5 shadow-sm">
-            <h3 className="text-sm font-bold uppercase tracking-wide text-[#5C5C5C] mb-4">
+            <h3 className="mb-4 text-sm font-bold uppercase tracking-wide text-[#5C5C5C]">
               Avance
             </h3>
-            <div className="text-center mb-4">
+            <div className="mb-4 text-center">
               <span className="text-4xl font-bold text-[#1A1A1A]">{proyecto.avance}%</span>
             </div>
             <ProgressBar value={proyecto.avance} showLabel={false} size="lg" />
+            {apiProyecto && puedeActualizarProyectos && (
+              <div className="mt-4 space-y-2">
+                <Label htmlFor="avance-directo" className="text-xs text-[#5C5C5C]">Actualizar avance (%)</Label>
+                <div className="flex gap-2">
+                  <Input
+                    id="avance-directo"
+                    type="number"
+                    min="0"
+                    max="100"
+                    step="1"
+                    value={avanceDirecto}
+                    onChange={e => setAvanceDirecto(e.target.value)}
+                  />
+                  <Button
+                    type="button"
+                    onClick={guardarAvanceProyecto}
+                    disabled={avanceSubmitting}
+                    className="bg-[#FFD600] text-[#1A1A1A] hover:bg-[#C9A42B]"
+                  >
+                    {avanceSubmitting ? "..." : "Guardar"}
+                  </Button>
+                </div>
+                {avanceError && <p className="text-xs text-[#C8102E]">{avanceError}</p>}
+              </div>
+            )}
           </div>
 
           {/* Alerts card */}
-          {proyecto.estado === "En riesgo" && (
+          {proyecto.estado === "SUSPENDIDO" && (
             <div className="rounded-lg border border-[#C8102E]/20 bg-[#C8102E]/5 p-5">
               <div className="flex items-center gap-2 text-[#C8102E] mb-2">
                 <AlertTriangle className="h-4 w-4" />
