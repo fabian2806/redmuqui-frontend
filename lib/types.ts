@@ -116,7 +116,7 @@ export interface EjeTematico {
 
 // ----- Proyecto -----
 
-export type EstadoProyecto = "PENDIENTE" | "EN_CURSO" | "FINALIZADO"
+export type EstadoProyecto = "ACTIVO" | "CERRADO" | "SUSPENDIDO"
 
 export interface UsuarioSummary {
   id: number
@@ -133,6 +133,12 @@ export interface TerritorioRef {
 export interface MacroregionRef {
   id: number
   nombre: string
+}
+
+export interface InstitucionProyectoRef {
+  id: number
+  nombre: string
+  tipoParticipacion: string | null
 }
 
 export interface ProyectoResponse {
@@ -154,6 +160,7 @@ export interface ProyectoResponse {
   idEjeTematico: number | null
   responsablePrincipal: UsuarioSummary | null
   territorios: TerritorioRef[]
+  instituciones: InstitucionProyectoRef[]
 }
 
 export interface ProyectoCreate {
@@ -171,6 +178,19 @@ export interface ProyectoCreate {
   idEjeTematico?: number
   idResponsablePrincipal?: number
   idTerritorios?: number[]
+}
+
+export interface ProyectoUpdate extends ProyectoCreate {
+  porcentajeAvance?: number
+}
+
+export interface InstitucionParticipacion {
+  idInstitucion: number
+  tipoParticipacion?: string | null
+}
+
+export interface AsociarInstitucionesRequest {
+  instituciones: InstitucionParticipacion[]
 }
 
 // ----- Actividad y Subactividad -----

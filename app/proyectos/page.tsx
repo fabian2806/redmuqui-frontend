@@ -27,12 +27,7 @@ import type {
   PageResponse,
   ProyectoResponse,
 } from "@/lib/types"
-
-const ESTADOS: Array<{ value: EstadoProyecto; label: string }> = [
-  { value: "PENDIENTE", label: "Pendiente" },
-  { value: "EN_CURSO", label: "En curso" },
-  { value: "FINALIZADO", label: "Finalizado" },
-]
+import { ESTADOS_PROYECTO } from "@/lib/project-status"
 
 const ITEMS_PER_PAGE = 8
 
@@ -294,7 +289,7 @@ export default function ProyectosPage() {
               className="h-10 rounded-lg border border-[#E0E0E0] bg-white px-3 text-sm text-[#1A1A1A] focus:border-[#FFD600] focus:outline-none focus:ring-1 focus:ring-[#FFD600]"
             >
               <option value="">Estado</option>
-              {ESTADOS.map((estado) => (
+              {ESTADOS_PROYECTO.map((estado) => (
                 <option key={estado.value} value={estado.value}>
                   {estado.label}
                 </option>

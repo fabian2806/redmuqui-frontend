@@ -9,11 +9,11 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { StatusBadge } from "@/components/ui/status-badge"
 import { ProgressBar } from "@/components/ui/progress-bar"
 import { proyectos, documentos, actividades, bitacora, institucionesMiembro } from "@/lib/data"
-import { 
-  BarChart3, 
-  PieChart, 
-  TrendingUp, 
-  Download, 
+import {
+  BarChart3,
+  PieChart,
+  TrendingUp,
+  Download,
   FileText,
   Users,
   FolderOpen,
@@ -221,8 +221,8 @@ export default function ReportesPage() {
                       </div>
                       <span className="font-medium">{proyectosActivos}</span>
                     </div>
-                    <ProgressBar 
-                      value={(proyectosActivos / totalProyectos) * 100} 
+                    <ProgressBar
+                      value={(proyectosActivos / totalProyectos) * 100}
                       className="h-2"
                       indicatorClassName="bg-blue-500"
                     />
@@ -235,8 +235,8 @@ export default function ReportesPage() {
                       </div>
                       <span className="font-medium">{proyectosFinalizados}</span>
                     </div>
-                    <ProgressBar 
-                      value={(proyectosFinalizados / totalProyectos) * 100} 
+                    <ProgressBar
+                      value={(proyectosFinalizados / totalProyectos) * 100}
                       className="h-2"
                       indicatorClassName="bg-green-500"
                     />
@@ -245,14 +245,14 @@ export default function ReportesPage() {
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
                         <div className="h-3 w-3 rounded-full bg-yellow-500" />
-                        <span className="text-sm">En Riesgo</span>
+                        <span className="text-sm">Suspendidos</span>
                       </div>
                       <span className="font-medium">
-                        {proyectos.filter(p => p.estado === "En riesgo").length}
+                        {proyectos.filter(p => p.estado === "Suspendido").length}
                       </span>
                     </div>
-                    <ProgressBar 
-                      value={(proyectos.filter(p => p.estado === "En riesgo").length / totalProyectos) * 100} 
+                    <ProgressBar
+                      value={(proyectos.filter(p => p.estado === "Suspendido").length / totalProyectos) * 100}
                       className="h-2"
                       indicatorClassName="bg-yellow-500"
                     />
@@ -338,8 +338,8 @@ export default function ReportesPage() {
                         <span className="text-sm font-medium truncate max-w-[250px]">{eje}</span>
                         <span className="text-sm text-muted-foreground">{stats.total} proyectos</span>
                       </div>
-                      <ProgressBar 
-                        value={(stats.total / totalProyectos) * 100} 
+                      <ProgressBar
+                        value={(stats.total / totalProyectos) * 100}
                         className="h-2"
                       />
                       <p className="text-xs text-muted-foreground">

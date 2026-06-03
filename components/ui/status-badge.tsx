@@ -1,3 +1,4 @@
+import { ESTADO_PROYECTO_LABELS } from "@/lib/project-status"
 import { cn } from "@/lib/utils"
 
 interface StatusBadgeProps {
@@ -8,6 +9,7 @@ interface StatusBadgeProps {
 }
 
 const statusLabels: Record<string, string> = {
+  ...ESTADO_PROYECTO_LABELS,
   PENDIENTE: "Pendiente",
   EN_CURSO: "En curso",
   FINALIZADO: "Finalizado",
@@ -18,6 +20,7 @@ export function StatusBadge({ estado, status, className }: StatusBadgeProps) {
   const getStatusStyles = () => {
     switch (value) {
       case "Activo":
+      case "ACTIVO":
       case "Publicado":
       case "Completada":
       case "Completado":
@@ -33,8 +36,10 @@ export function StatusBadge({ estado, status, className }: StatusBadgeProps) {
       case "Vencido":
       case "Vencida":
       case "Suspendido":
+      case "SUSPENDIDO":
         return "bg-[#C8102E]/10 text-[#C8102E] border-[#C8102E]/20"
       case "Cerrado":
+      case "CERRADO":
       case "Inactivo":
         return "bg-[#5C5C5C]/10 text-[#5C5C5C] border-[#5C5C5C]/20"
       case "Borrador":
