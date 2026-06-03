@@ -258,6 +258,55 @@ export interface HitoCreate {
   estado: EstadoHito
 }
 
+// ----- Documento -----
+
+// Alineado con el enum EstadoDocumento del backend.
+// NOTA: el workflow de 3 estados (EN_REVISION) es RF-056 de LS; aquí solo
+// existen los valores actuales del enum Java.
+export type EstadoDocumento = "BORRADOR" | "PUBLICADO"
+
+// Tipos de documento permitidos al registrar (RF-046).
+// Debe mantenerse IDÉNTICO al Set TIPOS_PERMITIDOS del backend (DocumentoService).
+export const TIPOS_DOCUMENTO = [
+  "Informe",
+  "Pronunciamiento",
+  "Investigación",
+  "Manual",
+  "Cartilla",
+  "Resumen técnico",
+] as const
+
+export type TipoDocumento = (typeof TIPOS_DOCUMENTO)[number]
+
+export interface DocumentoResponse {
+  id: number
+  titulo: string
+  descripcion: string | null
+  tipo: string | null
+  estado: EstadoDocumento
+  tipoArchivo: string | null
+  fechaCarga: string
+  enlace: string | null
+  version: number
+  idProyecto: number | null
+  idEjeTematico: number | null
+  idRespElaboracion: number | null
+  idRespValidacion: number | null
+  idTerritorios: number[]
+}
+
+export interface DocumentoCreate {
+  titulo: string
+  tipo: string
+  descripcion?: string
+  estado?: EstadoDocumento
+  idProyecto?: number
+  idEjeTematico?: number
+  idRespElaboracion: number
+  idRespValidacion?: number
+  idTerritorios?: number[]
+}
+
 // ----- Bitacora -----
 
 export interface BitacoraResponse {
