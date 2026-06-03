@@ -2,6 +2,7 @@
 
 import React, { useEffect, useMemo, useState, use } from "react"
 import { AppLayout } from "@/components/layout/app-layout"
+import { PermissionGuard } from "@/components/auth/permission-guard"
 import { StatusBadge, MacroregionBadge, TypeBadge } from "@/components/ui/status-badge"
 import { ProgressBar } from "@/components/ui/progress-bar"
 import {
@@ -22,7 +23,10 @@ import type {
   PageResponse,
   HitoCreate,
   HitoResponse,
-  EstadoHito
+  EstadoHito,
+  EstadoActividad,
+  SubactividadCreate,
+  SubactividadResponse,
 } from "@/lib/types"
 import {
   ChevronRight,
@@ -51,6 +55,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { useAuth } from "@/hooks/useAuth"
 
 type TabType = "resumen" | "actividades" | "hitos" | "informes" | "equipo" | "bitacora"
 type HitoEstadoUi = "Pendiente" | "En curso" | "Finalizado"
@@ -320,6 +325,11 @@ function ApiSourceTag({
 
 export default function ProyectoDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params)
+  const { loading: authLoading, hasPermission } = useAuth()
+  const puedeVerProyectos = hasPermission("PROYECTOS_READ")
+  const puedeActualizarProyectos = hasPermission("PROYECTOS_UPDATE")
+  const puedeVerUsuarios = hasPermission("USUARIOS_READ")
+  const puedeVerBitacora = hasPermission("BITACORA_READ")
   const mockProyecto = getProyectoById(id)
   const [apiProyecto, setApiProyecto] = useState<ProyectoResponse | null>(null)
   const [apiActividades, setApiActividades] = useState<ActividadResponse[]>([])
@@ -378,7 +388,7 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
     descripcion: "",
     fechaInicio: "",
     fechaFin: "",
-    estado: "PENDIENTE" as "PENDIENTE" | "EN_CURSO" | "FINALIZADA",
+    estado: "PENDIENTE" as EstadoActividad,
     idResponsables: [] as number[],
   })
 
@@ -398,6 +408,8 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
   })
 
   useEffect(() => {
+    if (authLoading || !puedeVerProyectos) return
+
     let cancelled = false
 
     async function cargarProyecto() {
@@ -411,9 +423,11 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
         let macros: Macroregion[] = []
         try {
           acts = await api.get<ActividadResponse[]>(`/proyectos/${id}/actividades`)
-          users = await api.get<PageResponse<UsuarioResponse>>(`/usuarios`)
           teamData = await api.get<{ idUsuario: number; rolEnProyecto: string }[]>(`/proyectos/${id}/equipo`)
           macros = await api.get<Macroregion[]>("/macroregiones")
+          if (puedeVerUsuarios) {
+            users = await api.get<PageResponse<UsuarioResponse>>(`/usuarios`)
+          }
         } catch (e) {
           console.error("Error al cargar actividades, usuarios o equipo", e)
         }
@@ -441,9 +455,11 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
     return () => {
       cancelled = true
     }
-  }, [id])
+  }, [id, authLoading, puedeVerProyectos, puedeVerUsuarios])
 
   useEffect(() => {
+    if (authLoading || !puedeVerProyectos) return
+
     let cancelled = false
 
     async function cargarActividades() {
@@ -499,11 +515,11 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
     }
 
     cargarActividades()
-    cargarUsuarios()
+    if (puedeVerUsuarios) cargarUsuarios()
     cargarHitos()
 
     return () => { cancelled = true }
-  }, [id])
+  }, [id, authLoading, puedeVerProyectos, puedeVerUsuarios])
 
   const abrirNuevoHito = () => {
     setHitoForm(hitoFormInicial)
@@ -589,6 +605,16 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
     [actividadesApi, usuariosMap]
   )
 
+  if (!authLoading && !puedeVerProyectos) {
+    return (
+      <AppLayout>
+        <PermissionGuard permiso="PROYECTOS_READ">
+          <div />
+        </PermissionGuard>
+      </AppLayout>
+    )
+  }
+
   if (!proyecto && apiLoading) {
     return (
       <AppLayout>
@@ -663,9 +689,11 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
     { id: "equipo" as TabType, label: "Equipo" },
     { id: "bitacora" as TabType, label: "Bitácora" },
   ]
+  const visibleTabs = tabs.filter((tab) => tab.id !== "bitacora" || puedeVerBitacora)
 
   return (
     <AppLayout>
+      <PermissionGuard permiso="PROYECTOS_READ">
       <div className="space-y-6">
         {/* Breadcrumb */}
         <nav className="flex items-center gap-2 text-sm text-[#5C5C5C]">
@@ -709,7 +737,7 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                     descripcion: formData.get("descripcion"),
                     objetivoGeneral: apiProyecto.objetivoGeneral || "Sin objetivo",
                     fechaInicio: formData.get("fechaInicio") || apiProyecto.fechaInicio,
-                    fechaFinEstimada: formData.get("fechaFin") || apiProyecto.fechaFinEstimada || apiProyecto.fechaFin,
+                    fechaFinEstimada: formData.get("fechaFin") || apiProyecto.fechaFinEstimada,
                     estado: formData.get("estado") as string || "PENDIENTE",
                     nivelPrioridad: apiProyecto.nivelPrioridad || 1,
                     porcentajeAvance: apiProyecto.porcentajeAvance,
@@ -717,7 +745,7 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                     idMacroregion: null,
                     idMacroregiones: formData.getAll("macroregiones").map(Number),
                     idEjeTematico: apiProyecto.idEjeTematico || null,
-                    idResponsablePrincipal: apiProyecto.idResponsablePrincipal || null,
+                    idResponsablePrincipal: apiProyecto.responsablePrincipal?.id || null,
                     idTerritorios: apiProyecto.territorios?.map(t => t.id) || []
                   };
 
@@ -820,7 +848,7 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
           <div className="lg:col-span-3 space-y-6">
             {/* Tabs */}
             <div className="flex gap-1 rounded-lg bg-[#F7F7F7] p-1">
-              {tabs.map(tab => (
+              {visibleTabs.map(tab => (
                 <button
                   key={tab.id}
                   onClick={() => setActiveTab(tab.id)}
@@ -1891,6 +1919,7 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
         </div>
       </div>
     </div>
+      </PermissionGuard>
     </AppLayout >
   )
 }

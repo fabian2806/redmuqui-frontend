@@ -2,6 +2,7 @@
 
 import { useState } from "react"
 import { AppLayout } from "@/components/layout/app-layout"
+import { PermissionGuard } from "@/components/auth/permission-guard"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -24,8 +25,12 @@ import {
   Clock,
   AlertCircle
 } from "lucide-react"
+import { useAuth } from "@/hooks/useAuth"
 
 export default function ReportesPage() {
+  const { hasPermission } = useAuth()
+  const puedeExportarReportes = hasPermission("REPORTES_EXPORT")
+
   const [periodoSeleccionado, setPeriodoSeleccionado] = useState("2024")
   const [regionSeleccionada, setRegionSeleccionada] = useState("todas")
 
@@ -78,6 +83,7 @@ export default function ReportesPage() {
 
   return (
     <AppLayout>
+      <PermissionGuard permiso="REPORTES_READ">
       <div className="space-y-6">
         {/* Header */}
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -98,10 +104,12 @@ export default function ReportesPage() {
                 <SelectItem value="2022">2022</SelectItem>
               </SelectContent>
             </Select>
-            <Button variant="outline">
-              <Download className="mr-2 h-4 w-4" />
-              Exportar
-            </Button>
+            {puedeExportarReportes && (
+              <Button variant="outline">
+                <Download className="mr-2 h-4 w-4" />
+                Exportar
+              </Button>
+            )}
           </div>
         </div>
 
@@ -511,6 +519,7 @@ export default function ReportesPage() {
           </TabsContent>
         </Tabs>
       </div>
+      </PermissionGuard>
     </AppLayout>
   )
 }

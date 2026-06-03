@@ -2,6 +2,7 @@
 
 import { useState, use } from "react"
 import { AppLayout } from "@/components/layout/app-layout"
+import { PermissionGuard } from "@/components/auth/permission-guard"
 import { StatusBadge, MacroregionBadge, TypeBadge } from "@/components/ui/status-badge"
 import { getDocumentoById } from "@/lib/data"
 import { 
@@ -18,11 +19,14 @@ import {
 } from "lucide-react"
 import Link from "next/link"
 import { notFound } from "next/navigation"
+import { useAuth } from "@/hooks/useAuth"
 
 type TabType = "descripcion" | "asociaciones" | "archivos" | "versiones" | "observaciones"
 
 export default function InformeDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params)
+  const { hasPermission } = useAuth()
+  const puedeEditarDocumentos = hasPermission("DOCUMENTOS_UPDATE")
   const [activeTab, setActiveTab] = useState<TabType>("descripcion")
   
   const documento = getDocumentoById(id)
@@ -47,6 +51,7 @@ export default function InformeDetailPage({ params }: { params: Promise<{ id: st
 
   return (
     <AppLayout>
+      <PermissionGuard permiso="DOCUMENTOS_READ">
       <div className="space-y-6">
         {/* Breadcrumb */}
         <nav className="flex items-center gap-2 text-sm text-[#5C5C5C]">
@@ -65,10 +70,12 @@ export default function InformeDetailPage({ params }: { params: Promise<{ id: st
             <h1 className="text-2xl font-bold text-[#1A1A1A]">{documento.titulo}</h1>
           </div>
           <div className="flex items-center gap-2">
-            <button className="flex items-center gap-2 rounded-lg border border-[#E0E0E0] bg-white px-4 py-2 text-sm font-medium text-[#5C5C5C] hover:bg-[#F7F7F7]">
-              <Pencil className="h-4 w-4" />
-              Editar
-            </button>
+            {puedeEditarDocumentos && (
+              <button className="flex items-center gap-2 rounded-lg border border-[#E0E0E0] bg-white px-4 py-2 text-sm font-medium text-[#5C5C5C] hover:bg-[#F7F7F7]">
+                <Pencil className="h-4 w-4" />
+                Editar
+              </button>
+            )}
             <button className="flex items-center gap-2 rounded-lg bg-[#FFD600] px-4 py-2 text-sm font-bold text-[#1A1A1A] hover:bg-[#C9A42B]">
               <Download className="h-4 w-4" />
               Descargar
@@ -337,6 +344,7 @@ export default function InformeDetailPage({ params }: { params: Promise<{ id: st
           )}
         </div>
       </div>
+      </PermissionGuard>
     </AppLayout>
   )
 }

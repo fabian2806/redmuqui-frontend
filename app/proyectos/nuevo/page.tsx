@@ -4,9 +4,11 @@ import { useEffect, useState, type FormEvent } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { AlertCircle, ChevronRight, Save } from "lucide-react"
+import { PermissionGuard } from "@/components/auth/permission-guard"
 import { AppLayout } from "@/components/layout/app-layout"
 import { Spinner } from "@/components/ui/spinner"
 import { api, ApiError } from "@/lib/api"
+import { useAuth } from "@/hooks/useAuth"
 import type {
   EjeTematico,
   EstadoProyecto,
@@ -75,6 +77,8 @@ function nombreCompleto(usuario: UsuarioResponse): string {
 
 export default function NuevoProyectoPage() {
   const router = useRouter()
+  const { loading: authLoading, hasPermission } = useAuth()
+  const puedeCrearProyectos = hasPermission("PROYECTOS_CREATE")
   const [formData, setFormData] = useState<FormState>(initialFormState)
   const [macroregiones, setMacroregiones] = useState<Macroregion[]>([])
   const [ejesTematicos, setEjesTematicos] = useState<EjeTematico[]>([])
@@ -89,6 +93,8 @@ export default function NuevoProyectoPage() {
   const isObjetivoGeneralInvalid = touched.objetivoGeneral && !formData.objetivoGeneral.trim()
 
   useEffect(() => {
+    if (authLoading || !puedeCrearProyectos) return
+
     let cancelled = false
 
     async function loadCatalogos() {
@@ -139,7 +145,7 @@ export default function NuevoProyectoPage() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [authLoading, puedeCrearProyectos])
 
   const updateField = <K extends keyof FormState>(field: K, value: FormState[K]) => {
     setFormData((current) => ({ ...current, [field]: value }))
@@ -249,6 +255,7 @@ export default function NuevoProyectoPage() {
 
   return (
     <AppLayout title="Nuevo Proyecto">
+      <PermissionGuard permiso="PROYECTOS_CREATE">
       <div className="mx-auto max-w-4xl space-y-6">
         <nav className="flex items-center gap-2 text-sm text-[#5C5C5C]">
           <Link href="/proyectos" className="hover:text-[#1A1A1A]">
@@ -597,6 +604,7 @@ export default function NuevoProyectoPage() {
           </div>
         </form>
       </div>
+      </PermissionGuard>
     </AppLayout>
   )
 }

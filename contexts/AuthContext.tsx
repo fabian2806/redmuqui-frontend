@@ -47,6 +47,53 @@ const MOCK_ADMIN: UsuarioResponse = {
   permisos: ["*"], // wildcard: admin tiene todos
 }
 
+const ROLE_PERMISSIONS: Record<string, string[]> = {
+  ADMINISTRADOR: ["*"],
+  TECNICO: [
+    "CATALOGOS_READ",
+    "PROYECTOS_READ",
+    "PROYECTOS_CREATE",
+    "PROYECTOS_UPDATE",
+    "DOCUMENTOS_READ",
+    "DOCUMENTOS_CREATE",
+    "DOCUMENTOS_UPDATE",
+    "BITACORA_READ",
+    "REPORTES_READ",
+  ],
+  COORDINADOR: [
+    "USUARIOS_READ",
+    "CATALOGOS_READ",
+    "PROYECTOS_READ",
+    "PROYECTOS_CREATE",
+    "PROYECTOS_UPDATE",
+    "DOCUMENTOS_READ",
+    "DOCUMENTOS_CREATE",
+    "DOCUMENTOS_UPDATE",
+    "DOCUMENTOS_VALIDATE",
+    "BITACORA_READ",
+    "REPORTES_READ",
+    "REPORTES_EXPORT",
+  ],
+  CONSULTOR: [
+    "CATALOGOS_READ",
+    "PROYECTOS_READ",
+    "DOCUMENTOS_READ",
+    "REPORTES_READ",
+  ],
+}
+
+function normalizeRol(rol: string | null | undefined) {
+  return (rol ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toUpperCase()
+}
+
+function getFallbackPermissions(nombreRol: string | null | undefined) {
+  const normalized = normalizeRol(nombreRol)
+  return ROLE_PERMISSIONS[normalized] ?? []
+}
+
 export interface AuthContextValue {
   user: UsuarioResponse | null
   isAuthenticated: boolean
@@ -123,18 +170,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null)
   }, [])
 
-  const isAdminRole = (user?.nombreRol ?? "").toLowerCase().includes("administrador")
-
   const hasPermission = useCallback(
     (permiso: string) => {
       if (!user) return false
       if (user.permisos?.includes("*")) return true
       if (!user.permisos || user.permisos.length === 0) {
-        return isAdminRole
+        const fallbackPermissions = getFallbackPermissions(user.nombreRol)
+        return fallbackPermissions.includes("*") || fallbackPermissions.includes(permiso)
       }
       return user.permisos.includes(permiso)
     },
-    [user, isAdminRole],
+    [user],
   )
 
   const value: AuthContextValue = {

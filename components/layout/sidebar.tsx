@@ -2,47 +2,51 @@
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { cn } from "@/lib/utils"
+import { useState } from "react"
 import {
-  LayoutDashboard,
-  FolderKanban,
-  FileText,
-  Search,
   BarChart3,
-  Users,
-  Settings,
   ChevronLeft,
   ChevronRight,
-  Mountain
+  FileText,
+  FolderKanban,
+  LayoutDashboard,
+  Mountain,
+  Settings,
+  Users,
 } from "lucide-react"
-import { useState } from "react"
+import { useAuth } from "@/hooks/useAuth"
+import { cn } from "@/lib/utils"
 
 const navItems = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/proyectos", label: "Proyectos", icon: FolderKanban },
-  { href: "/informes", label: "Informes y Productos", icon: FileText },
-  { href: "/reportes", label: "Reportes", icon: BarChart3 },
-  { href: "/usuarios", label: "Usuarios y Permisos", icon: Users },
-  { href: "/configuracion", label: "Configuración", icon: Settings },
+  { href: "/proyectos", label: "Proyectos", icon: FolderKanban, permiso: "PROYECTOS_READ" },
+  { href: "/informes", label: "Informes y Productos", icon: FileText, permiso: "DOCUMENTOS_READ" },
+  { href: "/reportes", label: "Reportes", icon: BarChart3, permiso: "REPORTES_READ" },
+  { href: "/usuarios", label: "Usuarios y Permisos", icon: Users, permiso: "USUARIOS_READ" },
+  { href: "/configuracion", label: "Configuracion", icon: Settings, permiso: "CATALOGOS_MANAGE" },
 ]
 
 export function Sidebar() {
   const pathname = usePathname()
   const [collapsed, setCollapsed] = useState(false)
+  const { hasPermission, loading } = useAuth()
 
   const isActive = (href: string) => {
     if (href === "/") return pathname === "/"
     return pathname.startsWith(href)
   }
 
+  const visibleItems = navItems.filter(
+    (item) => !item.permiso || (!loading && hasPermission(item.permiso)),
+  )
+
   return (
     <aside
       className={cn(
         "fixed left-0 top-0 z-40 h-screen border-r border-[#E0E0E0] bg-white transition-all duration-300",
-        collapsed ? "w-16" : "w-64"
+        collapsed ? "w-16" : "w-64",
       )}
     >
-      {/* Logo */}
       <div className="flex h-16 items-center justify-between border-b border-[#E0E0E0] px-4">
         {!collapsed && (
           <Link href="/" className="flex items-center gap-2">
@@ -66,9 +70,8 @@ export function Sidebar() {
         )}
       </div>
 
-      {/* Navigation */}
       <nav className="flex flex-col gap-1 p-3">
-        {navItems.map((item) => {
+        {visibleItems.map((item) => {
           const Icon = item.icon
           const active = isActive(item.href)
           return (
@@ -80,7 +83,7 @@ export function Sidebar() {
                 active
                   ? "bg-[#FFD600] text-[#1A1A1A]"
                   : "text-[#5C5C5C] hover:bg-[#F7F7F7] hover:text-[#1A1A1A]",
-                collapsed && "justify-center px-2"
+                collapsed && "justify-center px-2",
               )}
               title={collapsed ? item.label : undefined}
             >
@@ -91,10 +94,10 @@ export function Sidebar() {
         })}
       </nav>
 
-      {/* Collapse button */}
       <button
         onClick={() => setCollapsed(!collapsed)}
         className="absolute -right-3 top-20 flex h-6 w-6 items-center justify-center rounded-full border border-[#E0E0E0] bg-white text-[#5C5C5C] shadow-sm hover:bg-[#F7F7F7]"
+        aria-label={collapsed ? "Expandir menu" : "Contraer menu"}
       >
         {collapsed ? (
           <ChevronRight className="h-4 w-4" />
@@ -103,7 +106,6 @@ export function Sidebar() {
         )}
       </button>
 
-      {/* Footer */}
       <div className="absolute bottom-0 left-0 right-0 border-t border-[#E0E0E0] p-4">
         {!collapsed && (
           <div className="text-center text-xs text-[#5C5C5C]">
