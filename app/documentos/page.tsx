@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
-import { AlertCircle, FileText, Plus } from "lucide-react"
+import { AlertCircle, Eye, FileText, Pencil, Plus } from "lucide-react"
 import { AppLayout } from "@/components/layout/app-layout"
 import { Spinner } from "@/components/ui/spinner"
 import { StatusBadge, TypeBadge } from "@/components/ui/status-badge"
@@ -135,6 +135,7 @@ export default function DocumentosPage() {
                     <th className="px-6 py-3 font-medium">Estado</th>
                     <th className="px-6 py-3 font-medium">Fecha de carga</th>
                     <th className="px-6 py-3 font-medium">Proyecto asociado</th>
+                    <th className="px-6 py-3 text-right font-medium">Acciones</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -144,7 +145,12 @@ export default function DocumentosPage() {
                       className={`border-b border-[#F0F0F0] ${index % 2 === 0 ? "bg-white" : "bg-[#FAFAFA]"}`}
                     >
                       <td className="px-6 py-3 font-medium text-[#1A1A1A]">
-                        {doc.titulo}
+                        <Link
+                          href={`/documentos/${doc.id}`}
+                          className="hover:text-[#0277BD] hover:underline"
+                        >
+                          {doc.titulo}
+                        </Link>
                       </td>
                       <td className="px-6 py-3">
                         {doc.tipo ? <TypeBadge tipo={doc.tipo} /> : "—"}
@@ -157,6 +163,26 @@ export default function DocumentosPage() {
                       </td>
                       <td className="px-6 py-3 text-[#5C5C5C]">
                         {proyectoNombre(doc.idProyecto)}
+                      </td>
+                      <td className="px-6 py-3">
+                        <div className="flex items-center justify-end gap-2">
+                          <Link
+                            href={`/documentos/${doc.id}`}
+                            title="Ver detalle"
+                            className="inline-flex items-center justify-center rounded-lg border border-[#E0E0E0] p-2 text-[#5C5C5C] transition-colors hover:bg-[#F7F7F7] hover:text-[#1A1A1A]"
+                          >
+                            <Eye className="h-4 w-4" />
+                          </Link>
+                          {/* Editar = RF-048 (lo implementa LS). Placeholder visual deshabilitado. */}
+                          <button
+                            type="button"
+                            disabled
+                            title="Editar (próximamente)"
+                            className="inline-flex cursor-not-allowed items-center justify-center rounded-lg border border-[#E0E0E0] p-2 text-[#C0C0C0]"
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}
