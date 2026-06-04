@@ -7,6 +7,7 @@ import { AppLayout } from "@/components/layout/app-layout"
 import { Spinner } from "@/components/ui/spinner"
 import { StatusBadge, TypeBadge } from "@/components/ui/status-badge"
 import { api } from "@/lib/api"
+import { useAuth } from "@/hooks/useAuth"
 import type {
   DocumentoResponse,
   EstadoDocumento,
@@ -16,6 +17,7 @@ import type {
 
 const ESTADO_LABEL: Record<EstadoDocumento, string> = {
   BORRADOR: "Borrador",
+  EN_REVISION: "En revisión",
   PUBLICADO: "Publicado",
 }
 
@@ -32,6 +34,8 @@ export default function DocumentosPage() {
   const [proyectos, setProyectos] = useState<ProyectoResponse[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const { hasPermission } = useAuth()
+  const puedeEditar = hasPermission("DOCUMENTOS_UPDATE")
 
   useEffect(() => {
     let cancelled = false
@@ -173,15 +177,24 @@ export default function DocumentosPage() {
                           >
                             <Eye className="h-4 w-4" />
                           </Link>
-                          {/* Editar = RF-048 (lo implementa LS). Placeholder visual deshabilitado. */}
-                          <button
-                            type="button"
-                            disabled
-                            title="Editar (próximamente)"
-                            className="inline-flex cursor-not-allowed items-center justify-center rounded-lg border border-[#E0E0E0] p-2 text-[#C0C0C0]"
-                          >
-                            <Pencil className="h-4 w-4" />
-                          </button>
+                          {puedeEditar ? (
+                            <Link
+                              href={`/documentos/${doc.id}/editar`}
+                              title="Editar documento"
+                              className="inline-flex items-center justify-center rounded-lg border border-[#E0E0E0] p-2 text-[#5C5C5C] transition-colors hover:bg-[#F7F7F7] hover:text-[#1A1A1A]"
+                            >
+                              <Pencil className="h-4 w-4" />
+                            </Link>
+                          ) : (
+                            <button
+                              type="button"
+                              disabled
+                              title="Sin permiso para editar"
+                              className="inline-flex cursor-not-allowed items-center justify-center rounded-lg border border-[#E0E0E0] p-2 text-[#C0C0C0]"
+                            >
+                              <Pencil className="h-4 w-4" />
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
