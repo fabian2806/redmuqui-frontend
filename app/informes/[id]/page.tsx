@@ -2,6 +2,7 @@
 
 import { useState, use } from "react"
 import { AppLayout } from "@/components/layout/app-layout"
+import { DocumentoAdjuntosEnlaces } from "@/components/documentos/documento-adjuntos-enlaces"
 import { PermissionGuard } from "@/components/auth/permission-guard"
 import { StatusBadge, MacroregionBadge, TypeBadge } from "@/components/ui/status-badge"
 import { getDocumentoById } from "@/lib/data"
@@ -42,6 +43,8 @@ export default function InformeDetailPage({ params }: { params: Promise<{ id: st
     { id: "versiones" as TabType, label: "Versiones" },
     { id: "observaciones" as TabType, label: "Observaciones" },
   ]
+  const documentoBackendId = Number(documento.id)
+  const tieneDocumentoBackend = Number.isFinite(documentoBackendId) && documentoBackendId > 0
 
   // Mock version history
   const versiones = [
@@ -236,6 +239,14 @@ export default function InformeDetailPage({ params }: { params: Promise<{ id: st
           {/* Archivos Tab */}
           {activeTab === "archivos" && (
             <div className="p-6">
+              {tieneDocumentoBackend ? (
+                <DocumentoAdjuntosEnlaces documentoId={documentoBackendId} embedded />
+              ) : (
+                <p className="text-sm text-[#5C5C5C]">
+                  No se pudo resolver el documento asociado para cargar adjuntos.
+                </p>
+              )}
+              <div className="hidden">
               <h3 className="text-sm font-bold uppercase tracking-wide text-[#5C5C5C] mb-4">
                 Archivos adjuntos
               </h3>
@@ -257,6 +268,7 @@ export default function InformeDetailPage({ params }: { params: Promise<{ id: st
                     </button>
                   </div>
                 ))}
+              </div>
               </div>
             </div>
           )}

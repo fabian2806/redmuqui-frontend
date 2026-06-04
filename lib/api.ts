@@ -32,6 +32,13 @@ interface RequestOptions {
   skipAuth?: boolean
 }
 
+interface FormRequestOptions {
+  method?: "POST" | "PUT" | "PATCH"
+  body: FormData
+  headers?: Record<string, string>
+  skipAuth?: boolean
+}
+
 async function rawFetch<T>(
   path: string,
   options: RequestOptions,
@@ -49,6 +56,41 @@ async function rawFetch<T>(
     method: options.method ?? "GET",
     headers,
     body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
+  })
+
+  if (res.status === 204) return undefined as T
+
+  const text = await res.text()
+  const parsed = text ? safeParse(text) : null
+
+  if (!res.ok) {
+    const errBody = parsed as ErrorResponse | null
+    throw new ApiError(
+      res.status,
+      errBody,
+      errBody?.message ?? `HTTP ${res.status}`,
+    )
+  }
+
+  return parsed as T
+}
+
+async function rawFormFetch<T>(
+  path: string,
+  options: FormRequestOptions,
+  accessToken: string | null,
+): Promise<T> {
+  const headers: Record<string, string> = {
+    ...options.headers,
+  }
+  if (!options.skipAuth && accessToken) {
+    headers.Authorization = `Bearer ${accessToken}`
+  }
+
+  const res = await fetch(`${API_BASE_URL}${path}`, {
+    method: options.method ?? "POST",
+    headers,
+    body: options.body,
   })
 
   if (res.status === 204) return undefined as T
@@ -105,6 +147,31 @@ export async function authenticatedJsonRequest<T>(
   }
 }
 
+export async function authenticatedFormRequest<T>(
+  path: string,
+  options: FormRequestOptions,
+): Promise<T> {
+  const { getAccessToken, refreshAccessToken, clearTokens } = await import("./auth")
+
+  const accessToken = getAccessToken()
+
+  try {
+    return await rawFormFetch<T>(path, options, accessToken)
+  } catch (err: unknown) {
+    if (err instanceof ApiError && err.status === 401 && !options.skipAuth) {
+      const newToken = await refreshAccessToken()
+      if (newToken) {
+        return await rawFormFetch<T>(path, options, newToken)
+      }
+      clearTokens()
+      if (typeof window !== "undefined") {
+        window.location.href = "/login"
+      }
+    }
+    throw err
+  }
+}
+
 export const api = {
   get: <T>(path: string, opts: Omit<RequestOptions, "method" | "body"> = {}) =>
     authenticatedJsonRequest<T>(path, { ...opts, method: "GET" }),
@@ -116,4 +183,6 @@ export const api = {
     authenticatedJsonRequest<T>(path, { ...opts, method: "PATCH", body }),
   delete: <T>(path: string, opts: Omit<RequestOptions, "method" | "body"> = {}) =>
     authenticatedJsonRequest<T>(path, { ...opts, method: "DELETE" }),
+  postForm: <T>(path: string, body: FormData, opts: Omit<FormRequestOptions, "method" | "body"> = {}) =>
+    authenticatedFormRequest<T>(path, { ...opts, method: "POST", body }),
 }

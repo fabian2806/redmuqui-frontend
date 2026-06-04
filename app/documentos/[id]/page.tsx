@@ -13,6 +13,7 @@ import {
   User,
 } from "lucide-react"
 import { AppLayout } from "@/components/layout/app-layout"
+import { DocumentoAdjuntosEnlaces } from "@/components/documentos/documento-adjuntos-enlaces"
 import { Spinner } from "@/components/ui/spinner"
 import { StatusBadge, TypeBadge } from "@/components/ui/status-badge"
 import { api, ApiError } from "@/lib/api"
@@ -252,6 +253,8 @@ export default function DocumentoDetallePage({
                 </Campo>
               </div>
             </section>
+
+            <DocumentoAdjuntosEnlaces documentoId={doc.id} />
           </>
         ) : null}
       </div>

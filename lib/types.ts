@@ -327,6 +327,30 @@ export interface DocumentoCreate {
   idTerritorios?: number[]
 }
 
+export interface ArchivoDocumentoResponse {
+  id: number
+  nombreArchivo: string
+  rutaArchivo: string
+  tipoArchivo: string
+  descripcion: string | null
+  tamanioArchivo: number
+  fechaRegistro: string | null
+  idDocumento: number
+}
+
+export interface EnlaceDocumentoResponse {
+  id: number
+  url: string
+  descripcion: string
+  fechaRegistro: string | null
+  idDocumento: number
+}
+
+export interface EnlaceDocumentoCreate {
+  url: string
+  descripcion: string
+}
+
 // ----- Bitacora -----
 
 export interface BitacoraResponse {
