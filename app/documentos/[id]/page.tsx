@@ -6,17 +6,24 @@ import {
   AlertCircle,
   Calendar,
   ChevronRight,
+  Download,
+  ExternalLink,
   FileText,
   FolderKanban,
+  Hash,
   MapPin,
+  Pencil,
   Tag,
   User,
 } from "lucide-react"
+import { toast } from "sonner"
 import { AppLayout } from "@/components/layout/app-layout"
 import { Spinner } from "@/components/ui/spinner"
 import { StatusBadge, TypeBadge } from "@/components/ui/status-badge"
 import { api, ApiError } from "@/lib/api"
+import { useAuth } from "@/hooks/useAuth"
 import type {
+  ArchivoResponse,
   DocumentoResponse,
   EjeTematico,
   EstadoDocumento,
@@ -28,6 +35,7 @@ import type {
 
 const ESTADO_LABEL: Record<EstadoDocumento, string> = {
   BORRADOR: "Borrador",
+  EN_REVISION: "En revisión",
   PUBLICADO: "Publicado",
 }
 
@@ -48,64 +56,87 @@ export default function DocumentoDetallePage({
   params: Promise<{ id: string }>
 }) {
   const { id } = use(params)
+  const { hasPermission } = useAuth()
+  const puedeEditar = hasPermission("DOCUMENTOS_UPDATE")
+  const puedeValidar = hasPermission("DOCUMENTOS_VALIDATE")
 
   const [doc, setDoc] = useState<DocumentoResponse | null>(null)
   const [proyecto, setProyecto] = useState<ProyectoResponse | null>(null)
   const [ejes, setEjes] = useState<EjeTematico[]>([])
   const [territorios, setTerritorios] = useState<Territorio[]>([])
   const [usuarios, setUsuarios] = useState<UsuarioResponse[]>([])
+  const [archivos, setArchivos] = useState<ArchivoResponse[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [cambiandoEstado, setCambiandoEstado] = useState(false)
+
+  async function cargarDocumento(cancelled: { value: boolean }) {
+    setLoading(true)
+    setError(null)
+    try {
+      const documento = await api.get<DocumentoResponse>(`/documentos/${id}`)
+      const [ejesData, territoriosData, usuariosData, archivosData] = await Promise.all([
+        api.get<EjeTematico[]>("/ejes-tematicos"),
+        api.get<Territorio[]>("/territorios"),
+        api.get<PageResponse<UsuarioResponse>>("/usuarios?page=0&size=100"),
+        api.get<ArchivoResponse[]>(`/documentos/${id}/archivos`),
+      ])
+      let proyectoData: ProyectoResponse | null = null
+      if (documento.idProyecto != null) {
+        proyectoData = await api
+          .get<ProyectoResponse>(`/proyectos/${documento.idProyecto}`)
+          .catch(() => null)
+      }
+
+      if (cancelled.value) return
+      setDoc(documento)
+      setEjes(ejesData)
+      setTerritorios(territoriosData)
+      setUsuarios(usuariosData.content)
+      setProyecto(proyectoData)
+      setArchivos(archivosData)
+    } catch (err) {
+      if (!cancelled.value) {
+        if (err instanceof ApiError && err.status === 404) {
+          setError("El documento no existe o fue eliminado.")
+        } else {
+          setError(
+            err instanceof Error ? err.message : "No se pudo cargar el documento",
+          )
+        }
+      }
+    } finally {
+      if (!cancelled.value) setLoading(false)
+    }
+  }
 
   useEffect(() => {
-    let cancelled = false
-
-    async function load() {
-      setLoading(true)
-      setError(null)
-      try {
-        const documento = await api.get<DocumentoResponse>(`/documentos/${id}`)
-        // Catálogos para resolver nombres (el DTO sólo trae IDs).
-        const [ejesData, territoriosData, usuariosData] = await Promise.all([
-          api.get<EjeTematico[]>("/ejes-tematicos"),
-          api.get<Territorio[]>("/territorios"),
-          api.get<PageResponse<UsuarioResponse>>("/usuarios?page=0&size=100"),
-        ])
-        let proyectoData: ProyectoResponse | null = null
-        if (documento.idProyecto != null) {
-          proyectoData = await api
-            .get<ProyectoResponse>(`/proyectos/${documento.idProyecto}`)
-            .catch(() => null)
-        }
-
-        if (cancelled) return
-        setDoc(documento)
-        setEjes(ejesData)
-        setTerritorios(territoriosData)
-        setUsuarios(usuariosData.content)
-        setProyecto(proyectoData)
-      } catch (err) {
-        if (!cancelled) {
-          if (err instanceof ApiError && err.status === 404) {
-            setError("El documento no existe o fue eliminado.")
-          } else {
-            setError(
-              err instanceof Error
-                ? err.message
-                : "No se pudo cargar el documento",
-            )
-          }
-        }
-      } finally {
-        if (!cancelled) setLoading(false)
-      }
-    }
-
-    load()
-    return () => {
-      cancelled = true
-    }
+    const cancelled = { value: false }
+    cargarDocumento(cancelled)
+    return () => { cancelled.value = true }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id])
+
+  async function handleCambiarEstado(nuevoEstado: EstadoDocumento) {
+    if (!doc) return
+    setCambiandoEstado(true)
+    try {
+      await api.patch<DocumentoResponse>(
+        `/documentos/${doc.id}/estado?estado=${nuevoEstado}`,
+      )
+      toast.success(`Estado actualizado a "${ESTADO_LABEL[nuevoEstado]}"`)
+      const cancelled = { value: false }
+      await cargarDocumento(cancelled)
+    } catch (err) {
+      toast.error(
+        err instanceof ApiError
+          ? err.message
+          : "No se pudo cambiar el estado",
+      )
+    } finally {
+      setCambiandoEstado(false)
+    }
+  }
 
   const ejeNombre =
     doc?.idEjeTematico != null
@@ -146,7 +177,7 @@ export default function DocumentoDetallePage({
         ) : doc ? (
           <>
             {/* Encabezado */}
-            <div className="flex items-start justify-between gap-4">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
               <div className="space-y-2">
                 <h1 className="text-2xl font-bold text-[#1A1A1A]">{doc.titulo}</h1>
                 <div className="flex flex-wrap items-center gap-2">
@@ -157,6 +188,62 @@ export default function DocumentoDetallePage({
                     {formatFecha(doc.fechaCarga)}
                   </span>
                 </div>
+              </div>
+
+              {/* Acciones: Editar + botones de estado contextual */}
+              <div className="flex flex-wrap items-center gap-2">
+                {puedeEditar && (
+                  <Link
+                    href={`/documentos/${doc.id}/editar`}
+                    className="flex items-center gap-2 rounded-lg border border-[#E0E0E0] bg-white px-3 py-2 text-sm font-medium text-[#5C5C5C] hover:bg-[#F7F7F7]"
+                  >
+                    <Pencil className="h-4 w-4" />
+                    Editar
+                  </Link>
+                )}
+                {/* RF-056: botones de transición de estado contextuales */}
+                {doc.estado === "BORRADOR" && puedeEditar && (
+                  <button
+                    type="button"
+                    disabled={cambiandoEstado}
+                    onClick={() => handleCambiarEstado("EN_REVISION")}
+                    className="flex items-center gap-2 rounded-lg bg-[#0277BD] px-3 py-2 text-sm font-medium text-white hover:bg-[#01579B] disabled:opacity-50"
+                  >
+                    {cambiandoEstado ? <Spinner /> : null}
+                    Enviar a revisión
+                  </button>
+                )}
+                {doc.estado === "EN_REVISION" && puedeValidar && (
+                  <>
+                    <button
+                      type="button"
+                      disabled={cambiandoEstado}
+                      onClick={() => handleCambiarEstado("PUBLICADO")}
+                      className="flex items-center gap-2 rounded-lg bg-[#2E7D32] px-3 py-2 text-sm font-medium text-white hover:bg-[#1B5E20] disabled:opacity-50"
+                    >
+                      {cambiandoEstado ? <Spinner /> : null}
+                      Publicar
+                    </button>
+                    <button
+                      type="button"
+                      disabled={cambiandoEstado}
+                      onClick={() => handleCambiarEstado("BORRADOR")}
+                      className="flex items-center gap-2 rounded-lg border border-[#E0E0E0] bg-white px-3 py-2 text-sm font-medium text-[#5C5C5C] hover:bg-[#F7F7F7] disabled:opacity-50"
+                    >
+                      Devolver a borrador
+                    </button>
+                  </>
+                )}
+                {doc.estado === "PUBLICADO" && puedeValidar && (
+                  <button
+                    type="button"
+                    disabled={cambiandoEstado}
+                    onClick={() => handleCambiarEstado("EN_REVISION")}
+                    className="flex items-center gap-2 rounded-lg border border-[#E0E0E0] bg-white px-3 py-2 text-sm font-medium text-[#5C5C5C] hover:bg-[#F7F7F7] disabled:opacity-50"
+                  >
+                    Devolver a revisión
+                  </button>
+                )}
               </div>
             </div>
 
@@ -178,6 +265,25 @@ export default function DocumentoDetallePage({
                   <Campo icon={<Calendar className="h-4 w-4" />} label="Fecha de carga">
                     {formatFecha(doc.fechaCarga)}
                   </Campo>
+                  <Campo icon={<Hash className="h-4 w-4" />} label="Versión">
+                    {doc.version != null ? `v${doc.version}` : "—"}
+                  </Campo>
+                  {doc.enlace && (
+                    <div className="md:col-span-2">
+                      <p className="mb-1 flex items-center gap-1.5 text-xs font-medium text-[#5C5C5C]">
+                        <ExternalLink className="h-4 w-4" />
+                        Enlace externo
+                      </p>
+                      <a
+                        href={doc.enlace}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="break-all text-sm text-[#0277BD] hover:underline"
+                      >
+                        {doc.enlace}
+                      </a>
+                    </div>
+                  )}
                 </div>
                 <div>
                   <p className="mb-1 text-xs font-medium text-[#5C5C5C]">Descripción</p>
@@ -236,7 +342,7 @@ export default function DocumentoDetallePage({
               </div>
             </section>
 
-            {/* Responsables */}
+            {/* Responsables (RF-054/055) */}
             <section className="rounded-lg border border-[#E0E0E0] bg-white shadow-sm">
               <div className="border-b border-[#E0E0E0] px-6 py-4">
                 <h2 className="text-sm font-bold uppercase tracking-wide text-[#1A1A1A]">
@@ -250,6 +356,54 @@ export default function DocumentoDetallePage({
                 <Campo icon={<User className="h-4 w-4" />} label="Responsable de validación">
                   {respValidacion ? nombreCompleto(respValidacion) : "Sin validador asignado"}
                 </Campo>
+              </div>
+            </section>
+
+            {/* Archivos adjuntos (RF-050) */}
+            <section className="rounded-lg border border-[#E0E0E0] bg-white shadow-sm">
+              <div className="border-b border-[#E0E0E0] px-6 py-4">
+                <h2 className="text-sm font-bold uppercase tracking-wide text-[#1A1A1A]">
+                  Archivos adjuntos
+                </h2>
+              </div>
+              <div className="p-6">
+                {archivos.length === 0 ? (
+                  <p className="text-sm text-[#5C5C5C]">No hay archivos adjuntos.</p>
+                ) : (
+                  <div className="space-y-3">
+                    {archivos.map((archivo) => (
+                      <div
+                        key={archivo.id}
+                        className="flex items-center justify-between rounded-lg border border-[#E0E0E0] p-4 hover:bg-[#FFFDE7]"
+                      >
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[#FFD600]/20">
+                            <FileText className="h-5 w-5 text-[#C9A42B]" />
+                          </div>
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-medium text-[#1A1A1A]">
+                              {archivo.nombre}
+                            </p>
+                            {archivo.extension && (
+                              <p className="text-xs text-[#5C5C5C] uppercase">
+                                {archivo.extension}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                        <a
+                          href={archivo.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="ml-4 flex shrink-0 items-center gap-2 rounded-lg bg-[#F7F7F7] px-4 py-2 text-sm font-medium text-[#5C5C5C] hover:bg-[#FFD600] hover:text-[#1A1A1A]"
+                        >
+                          <Download className="h-4 w-4" />
+                          Descargar
+                        </a>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </section>
           </>

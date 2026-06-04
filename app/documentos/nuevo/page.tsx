@@ -23,6 +23,7 @@ import {
 
 const ESTADOS: Array<{ value: EstadoDocumento; label: string }> = [
   { value: "BORRADOR", label: "Borrador" },
+  { value: "EN_REVISION", label: "En revisión" },
   { value: "PUBLICADO", label: "Publicado" },
 ]
 
