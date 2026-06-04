@@ -1,6 +1,7 @@
 "use client"
 import { useEffect, useState } from "react"
 import { AppLayout } from "@/components/layout/app-layout"
+import { PermissionGuard } from "@/components/auth/permission-guard"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -9,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Checkbox } from "@/components/ui/checkbox"
 import { Separator } from "@/components/ui/separator"
 import { api, ApiError } from "@/lib/api"
+import { useAuth } from "@/hooks/useAuth"
 import { getPermisoTexto } from "@/lib/permissions"
 import type { Institucion, Permiso, Rol, UsuarioCreate } from "@/lib/types"
 import { ArrowLeft, Save, User, Mail, PhoneIcon, Building2, Shield, Eye, EyeOff, CheckCircle2, AlertCircle, X } from "lucide-react"
@@ -17,6 +19,8 @@ import { useRouter } from "next/navigation"
 
 export default function NuevoUsuarioPage() {
   const router = useRouter()
+  const { loading: authLoading, hasPermission } = useAuth()
+  const puedeCrearUsuarios = hasPermission("USUARIOS_CREATE")
   const [showPassword, setShowPassword] = useState(false)
   const [saving, setSaving] = useState(false)
   const [roles, setRoles] = useState<Rol[]>([])
@@ -44,6 +48,8 @@ export default function NuevoUsuarioPage() {
   const closeFeedbackCard = (id: number) => setFeedbackCards((prev) => prev.filter((item) => item.id !== id))
 
   useEffect(() => {
+    if (authLoading || !puedeCrearUsuarios) return
+
     const loadCatalogos = async () => {
       try {
         const [rolesData, institucionesData] = await Promise.all([api.get<Rol[]>("/roles"), api.get<Institucion[]>("/instituciones")])
@@ -54,7 +60,7 @@ export default function NuevoUsuarioPage() {
       }
     }
     void loadCatalogos()
-  }, [])
+  }, [authLoading, puedeCrearUsuarios])
 
   const handleRolChange = async (rolId: string) => {
     const selectedRol = roles.find((role) => String(role.id) === rolId)
@@ -154,6 +160,7 @@ export default function NuevoUsuarioPage() {
 
   return (
     <AppLayout>
+      <PermissionGuard permiso="USUARIOS_CREATE">
       <div className="space-y-6">
         <div className="flex items-center gap-4"><Link href="/usuarios"><Button variant="ghost" size="icon"><ArrowLeft className="h-5 w-5" /></Button></Link><div><h1 className="text-2xl font-bold text-foreground">Nuevo Usuario</h1><p className="text-muted-foreground">Registra un nuevo usuario en el sistema</p></div></div>
 
@@ -193,6 +200,7 @@ export default function NuevoUsuarioPage() {
           </div>
         )}
       </div>
+      </PermissionGuard>
     </AppLayout>
   )
 }

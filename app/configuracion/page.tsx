@@ -1,6 +1,7 @@
 "use client"
 
 import { AppLayout } from "@/components/layout/app-layout"
+import { PermissionGuard } from "@/components/auth/permission-guard"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -28,6 +29,7 @@ export default function ConfiguracionPage() {
 
   return (
     <AppLayout>
+      <PermissionGuard permiso="CATALOGOS_MANAGE">
       <div className="space-y-6">
         {/* Header */}
         <div>
@@ -286,6 +288,7 @@ export default function ConfiguracionPage() {
           </TabsContent>
         </Tabs>
       </div>
+      </PermissionGuard>
     </AppLayout>
   )
 }

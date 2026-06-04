@@ -2,6 +2,7 @@
 
 import { useState } from "react"
 import { AppLayout } from "@/components/layout/app-layout"
+import { PermissionGuard } from "@/components/auth/permission-guard"
 import { 
   proyectos,
   institucionesMiembro,
@@ -84,6 +85,7 @@ export default function NuevoInformePage() {
 
   return (
     <AppLayout title="Nuevo Documento">
+      <PermissionGuard permiso="DOCUMENTOS_CREATE">
       <div className="max-w-4xl mx-auto space-y-6">
         {/* Breadcrumb */}
         <nav className="flex items-center gap-2 text-sm text-[#5C5C5C]">
@@ -392,6 +394,7 @@ export default function NuevoInformePage() {
           </div>
         </form>
       </div>
+      </PermissionGuard>
     </AppLayout>
   )
 }

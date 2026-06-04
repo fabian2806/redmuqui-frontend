@@ -5,6 +5,7 @@ import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useEffect, useRef, useState } from "react"
 import { useAuth } from "@/hooks/useAuth"
+import { getUserDisplayName, getUserRoleLabel } from "@/lib/user-display"
 
 interface HeaderProps {
   title?: string
@@ -15,7 +16,11 @@ export function Header({ title }: HeaderProps) {
   const [menuOpen, setMenuOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
   const router = useRouter()
-  const { logout } = useAuth()
+  const { user, logout } = useAuth()
+  const displayName = getUserDisplayName(user)
+  const displayRole = getUserRoleLabel(user)
+  const displayEmail = user?.email ?? ""
+  const profileHref = user?.id ? `/usuarios/${user.id}` : "/configuracion"
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -76,8 +81,8 @@ export function Header({ title }: HeaderProps) {
               <User className="h-4 w-4 text-[#1A1A1A]" />
             </div>
             <div className="text-left">
-              <p className="text-xs font-medium text-[#1A1A1A]">María Torres</p>
-              <p className="text-[10px] text-[#5C5C5C]">Secretaría Ejecutiva</p>
+              <p className="text-xs font-medium text-[#1A1A1A]">{displayName}</p>
+              <p className="text-[10px] text-[#5C5C5C]">{displayRole}</p>
             </div>
             <ChevronDown className={`h-4 w-4 text-[#5C5C5C] transition-transform duration-200 ${menuOpen ? "rotate-180" : ""}`} />
           </button>
@@ -87,14 +92,14 @@ export function Header({ title }: HeaderProps) {
             <div className="absolute right-0 top-full mt-2 w-52 overflow-hidden rounded-lg border border-[#E0E0E0] bg-white shadow-lg">
               {/* User info */}
               <div className="border-b border-[#E0E0E0] px-4 py-3">
-                <p className="text-sm font-semibold text-[#1A1A1A]">María Torres</p>
-                <p className="text-xs text-[#5C5C5C]">maria.torres@muqui.org</p>
+                <p className="text-sm font-semibold text-[#1A1A1A]">{displayName}</p>
+                <p className="text-xs text-[#5C5C5C]">{displayEmail}</p>
               </div>
 
               {/* Menu items */}
               <div className="py-1">
                 <Link
-                  href="/usuarios/usr-001"
+                  href={profileHref}
                   onClick={() => setMenuOpen(false)}
                   className="flex w-full items-center gap-3 px-4 py-2.5 text-sm text-[#1A1A1A] hover:bg-[#F7F7F7]"
                 >

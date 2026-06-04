@@ -1,6 +1,7 @@
 "use client"
 
 import React, { useEffect, useMemo, useState, use } from "react"
+import { PermissionGuard } from "@/components/auth/permission-guard"
 import { AppLayout } from "@/components/layout/app-layout"
 import { StatusBadge, MacroregionBadge, TypeBadge } from "@/components/ui/status-badge"
 import { ProgressBar } from "@/components/ui/progress-bar"
@@ -57,6 +58,7 @@ import {
 } from "lucide-react"
 import Link from "next/link"
 import { notFound } from "next/navigation"
+import { useAuth } from "@/hooks/useAuth"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogTrigger, DialogClose } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -337,6 +339,11 @@ function MockDataTag() {
 
 export default function ProyectoDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params)
+  const { loading: authLoading, hasPermission } = useAuth()
+  const puedeVerProyectos = hasPermission("PROYECTOS_READ")
+  const puedeActualizarProyectos = hasPermission("PROYECTOS_UPDATE")
+  const puedeVerUsuarios = hasPermission("USUARIOS_READ")
+  const puedeVerBitacora = hasPermission("BITACORA_READ")
   const mockProyecto = getProyectoById(id)
   const [apiProyecto, setApiProyecto] = useState<ProyectoResponse | null>(null)
   const [apiActividades, setApiActividades] = useState<ActividadResponse[]>([])
@@ -756,6 +763,8 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
   }
 
   useEffect(() => {
+    if (authLoading || !puedeVerProyectos) return
+
     let cancelled = false
 
     async function cargarProyecto() {
@@ -773,7 +782,9 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
         try {
           const [actsResponse, usersResponse, teamResponse, macrosResponse, ejesResponse, territoriosResponse, institucionesResponse] = await Promise.all([
             api.get<ActividadResponse[]>(`/proyectos/${id}/actividades`),
-            api.get<PageResponse<UsuarioResponse>>(`/usuarios?page=0&size=100&sort=apellidos,asc`),
+            puedeVerUsuarios
+              ? api.get<PageResponse<UsuarioResponse>>(`/usuarios?page=0&size=100&sort=apellidos,asc`)
+              : Promise.resolve({ content: [], page: 0, size: 0, totalElements: 0, totalPages: 0, first: true, last: true }),
             api.get<{ idUsuario: number; rolEnProyecto: string }[]>(`/proyectos/${id}/equipo`),
             api.get<Macroregion[]>(`/macroregiones`),
             api.get<EjeTematico[]>(`/ejes-tematicos`),
@@ -819,9 +830,11 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
     return () => {
       cancelled = true
     }
-  }, [id])
+  }, [id, authLoading, puedeVerProyectos, puedeVerUsuarios])
 
   useEffect(() => {
+    if (authLoading || !puedeVerProyectos) return
+
     let cancelled = false
 
     async function cargarActividades() {
@@ -877,11 +890,11 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
     }
 
     cargarActividades()
-    cargarUsuarios()
+    if (puedeVerUsuarios) cargarUsuarios()
     cargarHitos()
 
     return () => { cancelled = true }
-  }, [id])
+  }, [id, authLoading, puedeVerProyectos, puedeVerUsuarios])
 
   const abrirNuevoHito = () => {
     setHitoForm(hitoFormInicial)
@@ -1011,6 +1024,16 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
     [actividadesApi, usuariosMap]
   )
 
+  if (!authLoading && !puedeVerProyectos) {
+    return (
+      <AppLayout>
+        <PermissionGuard permiso="PROYECTOS_READ">
+          <div />
+        </PermissionGuard>
+      </AppLayout>
+    )
+  }
+
   if (!proyecto && apiLoading) {
     return (
       <AppLayout>
@@ -1102,9 +1125,11 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
     { id: "equipo" as TabType, label: "Equipo" },
     { id: "bitacora" as TabType, label: "Bitácora" },
   ]
+  const visibleTabs = tabs.filter((tab) => tab.id !== "bitacora" || puedeVerBitacora)
 
   return (
     <AppLayout>
+      <PermissionGuard permiso="PROYECTOS_READ">
       <div className="space-y-6">
         {/* Breadcrumb */}
         <nav className="flex items-center gap-2 text-sm text-[#5C5C5C]">
@@ -1131,6 +1156,8 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
             </div>
           </div>
           <div className="flex items-center gap-2">
+            {puedeActualizarProyectos && (
+            <>
             <Dialog open={editModalOpen} onOpenChange={(open) => {
               if (open && apiProyecto) {
                 prepararFormularioEdicionProyecto(apiProyecto)
@@ -1291,6 +1318,8 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                 </DialogFooter>
               </DialogContent>
             </Dialog>
+            </>
+            )}
 
             <button className="flex items-center gap-2 rounded-lg border border-[#E0E0E0] bg-white px-4 py-2 text-sm font-medium text-[#5C5C5C] hover:bg-[#F7F7F7]">
               <Download className="h-4 w-4" />
@@ -1308,7 +1337,7 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
           <div className="lg:col-span-3 space-y-6">
             {/* Tabs */}
             <div className="flex gap-1 rounded-lg bg-[#F7F7F7] p-1">
-              {tabs.map(tab => (
+              {visibleTabs.map(tab => (
                 <button
                   key={tab.id}
                   onClick={() => setActiveTab(tab.id)}
@@ -2833,7 +2862,7 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
               <span className="text-4xl font-bold text-[#1A1A1A]">{proyecto.avance}%</span>
             </div>
             <ProgressBar value={proyecto.avance} showLabel={false} size="lg" />
-            {apiProyecto && (
+            {apiProyecto && puedeActualizarProyectos && (
               <div className="mt-4 space-y-2">
                 <Label htmlFor="avance-directo" className="text-xs text-[#5C5C5C]">Actualizar avance (%)</Label>
                 <div className="flex gap-2">
@@ -2876,6 +2905,7 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
         </div>
       </div>
     </div>
+      </PermissionGuard>
     </AppLayout >
   )
 }

@@ -12,6 +12,7 @@ import {
   X,
 } from "lucide-react"
 import { AppLayout } from "@/components/layout/app-layout"
+import { PermissionGuard } from "@/components/auth/permission-guard"
 import { ProgressBar } from "@/components/ui/progress-bar"
 import {
   MacroregionBadge,
@@ -19,6 +20,7 @@ import {
   TypeBadge,
 } from "@/components/ui/status-badge"
 import { api, ApiError } from "@/lib/api"
+import { useAuth } from "@/hooks/useAuth"
 import type {
   EjeTematico,
   EstadoProyecto,
@@ -85,6 +87,10 @@ function buildProyectosPath(params: {
 }
 
 export default function ProyectosPage() {
+  const { loading: authLoading, hasPermission } = useAuth()
+  const puedeVerProyectos = hasPermission("PROYECTOS_READ")
+  const puedeCrearProyectos = hasPermission("PROYECTOS_CREATE")
+
   const [searchQuery, setSearchQuery] = useState("")
   const [selectedMacroregion, setSelectedMacroregion] = useState("")
   const [selectedEje, setSelectedEje] = useState("")
@@ -103,6 +109,8 @@ export default function ProyectosPage() {
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
+    if (authLoading || !puedeVerProyectos) return
+
     let cancelled = false
 
     async function loadCatalogos() {
@@ -135,9 +143,11 @@ export default function ProyectosPage() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [authLoading, puedeVerProyectos])
 
   useEffect(() => {
+    if (authLoading || !puedeVerProyectos) return
+
     let cancelled = false
 
     async function loadProyectos() {
@@ -182,6 +192,8 @@ export default function ProyectosPage() {
     selectedMacroregion,
     selectedInstitucion,
     selectedAnio,
+    authLoading,
+    puedeVerProyectos,
   ])
 
   const proyectos = proyectosPage?.content ?? []
@@ -213,6 +225,7 @@ export default function ProyectosPage() {
 
   return (
     <AppLayout title="Proyectos">
+      <PermissionGuard permiso="PROYECTOS_READ">
       <div className="space-y-6">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
@@ -221,13 +234,15 @@ export default function ProyectosPage() {
               Gestiona y da seguimiento a los proyectos institucionales
             </p>
           </div>
-          <Link
-            href="/proyectos/nuevo"
-            className="flex items-center justify-center gap-2 rounded-lg bg-[#FFD600] px-4 py-2.5 text-sm font-bold text-[#1A1A1A] transition-colors hover:bg-[#C9A42B]"
-          >
-            <Plus className="h-4 w-4" />
-            Nuevo Proyecto
-          </Link>
+          {puedeCrearProyectos && (
+            <Link
+              href="/proyectos/nuevo"
+              className="flex items-center justify-center gap-2 rounded-lg bg-[#FFD600] px-4 py-2.5 text-sm font-bold text-[#1A1A1A] transition-colors hover:bg-[#C9A42B]"
+            >
+              <Plus className="h-4 w-4" />
+              Nuevo Proyecto
+            </Link>
+          )}
         </div>
 
         <div className="rounded-lg border border-[#E0E0E0] bg-white p-4 shadow-sm">
@@ -530,6 +545,7 @@ export default function ProyectosPage() {
           )}
         </div>
       </div>
+      </PermissionGuard>
     </AppLayout>
   )
 }

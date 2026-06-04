@@ -2,6 +2,7 @@
 
 import { useState } from "react"
 import { AppLayout } from "@/components/layout/app-layout"
+import { PermissionGuard } from "@/components/auth/permission-guard"
 import { StatusBadge, TypeBadge, MacroregionBadge } from "@/components/ui/status-badge"
 import { 
   documentos, 
@@ -23,6 +24,7 @@ import {
   User
 } from "lucide-react"
 import Link from "next/link"
+import { useAuth } from "@/hooks/useAuth"
 
 const tiposDocumento: TipoDocumento[] = [
   "Informe", "Pronunciamiento", "Investigación", "Manual", "Cartilla", "Resumen técnico"
@@ -30,6 +32,10 @@ const tiposDocumento: TipoDocumento[] = [
 const estadosDocumento: EstadoDocumento[] = ["Borrador", "En revisión", "Publicado"]
 
 export default function InformesPage() {
+  const { hasPermission } = useAuth()
+  const puedeCrearDocumentos = hasPermission("DOCUMENTOS_CREATE")
+  const puedeEditarDocumentos = hasPermission("DOCUMENTOS_UPDATE")
+
   const [searchQuery, setSearchQuery] = useState("")
   const [selectedTipo, setSelectedTipo] = useState<TipoDocumento | "">("")
   const [selectedProyecto, setSelectedProyecto] = useState("")
@@ -53,6 +59,7 @@ export default function InformesPage() {
 
   return (
     <AppLayout title="Informes y Productos">
+      <PermissionGuard permiso="DOCUMENTOS_READ">
       <div className="space-y-6">
         {/* Header */}
         <div className="flex items-center justify-between">
@@ -62,13 +69,15 @@ export default function InformesPage() {
               Repositorio central de documentos institucionales
             </p>
           </div>
-          <Link
-            href="/informes/nuevo"
-            className="flex items-center gap-2 rounded-lg bg-[#FFD600] px-4 py-2.5 text-sm font-bold text-[#1A1A1A] transition-colors hover:bg-[#C9A42B]"
-          >
-            <Plus className="h-4 w-4" />
-            Registrar documento
-          </Link>
+          {puedeCrearDocumentos && (
+            <Link
+              href="/informes/nuevo"
+              className="flex items-center gap-2 rounded-lg bg-[#FFD600] px-4 py-2.5 text-sm font-bold text-[#1A1A1A] transition-colors hover:bg-[#C9A42B]"
+            >
+              <Plus className="h-4 w-4" />
+              Registrar documento
+            </Link>
+          )}
         </div>
 
         {/* Tabs */}
@@ -218,9 +227,11 @@ export default function InformesPage() {
                     <Download className="h-3.5 w-3.5" />
                     Descargar
                   </button>
-                  <button className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#F7F7F7] text-[#5C5C5C] hover:bg-[#FFD600] hover:text-[#1A1A1A]">
-                    <Pencil className="h-3.5 w-3.5" />
-                  </button>
+                  {puedeEditarDocumentos && (
+                    <button className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#F7F7F7] text-[#5C5C5C] hover:bg-[#FFD600] hover:text-[#1A1A1A]">
+                      <Pencil className="h-3.5 w-3.5" />
+                    </button>
+                  )}
                 </div>
               </div>
             ))}
@@ -303,12 +314,14 @@ export default function InformesPage() {
                           >
                             <Download className="h-4 w-4" />
                           </button>
-                          <button
-                            className="rounded-md p-2 text-[#5C5C5C] hover:bg-[#F7F7F7] hover:text-[#1A1A1A]"
-                            title="Editar"
-                          >
-                            <Pencil className="h-4 w-4" />
-                          </button>
+                          {puedeEditarDocumentos && (
+                            <button
+                              className="rounded-md p-2 text-[#5C5C5C] hover:bg-[#F7F7F7] hover:text-[#1A1A1A]"
+                              title="Editar"
+                            >
+                              <Pencil className="h-4 w-4" />
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -328,6 +341,7 @@ export default function InformesPage() {
           </div>
         )}
       </div>
+      </PermissionGuard>
     </AppLayout>
   )
 }

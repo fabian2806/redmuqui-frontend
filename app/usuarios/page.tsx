@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
+import { useAuth } from "@/hooks/useAuth"
 import { AppLayout } from "@/components/layout/app-layout"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -43,6 +44,13 @@ import {
 import Link from "next/link"
 
 export default function UsuariosPage() {
+  const { user: usuarioActual, hasPermission, loading: authLoading } = useAuth()
+  const puedeVerUsuarios = hasPermission("USUARIOS_READ")
+  const puedeCrearUsuarios = hasPermission("USUARIOS_CREATE")
+  const puedeEditarUsuarios = hasPermission("USUARIOS_UPDATE")
+  const puedeCambiarEstadoUsuarios = hasPermission("USUARIOS_DEACTIVATE")
+  const puedeGestionarPermisos = hasPermission("USUARIOS_UPDATE")
+
   const [usuarios, setUsuarios] = useState<UsuarioResponse[]>([])
   const [cargando, setCargando] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -60,6 +68,14 @@ export default function UsuariosPage() {
 
   useEffect(() => {
     let cancelado = false
+
+    if (authLoading) return
+    if (!puedeVerUsuarios) {
+      setUsuarios([])
+      setError(null)
+      setCargando(false)
+      return
+    }
 
     const cargarUsuarios = async () => {
       try {
@@ -81,7 +97,7 @@ export default function UsuariosPage() {
     return () => {
       cancelado = true
     }
-  }, [])
+  }, [authLoading, puedeVerUsuarios])
 
   useEffect(() => {
     const loadCatalogos = async () => {
@@ -138,6 +154,8 @@ export default function UsuariosPage() {
   const roles = Array.from(new Set(usuarios.map(usuario => usuario.nombreRol).filter(Boolean))).sort()
 
   const openEditModal = async (usuario: UsuarioResponse) => {
+    if (!puedeEditarUsuarios) return
+
     setUsuarioEditando(usuario)
     setEditData(getEditDataFromUsuario(usuario))
 
@@ -157,7 +175,7 @@ export default function UsuariosPage() {
   }
 
   const handleUpdateUsuario = async () => {
-    if (!usuarioEditando) return
+    if (!usuarioEditando || !puedeEditarUsuarios) return
     const validationErrors: { title: string; description: string }[] = []
     const telefonoLimpio = editData.telefono.trim()
     if (!editData.nombre.trim()) validationErrors.push({ title: "Nombre completo requerido", description: "Completa el nombre completo." })
@@ -246,6 +264,29 @@ export default function UsuariosPage() {
     setAccionConfirmar(null)
   }
 
+  if (authLoading) {
+    return (
+      <AppLayout>
+        <div className="flex min-h-[400px] items-center justify-center text-muted-foreground">
+          Cargando permisos...
+        </div>
+      </AppLayout>
+    )
+  }
+
+  if (!puedeVerUsuarios) {
+    return (
+      <AppLayout>
+        <div className="flex min-h-[400px] flex-col items-center justify-center text-center gap-4 px-4">
+          <p className="text-lg font-semibold">Acceso restringido</p>
+          <p className="max-w-md text-sm text-muted-foreground">
+            No tienes permiso para ver la lista de usuarios. Si crees que es un error, contacta con el administrador.
+          </p>
+        </div>
+      </AppLayout>
+    )
+  }
+
   return (
     <AppLayout>
       <div className="space-y-6">
@@ -257,12 +298,14 @@ export default function UsuariosPage() {
               Administra usuarios, roles y permisos del sistema
             </p>
           </div>
-          <Link href="/usuarios/nuevo">
-            <Button className="bg-primary hover:bg-primary/90">
-              <UserPlus className="mr-2 h-4 w-4" />
-              Nuevo Usuario
-            </Button>
-          </Link>
+          {puedeCrearUsuarios && (
+            <Link href="/usuarios/nuevo">
+              <Button className="bg-primary hover:bg-primary/90">
+                <UserPlus className="mr-2 h-4 w-4" />
+                Nuevo Usuario
+              </Button>
+            </Link>
+          )}
         </div>
 
         {/* KPIs */}
@@ -464,19 +507,30 @@ export default function UsuariosPage() {
                                 Ver detalle
                               </DropdownMenuItem>
                             </Link>
-                            <DropdownMenuItem onClick={() => openEditModal(usuario)}>
+                            {puedeEditarUsuarios && (
+                              <DropdownMenuItem onClick={() => openEditModal(usuario)}>
                                 <Pencil className="mr-2 h-4 w-4" />
                                 Editar
-                            </DropdownMenuItem>
-                            <DropdownMenuItem>
-                              <Shield className="mr-2 h-4 w-4" />
-                              Gestionar permisos
-                            </DropdownMenuItem>
+                              </DropdownMenuItem>
+                            )}
+                            {puedeGestionarPermisos && (
+                              <DropdownMenuItem>
+                                <Shield className="mr-2 h-4 w-4" />
+                                Gestionar permisos
+                              </DropdownMenuItem>
+                            )}
                             <DropdownMenuSeparator />
-                            <DropdownMenuItem onClick={() => { setUsuarioAConfirmar(usuario); setAccionConfirmar(usuario.estado ? "desactivar" : "activar") }} className={usuario.estado ? "text-orange-600" : "text-green-600"}>
-                              <UserX className="mr-2 h-4 w-4" />
-                              {usuario.estado ? "Desactivar" : "Activar"}
-                            </DropdownMenuItem>
+                            {usuarioActual?.id === usuario.id ? (
+                              <DropdownMenuItem disabled className="cursor-not-allowed opacity-50">
+                                <UserX className="mr-2 h-4 w-4" />
+                                Desactivar (eres tú)
+                              </DropdownMenuItem>
+                            ) : puedeCambiarEstadoUsuarios ? (
+                              <DropdownMenuItem onClick={() => { setUsuarioAConfirmar(usuario); setAccionConfirmar(usuario.estado ? "desactivar" : "activar") }} className={usuario.estado ? "text-orange-600" : "text-green-600"}>
+                                <UserX className="mr-2 h-4 w-4" />
+                                {usuario.estado ? "Desactivar" : "Activar"}
+                              </DropdownMenuItem>
+                            ) : null}
                           </DropdownMenuContent>
                         </DropdownMenu>
                       </TableCell>
@@ -611,13 +665,13 @@ export default function UsuariosPage() {
             <div className="space-y-2"><Label htmlFor="edit-email">Correo electrónico *</Label><Input id="edit-email" type="email" value={editData.email} onChange={(e) => setEditData({ ...editData, email: e.target.value })} /></div>
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-2"><Label htmlFor="edit-telefono">Teléfono</Label><Input id="edit-telefono" inputMode="numeric" maxLength={9} value={editData.telefono} onChange={(e) => setEditData({ ...editData, telefono: e.target.value.replace(/\D/g, "").slice(0, 9) })} /></div>
-              <div className="space-y-2"><Label>Estado</Label><Select value={editData.estado} onValueChange={(value) => setEditData({ ...editData, estado: value })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="activo">Activo</SelectItem><SelectItem value="inactivo">Inactivo</SelectItem></SelectContent></Select></div>
+              <div className="space-y-2"><Label>Estado</Label><Select value={editData.estado} onValueChange={(value) => setEditData({ ...editData, estado: value })} disabled={usuarioActual?.id === usuarioEditando?.id}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="activo">Activo</SelectItem><SelectItem value="inactivo" disabled={usuarioActual?.id === usuarioEditando?.id}>Inactivo</SelectItem></SelectContent></Select>{usuarioActual?.id === usuarioEditando?.id && <p className="text-xs text-muted-foreground">No puedes desactivar tu propia cuenta.</p>}</div>
             </div>
             <div className="grid gap-4 sm:grid-cols-2">
-              <div className="space-y-2"><Label>Rol *</Label><Select value={editData.rolId} onValueChange={(value) => setEditData({ ...editData, rolId: value })}><SelectTrigger><SelectValue placeholder="Seleccionar rol" /></SelectTrigger><SelectContent>{rolesCatalogo.map((rol) => (<SelectItem key={rol.id} value={String(rol.id)}>{rol.nombre}</SelectItem>))}</SelectContent></Select></div>
+              <div className="space-y-2"><Label>Rol *</Label><Select value={editData.rolId} onValueChange={(value) => setEditData({ ...editData, rolId: value })} disabled={usuarioActual?.id === usuarioEditando?.id}><SelectTrigger><SelectValue placeholder="Seleccionar rol" /></SelectTrigger><SelectContent>{rolesCatalogo.map((rol) => (<SelectItem key={rol.id} value={String(rol.id)}>{rol.nombre}</SelectItem>))}</SelectContent></Select>{usuarioActual?.id === usuarioEditando?.id && <p className="text-xs text-muted-foreground">No puedes cambiar tu propio rol.</p>}</div>
               <div className="space-y-2"><Label>Organización *</Label><Select value={editData.institucion} onValueChange={(value) => setEditData({ ...editData, institucion: value })}><SelectTrigger><SelectValue placeholder="Seleccionar organización" /></SelectTrigger><SelectContent>{instituciones.map((institucion) => (<SelectItem key={institucion.id} value={String(institucion.id)}>{institucion.nombre}</SelectItem>))}</SelectContent></Select></div>
             </div>
-            <div className="flex justify-end gap-3"><Button type="button" variant="outline" onClick={closeEditModal}>Cancelar</Button><Button type="button" onClick={handleUpdateUsuario} disabled={savingEdit}>{savingEdit ? "Guardando..." : "Guardar cambios"}</Button></div>
+            <div className="flex justify-end gap-3"><Button type="button" variant="outline" onClick={closeEditModal}>Cancelar</Button><Button type="button" onClick={handleUpdateUsuario} disabled={savingEdit || !puedeEditarUsuarios}>{savingEdit ? "Guardando..." : "Guardar cambios"}</Button></div>
           </div>
         </DialogContent>
       </Dialog>

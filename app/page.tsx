@@ -21,6 +21,8 @@ import {
 } from "lucide-react"
 import Link from "next/link"
 import { useState, useEffect } from "react"
+import { useAuth } from "@/hooks/useAuth"
+import { getUserRoleLabel } from "@/lib/user-display"
 import {
   BarChart,
   Bar,
@@ -44,6 +46,7 @@ const MACROREGION_COLORS = {
 const ESTADO_COLORS = ["#2E7D32", "#0277BD", "#C8102E"]
 
 export default function DashboardPage() {
+  const { user } = useAuth()
   const stats = getStats()
   const proyectosPorMacroregion = getProyectosPorMacroregion()
   const actividadesPorEstado = getActividadesPorEstado()
@@ -67,6 +70,7 @@ export default function DashboardPage() {
 
   const [formattedDate, setFormattedDate] = useState<string>("")
   const [mounted, setMounted] = useState(false)
+  const displayRole = getUserRoleLabel(user)
 
   useEffect(() => {
     setMounted(true)
@@ -92,7 +96,7 @@ export default function DashboardPage() {
       {/* Welcome header */}
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-[#1A1A1A]">
-          Bienvenida, Secretaría Ejecutiva
+          Bienvenida, {displayRole}
         </h1>
         <p className="text-sm text-[#5C5C5C] capitalize">{formattedDate}</p>
       </div>

@@ -4,13 +4,14 @@ import { useEffect, useState, type FormEvent } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { AlertCircle, CheckCircle2, ChevronRight, Save } from "lucide-react"
+import { PermissionGuard } from "@/components/auth/permission-guard"
 import { AppLayout } from "@/components/layout/app-layout"
 import { Spinner } from "@/components/ui/spinner"
+import { useAuth } from "@/hooks/useAuth"
 import { api, ApiError } from "@/lib/api"
 import type {
   AsociarInstitucionesRequest,
   EjeTematico,
-  EstadoProyecto,
   Institucion,
   Macroregion,
   PageResponse,
@@ -19,7 +20,6 @@ import type {
   Territorio,
   UsuarioResponse,
 } from "@/lib/types"
-import { ESTADOS_PROYECTO } from "@/lib/project-status"
 import {
   Dialog,
   DialogContent,
@@ -48,7 +48,6 @@ interface FormState {
   idResponsablePrincipal: string
   fechaInicio: string
   fechaFinEstimada: string
-  estado: EstadoProyecto
   nivelPrioridad: string
   presupuesto: string
 }
@@ -65,7 +64,6 @@ const initialFormState: FormState = {
   idResponsablePrincipal: "",
   fechaInicio: "",
   fechaFinEstimada: "",
-  estado: "ACTIVO",
   nivelPrioridad: "",
   presupuesto: "",
 }
@@ -73,7 +71,13 @@ const initialFormState: FormState = {
 function toOptionalNumber(value: string): number | undefined {
   if (!value) return undefined
   const parsed = Number(value)
-  return Number.isNaN(parsed) ? undefined : parsed
+  return Number.isFinite(parsed) ? parsed : undefined
+}
+
+function isIsoDate(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false
+  const date = new Date(`${value}T00:00:00`)
+  return !Number.isNaN(date.getTime())
 }
 
 function nombreCompleto(usuario: UsuarioResponse): string {
@@ -101,8 +105,24 @@ function generarSiguienteCodigo(ultimoCodigo: string | null): string {
   return `PRY-${currentYear}-${String(lastSeq + 1).padStart(4, "0")}`
 }
 
+function getProyectoFormErrorMessage(error: unknown): string {
+  if (error instanceof ApiError) {
+    if (error.status === 403) {
+      return "No tienes permisos suficientes para registrar proyectos. Cierra sesión y vuelve a ingresar para actualizar tus permisos."
+    }
+    if (error.status === 400 && error.body?.message?.includes("JSON")) {
+      return "Revisa los campos del formulario. Alguna fecha o valor seleccionado no tiene un formato válido."
+    }
+    return error.body?.message ?? error.message
+  }
+  if (error instanceof Error) return error.message
+  return "No se pudo crear el proyecto"
+}
+
 export default function NuevoProyectoPage() {
   const router = useRouter()
+  const { loading: authLoading, hasPermission } = useAuth()
+  const puedeCrearProyectos = hasPermission("PROYECTOS_CREATE")
   const [formData, setFormData] = useState<FormState>(initialFormState)
   const [macroregiones, setMacroregiones] = useState<Macroregion[]>([])
   const [ejesTematicos, setEjesTematicos] = useState<EjeTematico[]>([])
@@ -122,6 +142,8 @@ export default function NuevoProyectoPage() {
   const [createdProjectId, setCreatedProjectId] = useState<number | null>(null)
 
   useEffect(() => {
+    if (authLoading || !puedeCrearProyectos) return
+
     let cancelled = false
 
     async function loadCatalogos() {
@@ -194,7 +216,7 @@ export default function NuevoProyectoPage() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [authLoading, puedeCrearProyectos])
 
   const updateField = <K extends keyof FormState>(field: K, value: FormState[K]) => {
     setFormData((current) => ({ ...current, [field]: value }))
@@ -243,7 +265,6 @@ export default function NuevoProyectoPage() {
       nombre: formData.nombre.trim(),
       codigoInterno: formData.codigoInterno.trim(),
       fechaInicio: formData.fechaInicio,
-      estado: formData.estado,
     }
 
     if (formData.descripcion.trim()) {
@@ -293,16 +314,25 @@ export default function NuevoProyectoPage() {
     }
     if (!formData.fechaInicio) {
       errors.fechaInicio = "La fecha de inicio es obligatoria"
+    } else if (!isIsoDate(formData.fechaInicio)) {
+      errors.fechaInicio = "La fecha de inicio no tiene un formato válido"
+    }
+    if (formData.fechaFinEstimada && !isIsoDate(formData.fechaFinEstimada)) {
+      errors.fechaFinEstimada = "La fecha de fin estimada no tiene un formato válido"
     }
     if (
       formData.fechaFinEstimada &&
       formData.fechaInicio &&
+      isIsoDate(formData.fechaFinEstimada) &&
+      isIsoDate(formData.fechaInicio) &&
       formData.fechaFinEstimada < formData.fechaInicio
     ) {
       errors.fechaFinEstimada =
         "La fecha de fin estimada no puede ser anterior a la fecha de inicio"
     }
-    if (formData.presupuesto && Number(formData.presupuesto) < 0) {
+    if (formData.presupuesto && !Number.isFinite(Number(formData.presupuesto))) {
+      errors.presupuesto = "El presupuesto debe ser un número válido"
+    } else if (formData.presupuesto && Number(formData.presupuesto) < 0) {
       errors.presupuesto = "El presupuesto no puede ser negativo"
     }
     return errors
@@ -360,13 +390,17 @@ export default function NuevoProyectoPage() {
       setCreatedProjectId(creado.id)
       setShowSuccessModal(true)
     } catch (err) {
-      const message =
-        err instanceof ApiError
-          ? err.message
-          : err instanceof Error
-            ? err.message
-            : "No se pudo crear el proyecto"
-      setError(message)
+      if (err instanceof ApiError && err.body?.fieldErrors?.length) {
+        const backendErrors: Record<string, string> = {}
+        err.body.fieldErrors.forEach((fieldError) => {
+          backendErrors[fieldError.field] = fieldError.message
+        })
+        setFieldErrors(backendErrors)
+        const firstField = err.body.fieldErrors[0]?.field
+        const el = firstField ? document.querySelector(`[data-field="${firstField}"]`) : null
+        el?.scrollIntoView({ behavior: "smooth", block: "start" })
+      }
+      setError(getProyectoFormErrorMessage(err))
     } finally {
       setSubmitting(false)
     }
@@ -374,6 +408,7 @@ export default function NuevoProyectoPage() {
 
   return (
     <AppLayout title="Nuevo Proyecto">
+      <PermissionGuard permiso="PROYECTOS_CREATE">
       <div className="mx-auto max-w-4xl space-y-6">
         <nav className="flex items-center gap-2 text-sm text-[#5C5C5C]">
           <Link href="/proyectos" className="hover:text-[#1A1A1A]">
@@ -824,19 +859,15 @@ export default function NuevoProyectoPage() {
                   <label className="mb-1.5 block text-xs font-medium text-[#5C5C5C]">
                     Estado inicial
                   </label>
-                  <select
-                    value={formData.estado}
-                    onChange={(event) =>
-                      updateField("estado", event.target.value as EstadoProyecto)
-                    }
-                    className="w-full rounded-lg border border-[#E0E0E0] px-4 py-2.5 text-sm text-[#1A1A1A] focus:border-[#FFD600] focus:outline-none focus:ring-1 focus:ring-[#FFD600]"
-                  >
-                    {ESTADOS_PROYECTO.map((estado) => (
-                      <option key={estado.value} value={estado.value}>
-                        {estado.label}
-                      </option>
-                    ))}
-                  </select>
+                  <input
+                    type="text"
+                    value="Activo"
+                    disabled
+                    className="w-full cursor-not-allowed rounded-lg border border-[#E0E0E0] bg-gray-50 px-4 py-2.5 text-sm text-[#5C5C5C] opacity-70"
+                  />
+                  <p className="mt-1 text-xs text-[#9CA3AF]">
+                    Asignado automáticamente
+                  </p>
                 </div>
                 <div>
                   <label className="mb-1.5 block text-xs font-medium text-[#5C5C5C]">
@@ -934,6 +965,7 @@ export default function NuevoProyectoPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      </PermissionGuard>
     </AppLayout>
   )
 }

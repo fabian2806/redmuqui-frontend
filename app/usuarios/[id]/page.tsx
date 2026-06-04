@@ -3,6 +3,7 @@
 import { use, useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { AppLayout } from "@/components/layout/app-layout"
+import { PermissionGuard } from "@/components/auth/permission-guard"
 import { Card, CardContent, CardHeader } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -10,6 +11,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { api } from "@/lib/api"
+import { useAuth } from "@/hooks/useAuth"
 import { formatPermiso, getPermisoTexto } from "@/lib/permissions"
 import type { BitacoraResponse, EquipoMember, PageResponse, Permiso, ProyectoResponse, UsuarioResponse } from "@/lib/types"
 import {
@@ -28,6 +30,8 @@ import {
 
 export default function UsuarioDetallePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params)
+  const { loading: authLoading, hasPermission } = useAuth()
+  const puedeVerUsuarios = hasPermission("USUARIOS_READ")
   const [usuario, setUsuario] = useState<UsuarioResponse | null>(null)
   const [permisos, setPermisos] = useState<Permiso[]>([])
   const [proyectosUsuario, setProyectosUsuario] = useState<ProyectoResponse[]>([])
@@ -36,6 +40,8 @@ export default function UsuarioDetallePage({ params }: { params: Promise<{ id: s
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
+    if (authLoading || !puedeVerUsuarios) return
+
     let cancelado = false
 
     const cargarDetalle = async () => {
@@ -107,10 +113,20 @@ export default function UsuarioDetallePage({ params }: { params: Promise<{ id: s
     return () => {
       cancelado = true
     }
-  }, [id])
+  }, [id, authLoading, puedeVerUsuarios])
 
   const nombreCompleto = usuario ? getNombreCompleto(usuario) : ""
   const descripcionRol = useMemo(() => getRolDescripcion(usuario?.nombreRol ?? ""), [usuario?.nombreRol])
+
+  if (!authLoading && !puedeVerUsuarios) {
+    return (
+      <AppLayout>
+        <PermissionGuard permiso="USUARIOS_READ">
+          <div />
+        </PermissionGuard>
+      </AppLayout>
+    )
+  }
 
   if (cargando) {
     return (

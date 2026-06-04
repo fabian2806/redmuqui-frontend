@@ -6,11 +6,8 @@
 // los cambios se propagan a todos los demás (header, sidebar, páginas).
 //
 // Modos:
-//   - "mock"  (default Sprint 1): admin hardcodeado. login() no toca
-//             el backend. Permite a los squads avanzar sin esperar a
-//             que squad Auth termine la Fase A.
-//   - "real": login real contra el backend + carga de /usuarios/me.
-//             Activar con NEXT_PUBLIC_AUTH_MODE=real en .env.local.
+//   - "real" (default): login real contra el backend + carga de /usuarios/me.
+//   - "mock": admin hardcodeado solo para prototipos locales.
 // =====================================================================
 
 "use client"
@@ -24,13 +21,14 @@ import {
 } from "react"
 import { api, ApiError } from "@/lib/api"
 import {
+  clearTokens,
   login as authLogin,
   logout as authLogout,
   isAuthenticated as hasToken,
 } from "@/lib/auth"
 import type { LoginRequest, UsuarioResponse } from "@/lib/types"
 
-const AUTH_MODE = (process.env.NEXT_PUBLIC_AUTH_MODE ?? "mock") as "mock" | "real"
+const AUTH_MODE = (process.env.NEXT_PUBLIC_AUTH_MODE ?? "real") as "mock" | "real"
 
 const MOCK_ADMIN: UsuarioResponse = {
   id: 1,
@@ -47,6 +45,53 @@ const MOCK_ADMIN: UsuarioResponse = {
   idInstitucion: null,
   ultimoAcceso: null,
   permisos: ["*"], // wildcard: admin tiene todos
+}
+
+const ROLE_PERMISSIONS: Record<string, string[]> = {
+  ADMINISTRADOR: ["*"],
+  TECNICO: [
+    "CATALOGOS_READ",
+    "PROYECTOS_READ",
+    "PROYECTOS_CREATE",
+    "PROYECTOS_UPDATE",
+    "DOCUMENTOS_READ",
+    "DOCUMENTOS_CREATE",
+    "DOCUMENTOS_UPDATE",
+    "BITACORA_READ",
+    "REPORTES_READ",
+  ],
+  COORDINADOR: [
+    "USUARIOS_READ",
+    "CATALOGOS_READ",
+    "PROYECTOS_READ",
+    "PROYECTOS_CREATE",
+    "PROYECTOS_UPDATE",
+    "DOCUMENTOS_READ",
+    "DOCUMENTOS_CREATE",
+    "DOCUMENTOS_UPDATE",
+    "DOCUMENTOS_VALIDATE",
+    "BITACORA_READ",
+    "REPORTES_READ",
+    "REPORTES_EXPORT",
+  ],
+  CONSULTOR: [
+    "CATALOGOS_READ",
+    "PROYECTOS_READ",
+    "DOCUMENTOS_READ",
+    "REPORTES_READ",
+  ],
+}
+
+function normalizeRol(rol: string | null | undefined) {
+  return (rol ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toUpperCase()
+}
+
+function getFallbackPermissions(nombreRol: string | null | undefined) {
+  const normalized = normalizeRol(nombreRol)
+  return ROLE_PERMISSIONS[normalized] ?? []
 }
 
 export interface AuthContextValue {
@@ -83,6 +128,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (!cancelled) setUser(data)
       })
       .catch(() => {
+        clearTokens()
         if (!cancelled) setUser(null)
       })
       .finally(() => {
@@ -105,8 +151,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUser(me)
     } catch (err) {
       if (err instanceof ApiError) {
-        // /usuarios/me todavía no implementado: dejar user mínimo.
-        setUser({ ...MOCK_ADMIN, email: credentials.email })
+        // Si no se puede cargar el usuario real, no concedemos acceso.
+        clearTokens()
+        throw err
       } else {
         throw err
       }
@@ -126,8 +173,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const hasPermission = useCallback(
     (permiso: string) => {
       if (!user) return false
-      if (!user.permisos || user.permisos.length === 0) return false
-      if (user.permisos.includes("*")) return true
+      if (user.permisos?.includes("*")) return true
+      if (!user.permisos || user.permisos.length === 0) {
+        const fallbackPermissions = getFallbackPermissions(user.nombreRol)
+        return fallbackPermissions.includes("*") || fallbackPermissions.includes(permiso)
+      }
       return user.permisos.includes(permiso)
     },
     [user],
