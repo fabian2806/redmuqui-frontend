@@ -753,6 +753,8 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
       await api.post<void>(`/proyectos/${id}/instituciones`, institucionesPayload)
       actualizado = await api.get<ProyectoResponse>(`/proyectos/${id}`)
       setApiProyecto(actualizado)
+      setAvanceDirecto(String(actualizado.porcentajeAvance ?? porcentajeAvance))
+      prepararFormularioEdicionProyecto(actualizado)
       setEditModalOpen(false)
       setEditSuccessModalOpen(true)
     } catch (error) {
