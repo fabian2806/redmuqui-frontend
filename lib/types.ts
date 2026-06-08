@@ -211,6 +211,7 @@ export interface SubactividadCreate {
   mujeresInvolucradas?: number
   fechaInicio?: string
   fechaFin?: string
+  estado?: EstadoActividad
   descripcion?: string
 }
 
@@ -228,6 +229,7 @@ export interface SubactividadResponse {
   mujeresInvolucradas?: number
   fechaInicio?: string
   fechaFin?: string
+  estado?: EstadoActividad
   descripcion?: string
   archivosEvidencia?: SubactividadArchivoResponse[]
   cofinanciadoPor?: SubactividadCofinanciamientoResponse[]
@@ -242,6 +244,8 @@ export interface ActividadResponse {
   estado: EstadoActividad
   porcentajeAvance: number | null
   idProyecto: number
+  idHito: number | null
+  nombreHito: string | null
   idResponsables: number[]
   subactividades?: SubactividadResponse[]
 }
@@ -253,6 +257,7 @@ export interface ActividadCreate {
   fechaFin?: string
   estado?: EstadoActividad
   idProyecto: number
+  idHito: number
   idResponsables?: number[]
 }
 
@@ -267,6 +272,12 @@ export interface HitoResponse {
   fechaClave: string
   estado: EstadoHito
   idProyecto: number
+  porcentajeAvance: number
+  fechaInicio: string | null
+  fechaFin: string | null
+  duracionDias: number
+  totalActividades: number
+  actividadesFinalizadas: number
   fechaCreacion?: string | null
   fechaModificacion?: string | null
 }

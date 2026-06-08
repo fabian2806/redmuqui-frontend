@@ -5,6 +5,7 @@ import { PermissionGuard } from "@/components/auth/permission-guard"
 import { AppLayout } from "@/components/layout/app-layout"
 import { StatusBadge, MacroregionBadge, TypeBadge } from "@/components/ui/status-badge"
 import { ProgressBar } from "@/components/ui/progress-bar"
+import { ProjectGantt } from "@/components/projects/project-gantt"
 import {
   getProyectoById,
   getHitosByProyecto,
@@ -75,9 +76,15 @@ type HitoDetalle = {
   fecha: string
   estado: HitoEstadoUi
   descripcion: string
+  porcentajeAvance: number
+  fechaInicio: string | null
+  fechaFin: string | null
+  duracionDias: number
+  totalActividades: number
+  actividadesFinalizadas: number
   fuenteDatos: "api" | "mock" | "local"
 }
-type HitoForm = Omit<HitoDetalle, "id" | "proyectoId" | "fuenteDatos">
+type HitoForm = Pick<HitoDetalle, "nombre" | "fecha" | "estado" | "descripcion">
 type ProyectoDetalle = Omit<ProyectoMock, "macroregion" | "ejeTematico" | "estado"> & {
   macroregion: string
   macroregiones?: MacroregionRef[]
@@ -87,6 +94,7 @@ type ProyectoDetalle = Omit<ProyectoMock, "macroregion" | "ejeTematico" | "estad
 }
 
 const DIAS_ALERTA_ACTIVIDAD = 15
+const ACTIVIDADES_POR_PAGINA = 15
 
 function parseLocalDate(date: string): Date {
   return new Date(`${date}T00:00:00`)
@@ -108,6 +116,15 @@ function formatLocalDate(date: string | null | undefined): string {
   const [year, month, day] = date.split("-")
   if (!year || !month || !day) return date
   return `${day}/${month}/${year}`
+}
+
+function formatPercent(value: number | null | undefined, decimals = 1): string {
+  const safeValue = Number.isFinite(Number(value)) ? Number(value) : 0
+  return `${safeValue.toFixed(decimals)}%`
+}
+
+function getActividadAvance(actividad: { porcentajeAvance?: number | null; estado: string }): number {
+  return actividad.porcentajeAvance ?? (actividad.estado === "FINALIZADA" ? 100 : 0)
 }
 
 function normalizeSearch(value: string): string {
@@ -300,6 +317,12 @@ function hitoDesdeApi(hito: HitoResponse): HitoDetalle {
     fecha: hito.fechaClave,
     estado: estadoHitoDesdeApi(hito.estado),
     descripcion: hito.descripcion ?? "",
+    porcentajeAvance: hito.porcentajeAvance ?? 0,
+    fechaInicio: hito.fechaInicio,
+    fechaFin: hito.fechaFin,
+    duracionDias: hito.duracionDias ?? 0,
+    totalActividades: hito.totalActividades ?? 0,
+    actividadesFinalizadas: hito.actividadesFinalizadas ?? 0,
     fuenteDatos: "api",
   }
 }
@@ -316,6 +339,12 @@ function hitoDesdeMock(hito: HitoMock): HitoDetalle {
     ...hito,
     estado,
     descripcion: "",
+    porcentajeAvance: estado === "Finalizado" ? 100 : 0,
+    fechaInicio: null,
+    fechaFin: null,
+    duracionDias: 0,
+    totalActividades: 0,
+    actividadesFinalizadas: 0,
     fuenteDatos: "mock",
   }
 }
@@ -374,9 +403,6 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
   const [territorioSearch, setTerritorioSearch] = useState("")
   const [institucionSearch, setInstitucionSearch] = useState("")
   const [responsableSearch, setResponsableSearch] = useState("")
-  const [avanceDirecto, setAvanceDirecto] = useState("0")
-  const [avanceSubmitting, setAvanceSubmitting] = useState(false)
-  const [avanceError, setAvanceError] = useState<string | null>(null)
   const [editFormProyecto, setEditFormProyecto] = useState({
     nombre: "",
     codigoInterno: "",
@@ -427,6 +453,7 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
     fechaInicio: "",
     fechaFin: "",
     idResponsables: [] as number[],
+    idHito: "",
     estado: "PENDIENTE" as string,
   })
 
@@ -441,6 +468,7 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
     fechaFin: "",
     estado: "PENDIENTE" as EstadoActividad,
     idResponsables: [] as number[],
+    idHito: "",
   })
   const [editActFieldErrors, setEditActFieldErrors] = useState<Record<string, string>>({})
   const [editActSuccessModalOpen, setEditActSuccessModalOpen] = useState(false)
@@ -458,6 +486,7 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
     mujeresInvolucradas: "",
     fechaInicio: "",
     fechaFin: "",
+    estado: "PENDIENTE" as EstadoActividad,
     descripcion: "",
   })
   const [subactFieldErrors, setSubactFieldErrors] = useState<Record<string, string>>({})
@@ -476,6 +505,7 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
     mujeresInvolucradas: "",
     fechaInicio: "",
     fechaFin: "",
+    estado: "PENDIENTE" as EstadoActividad,
     descripcion: "",
   })
   const [editSubactFieldErrors, setEditSubactFieldErrors] = useState<Record<string, string>>({})
@@ -489,6 +519,11 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
   const [confirmDeleteInput, setConfirmDeleteInput] = useState("")
   const [confirmDeleteParentId, setConfirmDeleteParentId] = useState<number | null>(null)
   const [expandedRespAct, setExpandedRespAct] = useState<Set<number>>(new Set())
+  const [expandedSubacts, setExpandedSubacts] = useState<Set<number>>(new Set())
+  const [expandedHitos, setExpandedHitos] = useState<Set<string>>(new Set())
+  const [actividadHitoFilter, setActividadHitoFilter] = useState("todos")
+  const [actividadEstadoFilter, setActividadEstadoFilter] = useState("todos")
+  const [actividadPage, setActividadPage] = useState(1)
 
   const prepararFormularioEdicionProyecto = (proyectoApi: ProyectoResponse) => {
     setEditError(null)
@@ -545,28 +580,6 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
     }))
   }
 
-  const guardarAvanceProyecto = async () => {
-    if (!apiProyecto) return
-    const porcentajeAvance = Number(avanceDirecto)
-    if (!Number.isFinite(porcentajeAvance) || porcentajeAvance < 0 || porcentajeAvance > 100) {
-      setAvanceError("El avance debe estar entre 0 y 100.")
-      return
-    }
-
-    setAvanceSubmitting(true)
-    setAvanceError(null)
-    try {
-      const actualizado = await api.patch<ProyectoResponse>(`/proyectos/${id}/avance?porcentajeAvance=${porcentajeAvance}`)
-      setApiProyecto(actualizado)
-      setAvanceDirecto(String(actualizado.porcentajeAvance ?? porcentajeAvance))
-      prepararFormularioEdicionProyecto(actualizado)
-    } catch (error) {
-      setAvanceError(getApiErrorMessage(error))
-    } finally {
-      setAvanceSubmitting(false)
-    }
-  }
-
   const validarEditForm = (): Record<string, string> => {
     const errors: Record<string, string> = {}
     if (!editFormProyecto.nombre.trim()) {
@@ -607,6 +620,9 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
     if (!actForm.nombre.trim()) {
       errors["act-nombre"] = "El nombre de la actividad es obligatorio"
     }
+    if (!actForm.idHito) {
+      errors["act-idHito"] = "Selecciona el hito al que pertenece la actividad"
+    }
     if (actForm.idResponsables.length === 0) {
       errors["act-idResponsables"] = "Selecciona al menos un responsable"
     }
@@ -634,6 +650,9 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
     const errors: Record<string, string> = {}
     if (!editForm.nombre.trim()) {
       errors["edit-nombre"] = "El nombre de la actividad es obligatorio"
+    }
+    if (!editForm.idHito) {
+      errors["edit-idHito"] = "Selecciona el hito al que pertenece la actividad"
     }
     if (editForm.idResponsables.length === 0) {
       errors["edit-idResponsables"] = "Selecciona al menos un responsable"
@@ -753,7 +772,6 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
       await api.post<void>(`/proyectos/${id}/instituciones`, institucionesPayload)
       actualizado = await api.get<ProyectoResponse>(`/proyectos/${id}`)
       setApiProyecto(actualizado)
-      setAvanceDirecto(String(actualizado.porcentajeAvance ?? porcentajeAvance))
       prepararFormularioEdicionProyecto(actualizado)
       setEditModalOpen(false)
       setEditSuccessModalOpen(true)
@@ -805,7 +823,6 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
         }
         if (!cancelled) {
           setApiProyecto(data)
-          setAvanceDirecto(String(data.porcentajeAvance ?? 0))
           prepararFormularioEdicionProyecto(data)
           setApiActividades(acts)
           setUsuariosSistema(users.content)
@@ -898,6 +915,22 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
     return () => { cancelled = true }
   }, [id, authLoading, puedeVerProyectos, puedeVerUsuarios])
 
+  const sincronizarAvancePlan = async () => {
+    try {
+      const [proyectoActualizado, hitosActualizados, actividadesActualizadas] = await Promise.all([
+        api.get<ProyectoResponse>(`/proyectos/${id}`),
+        api.get<HitoResponse[] | { content: HitoResponse[] }>(`/proyectos/${id}/hitos`),
+        api.get<PageResponse<ActividadResponse>>("/actividades?proyectoId=" + id + "&size=100"),
+      ])
+      setApiProyecto(proyectoActualizado)
+      const listaHitos = Array.isArray(hitosActualizados) ? hitosActualizados : hitosActualizados.content
+      setHitosState(listaHitos.map(hitoDesdeApi))
+      setActividadesApi(actividadesActualizadas.content)
+    } catch (error) {
+      setHitosError(`La operación se guardó, pero no se pudo actualizar el resumen: ${getApiErrorMessage(error)}`)
+    }
+  }
+
   const abrirNuevoHito = () => {
     setHitoForm(hitoFormInicial)
     setEditHito(null)
@@ -954,7 +987,7 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
           setHitosState(prev => [...prev, hitoDesdeApi(creado)])
         } catch (error) {
           const newId = `hito-${Date.now()}`
-          setHitosState(prev => [...prev, { id: newId, proyectoId: id, ...hitoForm, fuenteDatos: "local" }])
+          setHitosState(prev => [...prev, { id: newId, proyectoId: id, ...hitoForm, porcentajeAvance: 0, fechaInicio: null, fechaFin: null, duracionDias: 0, totalActividades: 0, actividadesFinalizadas: 0, fuenteDatos: "local" }])
           setHitosError(`Hito guardado solo en esta sesion: ${getApiErrorMessage(error)}`)
         }
       }
@@ -995,6 +1028,7 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
       setActividadesApi(prev => prev.filter(a => String(a.id) !== confirmDeleteId))
       try {
         await api.delete<void>(`/actividades/${confirmDeleteId}`)
+        await sincronizarAvancePlan()
       } catch (error) {
         setActividadesApi(previous)
         setActividadesError(getApiErrorMessage(error))
@@ -1006,6 +1040,7 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
       setActividadesApi(prev => prev.map(a => a.id === parentId ? { ...a, subactividades: (a.subactividades || []).filter(s => String(s.id) !== confirmDeleteId) } : a))
       try {
         await api.delete<void>(`/actividades/${parentId}/subactividades/${confirmDeleteId}`)
+        await sincronizarAvancePlan()
       } catch (error) {
         setActividadesApi(previous)
         setActividadesError(getApiErrorMessage(error))
@@ -1057,6 +1092,31 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
       alertaVencimiento: getAlertaVencimientoActividad(actividad),
     })
     )
+
+  const actividadesFiltradas = actividadesConAlertas.filter(actividad => {
+    const coincideHito = actividadHitoFilter === "todos" || String(actividad.idHito ?? "sin-hito") === actividadHitoFilter
+    const coincideEstado = actividadEstadoFilter === "todos" || actividad.estado === actividadEstadoFilter
+    return coincideHito && coincideEstado
+  })
+
+  const totalActividadPages = Math.max(1, Math.ceil(actividadesFiltradas.length / ACTIVIDADES_POR_PAGINA))
+  const actividadPageSafe = Math.min(actividadPage, totalActividadPages)
+  const actividadesPaginadas = actividadesFiltradas.slice(
+    (actividadPageSafe - 1) * ACTIVIDADES_POR_PAGINA,
+    actividadPageSafe * ACTIVIDADES_POR_PAGINA,
+  )
+  const actividadRangeStart = actividadesFiltradas.length === 0 ? 0 : (actividadPageSafe - 1) * ACTIVIDADES_POR_PAGINA + 1
+  const actividadRangeEnd = Math.min(actividadPageSafe * ACTIVIDADES_POR_PAGINA, actividadesFiltradas.length)
+
+  const navegarADetalleActividad = (actividadId: number, hitoId: string) => {
+    const actividadesDelHito = actividadesConAlertas.filter(actividad => String(actividad.idHito ?? "sin-hito") === hitoId)
+    const index = actividadesDelHito.findIndex(actividad => actividad.id === actividadId)
+    setActividadHitoFilter(hitoId)
+    setActividadEstadoFilter("todos")
+    setActividadPage(index >= 0 ? Math.floor(index / ACTIVIDADES_POR_PAGINA) + 1 : 1)
+    setExpandedSubacts(prev => new Set(prev).add(actividadId))
+    setActiveTab("actividades")
+  }
 
   const actividadesVencidas = actividadesConAlertas.filter(
     (actividad) => actividad.alertaVencimiento?.tipo === "vencida",
@@ -1121,8 +1181,8 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
 
   const tabs = [
     { id: "resumen" as TabType, label: "Resumen" },
-    { id: "actividades" as TabType, label: "Actividades" },
     { id: "hitos" as TabType, label: "Hitos y Cronograma" },
+    { id: "actividades" as TabType, label: "Actividades" },
     { id: "informes" as TabType, label: "Informes y Productos" },
     { id: "equipo" as TabType, label: "Equipo" },
     { id: "bitacora" as TabType, label: "Bitácora" },
@@ -1197,7 +1257,7 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                       <div className="grid gap-2" data-field="edit-fechaFinEstimada"><Label>Fecha de fin estimada</Label><Input type="date" value={editFormProyecto.fechaFinEstimada} onChange={e => { const v = e.target.value; setEditFormProyecto(f => ({ ...f, fechaFinEstimada: v })); setEditFieldErrors(p => { const { "edit-fechaFinEstimada": _, ...r } = p; if (v && editFormProyecto.fechaInicio && v < editFormProyecto.fechaInicio) { r["edit-fechaFinEstimada"] = "La fecha de fin estimada no puede ser anterior a la fecha de inicio" }; return r }) }} className={editFieldErrors["edit-fechaFinEstimada"] ? "border-[#C8102E]" : ""} />{editFieldErrors["edit-fechaFinEstimada"] && <p className="text-xs text-[#C8102E]">{editFieldErrors["edit-fechaFinEstimada"]}</p>}<div className="min-h-5"></div></div>
                       <div className="grid gap-2"><Label>Estado <span className="text-[#C8102E]">*</span></Label><Select value={editFormProyecto.estado} onValueChange={v => setEditFormProyecto(f => ({ ...f, estado: v as EstadoProyecto }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{ESTADOS_PROYECTO.map(estado => <SelectItem key={estado.value} value={estado.value}>{estado.label}</SelectItem>)}</SelectContent></Select><div className="min-h-5"></div></div>
                       <div className="grid gap-2"><Label>Prioridad</Label><Select value={editFormProyecto.nivelPrioridad || "sin-prioridad"} onValueChange={v => setEditFormProyecto(f => ({ ...f, nivelPrioridad: v === "sin-prioridad" ? "" : v }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{PRIORIDADES_PROYECTO.map(prioridad => <SelectItem key={prioridad.value || "sin-prioridad"} value={prioridad.value || "sin-prioridad"}>{prioridad.label}</SelectItem>)}</SelectContent></Select><div className="min-h-5"></div></div>
-                      <div className="grid gap-2" data-field="edit-porcentajeAvance"><Label>Avance (%) <span className="text-[#C8102E]">*</span></Label><Input type="number" min="0" max="100" step="1" value={editFormProyecto.porcentajeAvance} onChange={e => { const v = e.target.value; setEditFormProyecto(f => ({ ...f, porcentajeAvance: v })); setEditFieldErrors(p => { const { "edit-porcentajeAvance": _, ...r } = p; const pct = Number(v); if (v && (!Number.isFinite(pct) || pct < 0 || pct > 100)) { r["edit-porcentajeAvance"] = "El porcentaje de avance debe estar entre 0 y 100" }; return r }) }} className={editFieldErrors["edit-porcentajeAvance"] ? "border-[#C8102E]" : ""} />{editFieldErrors["edit-porcentajeAvance"] && <p className="text-xs text-[#C8102E]">{editFieldErrors["edit-porcentajeAvance"]}</p>}<div className="min-h-5"></div></div>
+                      <div className="grid gap-2" data-field="edit-porcentajeAvance"><Label>Avance calculado (%)</Label><Input type="number" value={editFormProyecto.porcentajeAvance} disabled /><p className="text-xs text-[#777]">Se calcula según la duración y finalización de hitos y actividades.</p></div>
                       <div className="grid gap-2" data-field="edit-presupuesto"><Label>Presupuesto</Label><Input type="number" min="0" step="0.01" value={editFormProyecto.presupuesto} onChange={e => { const v = e.target.value; setEditFormProyecto(f => ({ ...f, presupuesto: v })); setEditFieldErrors(p => { const { "edit-presupuesto": _, ...r } = p; if (v && Number(v) < 0) { r["edit-presupuesto"] = "El presupuesto no puede ser negativo" }; return r }) }} className={editFieldErrors["edit-presupuesto"] ? "border-[#C8102E]" : ""} />{editFieldErrors["edit-presupuesto"] && <p className="text-xs text-[#C8102E]">{editFieldErrors["edit-presupuesto"]}</p>}<div className="min-h-5"></div></div>
                     </div>
                   </section>
@@ -1420,7 +1480,7 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                         <span className="text-xs text-[#5C5C5C]">Sincronizando...</span>
                       )}
                     </div>
-                    <Dialog open={createActividadOpen} onOpenChange={(open) => { setCreateActividadOpen(open); if (open) { setActForm({ nombre: "", descripcion: "", fechaInicio: "", fechaFin: "", idResponsables: [], estado: "PENDIENTE" }); setActFieldErrors({}); setActResponsableSearch("") } }}>
+                    <Dialog open={createActividadOpen} onOpenChange={(open) => { setCreateActividadOpen(open); if (open) { setActForm({ nombre: "", descripcion: "", fechaInicio: "", fechaFin: "", idResponsables: [], idHito: "", estado: "PENDIENTE" }); setActFieldErrors({}); setActResponsableSearch("") } }}>
                       <DialogTrigger asChild>
                         <button className="flex items-center gap-2 rounded-lg bg-[#FFD600] px-3 py-1.5 text-xs font-bold text-[#1A1A1A] hover:bg-[#C9A42B]">
                           <Plus className="h-3.5 w-3.5" />
@@ -1479,6 +1539,15 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                             </div>
                             {actFieldErrors["act-idResponsables"] && <p className="text-xs text-[#C8102E]">{actFieldErrors["act-idResponsables"]}</p>}
                           </div>
+                          <div className="grid gap-2" data-field="act-idHito">
+                            <Label>Hito relacionado <span className="text-[#C8102E]">*</span></Label>
+                            <Select value={actForm.idHito} onValueChange={value => { setActForm(f => ({ ...f, idHito: value })); setActFieldErrors(prev => { const { "act-idHito": _, ...rest } = prev; return rest }) }}>
+                              <SelectTrigger className={actFieldErrors["act-idHito"] ? "border-[#C8102E]" : ""}><SelectValue placeholder="Selecciona un hito" /></SelectTrigger>
+                              <SelectContent>{hitosState.filter(h => h.fuenteDatos === "api").map(hito => <SelectItem key={hito.id} value={hito.id}>{hito.nombre}</SelectItem>)}</SelectContent>
+                            </Select>
+                            {actFieldErrors["act-idHito"] && <p className="text-xs text-[#C8102E]">{actFieldErrors["act-idHito"]}</p>}
+                            {hitosState.filter(h => h.fuenteDatos === "api").length === 0 && <p className="text-xs text-[#8A6D00]">Primero registra un hito en “Hitos y Cronograma”.</p>}
+                          </div>
                           <div className="grid gap-2">
                             <Label>Estado</Label>
                             <Select value={actForm.estado} onValueChange={v => setActForm(f => ({ ...f, estado: v }))}>
@@ -1528,10 +1597,12 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                                   fechaFin: actForm.fechaFin || undefined,
                                   estado: actForm.estado as EstadoActividad,
                                   idProyecto: Number(id),
+                                  idHito: Number(actForm.idHito),
                                   idResponsables: actForm.idResponsables.length > 0 ? actForm.idResponsables : undefined,
                                 })
                                 setActividadesApi(prev => [...prev, creada])
-                                setActForm({ nombre: "", descripcion: "", fechaInicio: "", fechaFin: "", idResponsables: [], estado: "PENDIENTE" })
+                                await sincronizarAvancePlan()
+                                setActForm({ nombre: "", descripcion: "", fechaInicio: "", fechaFin: "", idResponsables: [], idHito: "", estado: "PENDIENTE" })
                                 setCreateActividadOpen(false)
                                 setActSuccessModalOpen(true)
                               } catch (err) {
@@ -1622,6 +1693,14 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                           </div>
                           {editActFieldErrors["edit-idResponsables"] && <p className="text-xs text-[#C8102E]">{editActFieldErrors["edit-idResponsables"]}</p>}
                         </div>
+                        <div className="grid gap-2" data-field="edit-idHito">
+                          <Label>Hito relacionado <span className="text-[#C8102E]">*</span></Label>
+                          <Select value={editForm.idHito} onValueChange={value => { setEditForm(f => ({ ...f, idHito: value })); setEditActFieldErrors(prev => { const { "edit-idHito": _, ...rest } = prev; return rest }) }}>
+                            <SelectTrigger className={editActFieldErrors["edit-idHito"] ? "border-[#C8102E]" : ""}><SelectValue placeholder="Selecciona un hito" /></SelectTrigger>
+                            <SelectContent>{hitosState.filter(h => h.fuenteDatos === "api").map(hito => <SelectItem key={hito.id} value={hito.id}>{hito.nombre}</SelectItem>)}</SelectContent>
+                          </Select>
+                          {editActFieldErrors["edit-idHito"] && <p className="text-xs text-[#C8102E]">{editActFieldErrors["edit-idHito"]}</p>}
+                        </div>
                         <div className="grid gap-2">
                           <Label htmlFor="edit-estado">Estado</Label>
                           <Select value={editForm.estado} onValueChange={v => setEditForm(f => ({ ...f, estado: v as EstadoActividad }))}>
@@ -1671,9 +1750,11 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                                 fechaFin: editForm.fechaFin || undefined,
                                 estado: editForm.estado,
                                 idProyecto: editingActividad.idProyecto,
+                                idHito: Number(editForm.idHito),
                                 idResponsables: editForm.idResponsables.length > 0 ? editForm.idResponsables : undefined,
                               })
                               setActividadesApi(prev => prev.map(a => a.id === actualizada.id ? actualizada : a))
+                              await sincronizarAvancePlan()
                               setEditActividadOpen(false)
                               setEditingActividad(null)
                               setEditActSuccessModalOpen(true)
@@ -1712,7 +1793,7 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                   </Dialog>
 
                   {/* ── CREAR SUBACTIVIDAD ── */}
-                  <Dialog open={createSubactOpen} onOpenChange={(open) => { setCreateSubactOpen(open); if (open) { setSubactForm({ nombre: "", idResponsable: "", presupuesto: "", hombresInvolucrados: "", mujeresInvolucradas: "", fechaInicio: "", fechaFin: "", descripcion: "" }); setSubactFieldErrors({}); setSubactResponsableSearch("") } }}>
+                  <Dialog open={createSubactOpen} onOpenChange={(open) => { setCreateSubactOpen(open); if (open) { setSubactForm({ nombre: "", idResponsable: "", presupuesto: "", hombresInvolucrados: "", mujeresInvolucradas: "", fechaInicio: "", fechaFin: "", estado: "PENDIENTE", descripcion: "" }); setSubactFieldErrors({}); setSubactResponsableSearch("") } }}>
                     <DialogContent className="overflow-y-auto sm:max-w-lg">
                       <DialogHeader>
                         <DialogTitle>Nueva Subactividad</DialogTitle>
@@ -1778,6 +1859,19 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                               {subactFieldErrors["sub-fin"] && <p className="text-xs text-[#C8102E]">{subactFieldErrors["sub-fin"]}</p>}
                             </div>
                           </div>
+                          <div className="grid gap-2">
+                            <Label htmlFor="sub-estado">Estado</Label>
+                            <Select value={subactForm.estado} onValueChange={value => setSubactForm(f => ({ ...f, estado: value as EstadoActividad }))}>
+                              <SelectTrigger id="sub-estado">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="PENDIENTE">Pendiente</SelectItem>
+                                <SelectItem value="EN_CURSO">En curso</SelectItem>
+                                <SelectItem value="FINALIZADA">Finalizada</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
                           <div className="grid grid-cols-3 gap-4">
                             <div className="grid gap-2" data-field="sub-presu">
                               <Label htmlFor="sub-presu">Presupuesto (S/)</Label>
@@ -1820,13 +1914,15 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                                   mujeresInvolucradas: subactForm.mujeresInvolucradas ? Number(subactForm.mujeresInvolucradas) : undefined,
                                   fechaInicio: subactForm.fechaInicio || undefined,
                                   fechaFin: subactForm.fechaFin || undefined,
+                                  estado: subactForm.estado,
                                   descripcion: subactForm.descripcion.trim() || undefined,
                                 }
                                 const creada = await api.post<SubactividadResponse>(`/actividades/${targetActividadId}/subactividades`, nuevaSub)
                                 setActividadesApi(prev => prev.map(a => a.id === targetActividadId ? { ...a, subactividades: [...(a.subactividades || []), creada] } : a))
+                                await sincronizarAvancePlan()
                                 setCreateSubactOpen(false)
                                 setSubactForm({
-                                  nombre: "", idResponsable: "", presupuesto: "", hombresInvolucrados: "", mujeresInvolucradas: "", fechaInicio: "", fechaFin: "", descripcion: ""
+                                  nombre: "", idResponsable: "", presupuesto: "", hombresInvolucrados: "", mujeresInvolucradas: "", fechaInicio: "", fechaFin: "", estado: "PENDIENTE", descripcion: ""
                                 })
                                 setSubactSuccessModalOpen(true)
                               } catch (err) {
@@ -1910,6 +2006,19 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                               {editSubactFieldErrors["edit-sub-fin"] && <p className="text-xs text-[#C8102E]">{editSubactFieldErrors["edit-sub-fin"]}</p>}
                             </div>
                           </div>
+                          <div className="grid gap-2">
+                            <Label htmlFor="edit-sub-estado">Estado</Label>
+                            <Select value={editSubactForm.estado} onValueChange={value => setEditSubactForm(f => ({ ...f, estado: value as EstadoActividad }))}>
+                              <SelectTrigger id="edit-sub-estado">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="PENDIENTE">Pendiente</SelectItem>
+                                <SelectItem value="EN_CURSO">En curso</SelectItem>
+                                <SelectItem value="FINALIZADA">Finalizada</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
                           <div className="grid grid-cols-3 gap-4">
                             <div className="grid gap-2" data-field="edit-sub-presu">
                               <Label htmlFor="edit-sub-presu">Presupuesto (S/)</Label>
@@ -1955,12 +2064,14 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                                   mujeresInvolucradas: editSubactForm.mujeresInvolucradas ? Number(editSubactForm.mujeresInvolucradas) : undefined,
                                   fechaInicio: editSubactForm.fechaInicio || undefined,
                                   fechaFin: editSubactForm.fechaFin || undefined,
+                                  estado: editSubactForm.estado,
                                   descripcion: editSubactForm.descripcion.trim() || undefined,
                                 })
                                 setActividadesApi(prev => prev.map(a => a.id === actId ? {
                                   ...a,
                                   subactividades: (a.subactividades || []).map(s => s.id === actualizada.id ? actualizada : s)
                                 } : a))
+                                await sincronizarAvancePlan()
                                 setEditSubactOpen(false)
                                 setEditingSubact(null)
                                 setEditSubactSuccessModalOpen(true)
@@ -2060,20 +2171,72 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                         )}
                       </div>
                     )}
-                    <div className="overflow-x-auto">
-                      <table className="w-full">
-                        <thead>
-                          <tr className="border-b border-[#E0E0E0]">
-                            <th className="pb-3 text-left text-xs font-semibold uppercase tracking-wide text-[#5C5C5C]">Actividad</th>
-                            <th className="w-48 pb-3 text-left text-xs font-semibold uppercase tracking-wide text-[#5C5C5C]">Responsable</th>
-                            <th className="pb-3 text-left text-xs font-semibold uppercase tracking-wide text-[#5C5C5C]">Inicio</th>
-                            <th className="pb-3 text-left text-xs font-semibold uppercase tracking-wide text-[#5C5C5C]">Fin</th>
-                            <th className="pb-3 text-left text-xs font-semibold uppercase tracking-wide text-[#5C5C5C]">Avance</th>
-                            <th className="pb-3 text-left text-xs font-semibold uppercase tracking-wide text-[#5C5C5C]">Estado</th>
+                    <div className="mb-4 flex flex-col gap-3 rounded-lg border border-[#E0E0E0] bg-[#FAFAFA] p-3 md:flex-row md:items-end md:justify-between">
+                      <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] md:items-end">
+                        <div className="grid gap-1.5">
+                          <Label className="text-xs font-semibold uppercase text-[#5C5C5C]">Hito</Label>
+                          <Select value={actividadHitoFilter} onValueChange={(value) => { setActividadHitoFilter(value); setActividadPage(1) }}>
+                            <SelectTrigger className="h-9 min-w-56 bg-white">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="todos">Todos los hitos</SelectItem>
+                              <SelectItem value="sin-hito">Sin hito</SelectItem>
+                              {hitosState.map(hito => (
+                                <SelectItem key={hito.id} value={hito.id}>{hito.nombre}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="grid gap-1.5">
+                          <Label className="text-xs font-semibold uppercase text-[#5C5C5C]">Estado</Label>
+                          <Select value={actividadEstadoFilter} onValueChange={(value) => { setActividadEstadoFilter(value); setActividadPage(1) }}>
+                            <SelectTrigger className="h-9 min-w-48 bg-white">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="todos">Todos los estados</SelectItem>
+                              <SelectItem value="PENDIENTE">Pendiente</SelectItem>
+                              <SelectItem value="EN_CURSO">En curso</SelectItem>
+                              <SelectItem value="FINALIZADA">Finalizada</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          disabled={actividadHitoFilter === "todos" && actividadEstadoFilter === "todos"}
+                          onClick={() => {
+                            setActividadHitoFilter("todos")
+                            setActividadEstadoFilter("todos")
+                            setActividadPage(1)
+                          }}
+                          className="h-9"
+                        >
+                          Limpiar filtros
+                        </Button>
+                      </div>
+                      <p className="text-xs text-[#5C5C5C]">
+                        Mostrando {actividadRangeStart}-{actividadRangeEnd} de {actividadesFiltradas.length} actividades
+                      </p>
+                    </div>
+                    <div className="max-h-[62vh] overflow-auto rounded-lg border border-[#E0E0E0]">
+                      <table className="w-full min-w-[1120px]">
+                        <thead className="sticky top-0 z-10 bg-white shadow-[0_1px_0_#E0E0E0]">
+                          <tr>
+                            <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-[#5C5C5C]">Actividad</th>
+                            <th className="w-44 px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-[#5C5C5C]">Hito</th>
+                            <th className="w-48 px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-[#5C5C5C]">Responsable</th>
+                            <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-[#5C5C5C]">Inicio</th>
+                            <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-[#5C5C5C]">Fin</th>
+                            <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-[#5C5C5C]">Avance</th>
+                            <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-[#5C5C5C]">Estado</th>
+                            <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-[#5C5C5C]">Acciones</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-[#E0E0E0]">
-                          {actividadesConAlertas.map(act => (
+                          {actividadesPaginadas.map(act => (
                             <React.Fragment key={act.id}>
                               <tr className={
                                 (act.alertaVencimiento?.tipo === "vencida"
@@ -2082,7 +2245,7 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                                     ? "bg-[#F57C00]/5 hover:bg-[#F57C00]/10"
                                     : "hover:bg-[#FFFDE7]") + " group"
                               }>
-                                <td className="py-3 text-sm font-medium text-[#1A1A1A]">
+                                <td className="px-3 py-3 text-sm font-medium text-[#1A1A1A]">
                                   <div className="flex flex-col gap-1">
                                     <span>{act.nombre}</span>
                                     {act.alertaVencimiento && (
@@ -2100,7 +2263,10 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                                     )}
                                   </div>
                                 </td>
-                                <td className="py-3 pr-4 text-sm text-[#5C5C5C] max-w-48">
+                                <td className="px-3 py-3 text-xs text-[#5C5C5C]">
+                                  <span className="inline-flex rounded-full bg-[#FFF8CC] px-2.5 py-1 font-medium text-[#765D00]">{act.nombreHito ?? "Sin hito"}</span>
+                                </td>
+                                <td className="max-w-48 px-3 py-3 text-sm text-[#5C5C5C]">
                                   {(() => {
                                     const nombres = act.responsableDisplay.split(", ")
                                     const expanded = expandedRespAct.has(act.id)
@@ -2132,22 +2298,45 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                                     )
                                   })()}
                                 </td>
-                                <td className="py-3 text-xs text-[#5C5C5C]">
+                                <td className="px-3 py-3 text-xs text-[#5C5C5C]">
                                   {act.fechaInicio ? act.fechaInicio.split('-').reverse().join('/') : "—"}
                                 </td>
-                                <td className="py-3 text-xs text-[#5C5C5C]">
+                                <td className="px-3 py-3 text-xs text-[#5C5C5C]">
                                   {act.fechaFin ? act.fechaFin.split('-').reverse().join('/') : "—"}
                                 </td>
-                                <td className="py-3">
-                                  <div className="w-24">
-                                    <ProgressBar value={0} size="sm" />
+                                <td className="px-3 py-3">
+                                  <div className="w-28">
+                                    <div className="mb-1 text-xs font-semibold text-[#1A1A1A]">{formatPercent(getActividadAvance(act))}</div>
+                                    <ProgressBar value={getActividadAvance(act)} size="sm" />
                                   </div>
                                 </td>
-                                <td className="py-3">
+                                <td className="px-3 py-3">
                                   <StatusBadge estado={act.estado} />
                                 </td>
-                                <td className="py-3">
+                                <td className="px-3 py-3">
                                   <div className="flex items-center gap-1">
+                                    {(act.subactividades?.length ?? 0) > 0 && (
+                                      <button
+                                        className="flex h-7 w-7 items-center justify-center rounded-full text-[#5C5C5C] hover:bg-[#F7F7F7]"
+                                        title={expandedSubacts.has(act.id) ? "Ocultar subactividades" : "Ver subactividades"}
+                                        onClick={() => setExpandedSubacts(prev => { const next = new Set(prev); next.has(act.id) ? next.delete(act.id) : next.add(act.id); return next })}
+                                      >
+                                        <ChevronDown className={`h-3.5 w-3.5 transition-transform ${expandedSubacts.has(act.id) ? "rotate-180" : ""}`} />
+                                      </button>
+                                    )}
+                                    <button
+                                      className="opacity-0 group-hover:opacity-100 transition-opacity flex h-7 w-7 items-center justify-center rounded-full text-[#765D00] hover:bg-[#FFFDE7]"
+                                      title="Agregar subactividad"
+                                      onClick={() => {
+                                        setTargetActividadId(act.id)
+                                        setSubactForm({ nombre: "", idResponsable: "", presupuesto: "", hombresInvolucrados: "", mujeresInvolucradas: "", fechaInicio: "", fechaFin: "", estado: "PENDIENTE", descripcion: "" })
+                                        setSubactFieldErrors({})
+                                        setSubactResponsableSearch("")
+                                        setCreateSubactOpen(true)
+                                      }}
+                                    >
+                                      <UserPlus className="h-3.5 w-3.5" />
+                                    </button>
                                     <button
                                       className="opacity-0 group-hover:opacity-100 transition-opacity flex h-7 w-7 items-center justify-center rounded-full text-[#5C5C5C] hover:bg-[#F7F7F7]"
                                       title="Editar actividad"
@@ -2160,6 +2349,7 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                                           fechaFin: act.fechaFin ?? "",
                                           estado: act.estado,
                                           idResponsables: [...act.idResponsables],
+                                          idHito: act.idHito ? String(act.idHito) : "",
                                         })
                                         setEditActividadOpen(true)
                                       }}
@@ -2177,9 +2367,9 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                                 </td>
                               </tr>
                               {/* Render Subactividades */}
-                              {act.subactividades?.map((sub) => (
+                              {expandedSubacts.has(act.id) && act.subactividades?.map((sub) => (
                                 <tr key={`sub-${sub.id}`} className="bg-[#FAFAFA] border-none group">
-                                  <td className="py-2 pl-8 text-xs font-medium text-[#5C5C5C] relative">
+                                <td className="relative py-2 pl-8 pr-3 text-xs font-medium text-[#5C5C5C]">
                                     <div className="absolute left-4 top-0 bottom-0 w-px bg-[#E0E0E0]" />
                                     <div className="flex flex-col gap-0.5">
                                       <span className="text-[#1A1A1A] before:content-[''] before:absolute before:left-4 before:top-4 before:w-3 before:h-px before:bg-[#E0E0E0]">
@@ -2187,16 +2377,19 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                                       </span>
                                     </div>
                                   </td>
-                                  <td className="py-2 text-xs text-[#5C5C5C]">{sub.responsable || "—"}</td>
-                                  <td className="py-2 text-xs text-[#5C5C5C]">
+                                  <td className="px-3 py-2 text-xs text-[#9CA3AF]">—</td>
+                                  <td className="px-3 py-2 text-xs text-[#5C5C5C]">{sub.responsable || "—"}</td>
+                                  <td className="px-3 py-2 text-xs text-[#5C5C5C]">
                                     {sub.fechaInicio ? sub.fechaInicio.split('-').reverse().join('/') : "—"}
                                   </td>
-                                  <td className="py-2 text-xs text-[#5C5C5C]">
+                                  <td className="px-3 py-2 text-xs text-[#5C5C5C]">
                                     {sub.fechaFin ? sub.fechaFin.split('-').reverse().join('/') : "—"}
                                   </td>
-                                  <td className="py-2 text-xs text-[#5C5C5C]">—</td>
-                                  <td className="py-2 text-xs text-[#5C5C5C]">—</td>
-                                  <td className="py-2">
+                                  <td className="px-3 py-2 text-xs font-semibold text-[#1A1A1A]">{formatPercent(getActividadAvance({ estado: sub.estado ?? "PENDIENTE" }))}</td>
+                                  <td className="px-3 py-2">
+                                    <StatusBadge estado={sub.estado ?? "PENDIENTE"} />
+                                  </td>
+                                  <td className="px-3 py-2">
                                     <div className="flex items-center gap-1">
                                       <button
                                         className="opacity-0 group-hover:opacity-100 transition-opacity flex h-7 w-7 items-center justify-center rounded-full text-[#5C5C5C] hover:bg-[#F7F7F7]"
@@ -2217,6 +2410,7 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                                             mujeresInvolucradas: sub.mujeresInvolucradas ? String(sub.mujeresInvolucradas) : "",
                                             fechaInicio: sub.fechaInicio ?? "",
                                             fechaFin: sub.fechaFin ?? "",
+                                            estado: sub.estado ?? "PENDIENTE",
                                             descripcion: sub.descripcion ?? "",
                                           })
                                           setEditSubactResponsableSearch("")
@@ -2238,15 +2432,16 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                                 </tr>
                               ))}
                               {/* Agregar subactividad */}
+                              {expandedSubacts.has(act.id) && (
                               <tr className="bg-[#FAFAFA] border-none">
-                                <td colSpan={7} className="py-2 pl-8 relative">
+                                <td colSpan={8} className="relative py-2 pl-8 pr-3">
                                   <div className="absolute left-4 top-0 bottom-1/2 w-px bg-[#E0E0E0]" />
                                   <div className="flex items-center gap-2 relative before:content-[''] before:absolute before:-left-4 before:top-3 before:w-3 before:h-px before:bg-[#E0E0E0]">
                                     <button
                                       className="flex items-center gap-1 text-xs font-medium text-[#C9A42B] hover:text-[#1A1A1A] transition-colors"
                                       onClick={() => {
                                         setTargetActividadId(act.id)
-                                        setSubactForm({ nombre: "", idResponsable: "", presupuesto: "", hombresInvolucrados: "", mujeresInvolucradas: "", fechaInicio: "", fechaFin: "", descripcion: "" })
+                                        setSubactForm({ nombre: "", idResponsable: "", presupuesto: "", hombresInvolucrados: "", mujeresInvolucradas: "", fechaInicio: "", fechaFin: "", estado: "PENDIENTE", descripcion: "" })
                                         setSubactFieldErrors({})
                                         setSubactResponsableSearch("")
                                         setCreateSubactOpen(true)
@@ -2258,11 +2453,39 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                                   </div>
                                 </td>
                               </tr>
+                              )}
                             </React.Fragment>
                           ))}
                         </tbody>
                       </table>
                     </div>
+                    {actividadesFiltradas.length === 0 ? (
+                      <div className="mt-4 rounded-lg border border-dashed border-[#D8D8D8] p-6 text-center text-sm text-[#5C5C5C]">
+                        No hay actividades que coincidan con los filtros seleccionados.
+                      </div>
+                    ) : (
+                      <div className="mt-4 flex flex-col gap-3 text-xs text-[#5C5C5C] md:flex-row md:items-center md:justify-between">
+                        <span>Página {actividadPageSafe} de {totalActividadPages}</span>
+                        <div className="flex items-center gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            disabled={actividadPageSafe <= 1}
+                            onClick={() => setActividadPage(page => Math.max(1, page - 1))}
+                          >
+                            Anterior
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            disabled={actividadPageSafe >= totalActividadPages}
+                            onClick={() => setActividadPage(page => Math.min(totalActividadPages, page + 1))}
+                          >
+                            Siguiente
+                          </Button>
+                        </div>
+                      </div>
+                    )}
                   </>
                 ) : (
                   <div className="text-center py-8 text-sm text-[#5C5C5C]">
@@ -2405,10 +2628,7 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                       </div>
                       <div className="grid gap-2">
                         <Label htmlFor="hito-estado">Estado</Label>
-                        <Select
-                          value={hitoForm.estado}
-                          onValueChange={v => setHitoForm(f => ({ ...f, estado: v as HitoEstadoUi }))}
-                        >
+                        <Select value={hitoForm.estado} disabled>
                           <SelectTrigger id="hito-estado"><SelectValue /></SelectTrigger>
                           <SelectContent>
                             <SelectItem value="Pendiente">Pendiente</SelectItem>
@@ -2416,6 +2636,7 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                             <SelectItem value="Finalizado">Finalizado</SelectItem>
                           </SelectContent>
                         </Select>
+                        <p className="text-xs text-[#777]">El estado se actualiza automáticamente según las actividades relacionadas.</p>
                       </div>
                     </div>
                     <DialogFooter>
@@ -2454,6 +2675,22 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
 
                 {hitosConAlertas.length > 0 ? (
                   <>
+                    <div className="mb-6 grid gap-4 md:grid-cols-3">
+                      <div className="rounded-xl border border-[#E0E0E0] bg-[#FAFAFA] p-4">
+                        <p className="text-xs font-semibold uppercase text-[#5C5C5C]">Avance ponderado</p>
+                        <p className="mt-2 text-3xl font-bold text-[#1A1A1A]">{formatPercent(proyecto.avance)}</p>
+                        <ProgressBar value={proyecto.avance} size="sm" />
+                      </div>
+                      <div className="rounded-xl border border-[#E0E0E0] bg-[#FAFAFA] p-4">
+                        <p className="text-xs font-semibold uppercase text-[#5C5C5C]">Hitos finalizados</p>
+                        <p className="mt-2 text-3xl font-bold text-[#1A1A1A]">{hitosConAlertas.filter(h => h.estado === "Finalizado").length}<span className="text-base font-normal text-[#777]"> / {hitosConAlertas.length}</span></p>
+                      </div>
+                      <div className="rounded-xl border border-[#E0E0E0] bg-[#FAFAFA] p-4">
+                        <p className="text-xs font-semibold uppercase text-[#5C5C5C]">Actividades finalizadas</p>
+                        <p className="mt-2 text-3xl font-bold text-[#1A1A1A]">{actividades.filter(a => a.estado === "FINALIZADA").length}<span className="text-base font-normal text-[#777]"> / {actividades.length}</span></p>
+                      </div>
+                    </div>
+                    <div className="mb-6"><ProjectGantt hitos={hitosState} actividades={actividadesApi} /></div>
                     {(hitosVencidos.length > 0 || hitosProximosAVencer.length > 0) && (
                       <div className="mb-6 grid gap-3 md:grid-cols-2">
                         {hitosVencidos.length > 0 && (
@@ -2484,9 +2721,9 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                         )}
                       </div>
                     )}
-                    <div className="relative">
+                    <div className="relative max-h-[52vh] overflow-y-auto rounded-xl border border-[#E0E0E0] bg-white p-4">
                       <div className="absolute left-4 top-0 bottom-0 w-0.5 bg-[#E0E0E0]" />
-                      <div className="space-y-6">
+                      <div className="space-y-3">
                         {hitosConAlertas.map((hito) => (
                           <div key={hito.id} className="relative flex gap-4 pl-10 group">
                             <div className={`absolute left-2 top-1 flex h-5 w-5 items-center justify-center rounded-full ${hito.estado === "Finalizado" ? "bg-[#2E7D32]" :
@@ -2521,6 +2758,59 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                                       {hito.descripcion}
                                     </p>
                                   )}
+                                  <div className="mt-4 rounded-lg bg-[#F7F7F7] p-3">
+                                    <div className="mb-2 flex items-center justify-between gap-3 text-xs">
+                                      <span className="font-semibold text-[#1A1A1A]">{hito.actividadesFinalizadas} de {hito.totalActividades} actividades finalizadas</span>
+                                      <span className="font-bold text-[#1A1A1A]">{formatPercent(hito.porcentajeAvance)}</span>
+                                    </div>
+                                    <ProgressBar value={hito.porcentajeAvance} size="sm" />
+                                    <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-[#777]">
+                                      <span>Periodo: {formatLocalDate(hito.fechaInicio)} – {formatLocalDate(hito.fechaFin)}</span>
+                                      <span>Peso temporal: {hito.duracionDias} día{hito.duracionDias === 1 ? "" : "s"}</span>
+                                    </div>
+                                  </div>
+                                  <div className="mt-3 space-y-1.5">
+                                    {hito.totalActividades > 0 && (
+                                      <button
+                                        type="button"
+                                        className="inline-flex items-center gap-1.5 rounded-md border border-[#E0E0E0] bg-white px-2.5 py-1.5 text-xs font-semibold text-[#5C5C5C] hover:border-[#FFD600] hover:bg-[#FFFDE7]"
+                                        onClick={() => setExpandedHitos(prev => { const next = new Set(prev); next.has(hito.id) ? next.delete(hito.id) : next.add(hito.id); return next })}
+                                      >
+                                        <ChevronDown className={`h-3.5 w-3.5 transition-transform ${expandedHitos.has(hito.id) ? "rotate-180" : ""}`} />
+                                        {expandedHitos.has(hito.id) ? "Ocultar actividades" : `Ver ${hito.totalActividades} actividades`}
+                                      </button>
+                                    )}
+                                    {expandedHitos.has(hito.id) && actividades.filter(a => String(a.idHito) === hito.id).map(actividad => (
+                                      <div key={actividad.id} className="flex items-center justify-between gap-3 rounded-md border border-[#E8E8E8] bg-white px-3 py-2 text-xs">
+                                        <span className="truncate text-[#1A1A1A]">{actividad.nombre}</span>
+                                        <div className="flex shrink-0 items-center gap-2">
+                                          <StatusBadge estado={actividad.estado} />
+                                          <button
+                                            type="button"
+                                            className="inline-flex items-center gap-1 rounded-md border border-[#E0E0E0] px-2 py-1 font-semibold text-[#5C5C5C] hover:border-[#FFD600] hover:bg-[#FFFDE7] hover:text-[#1A1A1A]"
+                                            onClick={() => navegarADetalleActividad(actividad.id, hito.id)}
+                                          >
+                                            Ver detalle
+                                            <ChevronRight className="h-3.5 w-3.5" />
+                                          </button>
+                                        </div>
+                                      </div>
+                                    ))}
+                                    {hito.totalActividades === 0 && <p className="text-xs text-[#777]">Sin actividades relacionadas.</p>}
+                                    {hito.fuenteDatos === "api" && puedeActualizarProyectos && (
+                                      <button
+                                        type="button"
+                                        className="mt-2 inline-flex items-center gap-1.5 rounded-md border border-[#E0E0E0] bg-white px-2.5 py-1.5 font-semibold text-[#765D00] hover:border-[#FFD600] hover:bg-[#FFFDE7]"
+                                        onClick={() => {
+                                          setActForm({ nombre: "", descripcion: "", fechaInicio: "", fechaFin: "", idResponsables: [], idHito: hito.id, estado: "PENDIENTE" })
+                                          setActiveTab("actividades")
+                                          setCreateActividadOpen(true)
+                                        }}
+                                      >
+                                        <Plus className="h-3.5 w-3.5" /> Agregar actividad a este hito
+                                      </button>
+                                    )}
+                                  </div>
                                   <div className="mt-3 flex flex-wrap gap-2 text-xs text-[#5C5C5C]">
                                     {hito.fuenteDatos !== "api" && (
                                       <span className="inline-flex items-center rounded-full bg-[#F7F7F7] px-2.5 py-1">
@@ -2861,34 +3151,10 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
               Avance
             </h3>
             <div className="mb-4 text-center">
-              <span className="text-4xl font-bold text-[#1A1A1A]">{proyecto.avance}%</span>
+              <span className="text-4xl font-bold text-[#1A1A1A]">{formatPercent(proyecto.avance)}</span>
             </div>
             <ProgressBar value={proyecto.avance} showLabel={false} size="lg" />
-            {apiProyecto && puedeActualizarProyectos && (
-              <div className="mt-4 space-y-2">
-                <Label htmlFor="avance-directo" className="text-xs text-[#5C5C5C]">Actualizar avance (%)</Label>
-                <div className="flex gap-2">
-                  <Input
-                    id="avance-directo"
-                    type="number"
-                    min="0"
-                    max="100"
-                    step="1"
-                    value={avanceDirecto}
-                    onChange={e => setAvanceDirecto(e.target.value)}
-                  />
-                  <Button
-                    type="button"
-                    onClick={guardarAvanceProyecto}
-                    disabled={avanceSubmitting}
-                    className="bg-[#FFD600] text-[#1A1A1A] hover:bg-[#C9A42B]"
-                  >
-                    {avanceSubmitting ? "..." : "Guardar"}
-                  </Button>
-                </div>
-                {avanceError && <p className="text-xs text-[#C8102E]">{avanceError}</p>}
-              </div>
-            )}
+            {apiProyecto && <p className="mt-3 text-xs leading-relaxed text-[#5C5C5C]">Calculado automáticamente ponderando la duración de las actividades dentro de cada hito y la duración de cada hito dentro del proyecto.</p>}
           </div>
 
           {/* Alerts card */}

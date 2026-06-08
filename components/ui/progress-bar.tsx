@@ -15,6 +15,8 @@ export function ProgressBar({
   className,
   indicatorClassName,
 }: ProgressBarProps) {
+  const formattedValue = `${Number.isFinite(value) ? value.toFixed(1) : "0.0"}%`
+
   const getColor = () => {
     if (value >= 75) return "bg-[#2E7D32]"
     if (value >= 50) return "bg-[#FFD600]"
@@ -47,7 +49,7 @@ export function ProgressBar({
       </div>
       {showLabel && (
         <span className="text-xs font-medium text-[#5C5C5C] min-w-[32px] text-right">
-          {value}%
+          {formattedValue}
         </span>
       )}
     </div>
