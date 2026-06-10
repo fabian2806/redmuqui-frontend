@@ -10,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Label } from "@/components/ui/label"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog"
+import { SuccessDialog } from "@/components/ui/success-dialog"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
@@ -62,7 +63,16 @@ export default function UsuariosPage() {
   const [usuarioEditando, setUsuarioEditando] = useState<UsuarioResponse | null>(null)
   const [editData, setEditData] = useState({ nombre: "", email: "", telefono: "", rolId: "", institucion: "", estado: "activo" })
   const [savingEdit, setSavingEdit] = useState(false)
-  const [feedbackCards, setFeedbackCards] = useState<{ id: number; type: "success" | "error"; title: string; description?: string }[]>([])
+  const [feedbackCards, setFeedbackCards] = useState<{ id: number; type: "error"; title: string; description?: string }[]>([])
+
+  const [successDialog, setSuccessDialog] = useState<{
+    open: boolean
+    title: string
+    description?: string
+  }>({
+    open: false,
+    title: "",
+  })
   const [usuarioAConfirmar, setUsuarioAConfirmar] = useState<UsuarioResponse | null>(null)
   const [accionConfirmar, setAccionConfirmar] = useState<"activar" | "desactivar" | null>(null)
 
@@ -112,10 +122,18 @@ export default function UsuariosPage() {
     void loadCatalogos()
   }, [])
 
-  const addFeedbackCard = (card: { type: "success" | "error"; title: string; description?: string }) => {
+  const addFeedbackCard = (card: { type: "error"; title: string; description?: string }) => {
     const id = Date.now() + Math.floor(Math.random() * 1000)
     setFeedbackCards((prev) => [...prev, { id, ...card }])
     setTimeout(() => setFeedbackCards((prev) => prev.filter((item) => item.id !== id)), 5000)
+  }
+
+  const showSuccessDialog = (title: string, description?: string) => {
+    setSuccessDialog({
+      open: true,
+      title,
+      description,
+    })
   }
 
   // Filtrar usuarios
@@ -205,8 +223,8 @@ export default function UsuariosPage() {
         actualizado.estado = editData.estado === "activo"
       }
       setUsuarios((prev) => prev.map((u) => (u.id === actualizado.id ? { ...u, ...actualizado } : u)))
-      addFeedbackCard({ type: "success", title: "Usuario actualizado correctamente", description: "Los cambios se guardaron exitosamente." })
       closeEditModal()
+      showSuccessDialog("Usuario actualizado correctamente", "Los cambios se guardaron exitosamente.")
     } catch (err) {
       setSavingEdit(false)
       if (err instanceof ApiError) {
@@ -232,7 +250,7 @@ export default function UsuariosPage() {
     try {
       await api.patch(`/usuarios/${usuario.id}/estado?activo=false`)
       setUsuarios((prev) => prev.map((u) => (u.id === usuario.id ? { ...u, estado: false } : u)))
-      addFeedbackCard({ type: "success", title: "Usuario desactivado correctamente" })
+      showSuccessDialog("Usuario desactivado correctamente", "El usuario fue desactivado exitosamente.")
     } catch (err) {
       addFeedbackCard({ type: "error", title: "No se pudo desactivar el usuario", description: err instanceof Error ? err.message : "Inténtalo nuevamente." })
     }
@@ -242,21 +260,26 @@ export default function UsuariosPage() {
     try {
       await api.patch(`/usuarios/${usuario.id}/estado?activo=true`)
       setUsuarios((prev) => prev.map((u) => (u.id === usuario.id ? { ...u, estado: true } : u)))
-      addFeedbackCard({ type: "success", title: "Usuario activado correctamente" })
+      showSuccessDialog("Usuario activado correctamente", "El usuario fue activado exitosamente.")
     } catch (err) {
       addFeedbackCard({ type: "error", title: "No se pudo activar el usuario", description: err instanceof Error ? err.message : "Inténtalo nuevamente." })
     }
   }
 
-  const handleConfirmarAccion = () => {
+  const handleConfirmarAccion = async () => {
     if (!usuarioAConfirmar || !accionConfirmar) return
-    if (accionConfirmar === "desactivar") {
-      handleDesactivarUsuario(usuarioAConfirmar)
-    } else {
-      handleActivarUsuario(usuarioAConfirmar)
-    }
+
+    const usuario = usuarioAConfirmar
+    const accion = accionConfirmar
+
     setUsuarioAConfirmar(null)
     setAccionConfirmar(null)
+
+    if (accion === "desactivar") {
+      await handleDesactivarUsuario(usuario)
+    } else {
+      await handleActivarUsuario(usuario)
+    }
   }
 
   const closeConfirmacion = () => {
@@ -691,19 +714,44 @@ export default function UsuariosPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+      <SuccessDialog
+        open={successDialog.open}
+        title={successDialog.title}
+        description={successDialog.description ?? ""}
+        onClose={() =>
+          setSuccessDialog((prev) => ({
+            ...prev,
+            open: false,
+          }))
+        }
+      />
       {feedbackCards.length > 0 && (
         <div className="fixed bottom-6 right-6 z-[80] flex w-[min(92vw,420px)] flex-col gap-3">
           {feedbackCards.map((feedback) => (
             <div key={feedback.id} className="rounded-xl border border-border bg-card shadow-xl">
               <div className="flex items-start gap-3 p-4">
-                <div className={`mt-0.5 ${feedback.type === "success" ? "text-green-600" : "text-destructive"}`}>
-                  {feedback.type === "success" ? <CheckCircle2 className="h-5 w-5" /> : <AlertCircle className="h-5 w-5" />}
+                <div className="mt-0.5 text-destructive">
+                  <AlertCircle className="h-5 w-5" />
                 </div>
+
                 <div className="flex-1">
-                  <p className={`text-sm font-semibold ${feedback.type === "success" ? "text-green-700" : "text-destructive"}`}>{feedback.title}</p>
-                  {feedback.description && <p className="mt-1 text-xs text-muted-foreground">{feedback.description}</p>}
+                  <p className="text-sm font-semibold text-destructive">{feedback.title}</p>
+                  {feedback.description && (
+                    <p className="mt-1 text-xs text-muted-foreground">{feedback.description}</p>
+                  )}
                 </div>
-                <Button type="button" variant="ghost" size="icon" className="h-7 w-7" onClick={() => setFeedbackCards((prev) => prev.filter((item) => item.id !== feedback.id))}><X className="h-4 w-4" /></Button>
+
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7"
+                  onClick={() =>
+                    setFeedbackCards((prev) => prev.filter((item) => item.id !== feedback.id))
+                  }
+                >
+                  <X className="h-4 w-4" />
+                </Button>
               </div>
             </div>
           ))}
