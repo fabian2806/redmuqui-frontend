@@ -108,7 +108,20 @@ export default function NuevoUsuarioPage() {
 
     if (formData.telefono.trim() && !/^\d{9}$/.test(formData.telefono.trim())) validationErrors.push({ title: "Teléfono inválido", description: "El teléfono debe contener solo números y exactamente 9 dígitos." })
     if (validationErrors.length > 0) {
-      validationErrors.forEach((error) => addFeedbackCard({ type: "error", ...error }))
+      if (validationErrors.length === 1) {
+        addFeedbackCard({
+          type: "error",
+          title: validationErrors[0].title,
+          description: validationErrors[0].description,
+        })
+      } else {
+        addFeedbackCard({
+          type: "error",
+          title: "Formulario incompleto",
+          description: "Completa los campos obligatorios y corrige los datos inválidos para continuar.",
+        })
+      }
+
       return
     }
 
@@ -139,17 +152,56 @@ export default function NuevoUsuarioPage() {
     } catch (error) {
       if (error instanceof ApiError) {
         const labelMap: Record<string, string> = { nombres: "Nombre completo", apellidos: "Apellidos", email: "Correo electrónico", telefono: "Teléfono", contrasenha: "Contraseña", idRol: "Rol", idInstitucion: "Organización" }
-        if (error.body?.fieldErrors?.length) {
-          error.body.fieldErrors.forEach((fieldError) => {
-            addFeedbackCard({
-              type: "error",
-              title: `${labelMap[fieldError.field] ?? fieldError.field} inválido`,
-              description: fieldError.message.replace("contrasenha", "contraseña"),
-            })
+      if (error.body?.fieldErrors?.length) {
+        const fieldErrors = error.body.fieldErrors
+
+        const passwordErrors = fieldErrors.filter(
+          (fieldError) => fieldError.field === "contrasenha"
+        )
+
+        const otrosErrores = fieldErrors.filter(
+          (fieldError) => fieldError.field !== "contrasenha"
+        )
+
+        const erroresNormalizados: { title: string; description: string }[] = []
+
+        if (passwordErrors.length > 0) {
+          erroresNormalizados.push({
+            title: "Contraseña no segura",
+            description:
+              "La contraseña debe tener mínimo 8 caracteres, una mayúscula, una minúscula, un número y un carácter especial.",
+          })
+        }
+
+        otrosErrores.forEach((fieldError) => {
+          erroresNormalizados.push({
+            title: `${labelMap[fieldError.field] ?? fieldError.field} inválido`,
+            description: fieldError.message.replace("contrasenha", "contraseña"),
+          })
+        })
+
+        if (erroresNormalizados.length === 1) {
+          addFeedbackCard({
+            type: "error",
+            title: erroresNormalizados[0].title,
+            description: erroresNormalizados[0].description,
           })
         } else {
-          addFeedbackCard({ type: "error", title: "No se pudo registrar el usuario", description: error.body?.message ?? "Revisa los datos e inténtalo nuevamente." })
+          addFeedbackCard({
+            type: "error",
+            title: "No se pudo registrar el usuario",
+            description:
+              "Revisa los campos obligatorios y corrige los datos inválidos para continuar.",
+          })
         }
+      } else {
+        addFeedbackCard({
+          type: "error",
+          title: "No se pudo registrar el usuario",
+          description:
+            error.body?.message ?? "Revisa los datos e inténtalo nuevamente.",
+        })
+      }
       } else {
         addFeedbackCard({ type: "error", title: "Error inesperado", description: "Ocurrió un problema al registrar el usuario." })
       }
