@@ -1,5 +1,6 @@
 "use client"
 
+import { SuccessDialog } from "@/components/ui/success-dialog"
 import React, { useEffect, useMemo, useState, use } from "react"
 import { PermissionGuard } from "@/components/auth/permission-guard"
 import { AppLayout } from "@/components/layout/app-layout"
@@ -1300,26 +1301,12 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
               </DialogContent>
             </Dialog>
 
-            <Dialog open={editSuccessModalOpen} onOpenChange={setEditSuccessModalOpen}>
-              <DialogContent className="sm:max-w-md" showCloseButton={false}>
-                <DialogHeader>
-                  <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-green-100">
-                    <CheckCircle2 className="h-8 w-8 text-green-600" />
-                  </div>
-                  <DialogTitle className="text-center text-lg">
-                    Proyecto actualizado exitosamente
-                  </DialogTitle>
-                  <DialogDescription className="text-center">
-                    Los cambios se han guardado correctamente.
-                  </DialogDescription>
-                </DialogHeader>
-                <DialogFooter className="sm:justify-center">
-                  <Button type="button" onClick={() => setEditSuccessModalOpen(false)} className="bg-[#FFD600] text-[#1A1A1A] hover:bg-[#C9A42B]">
-                    Aceptar
-                  </Button>
-                </DialogFooter>
-              </DialogContent>
-            </Dialog>
+            <SuccessDialog
+              open={editSuccessModalOpen}
+              title="Proyecto actualizado exitosamente"
+              description="Los cambios se han guardado correctamente."
+              onClose={() => setEditSuccessModalOpen(false)}
+            />
             </>
             )}
 

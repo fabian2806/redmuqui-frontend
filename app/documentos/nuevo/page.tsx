@@ -3,8 +3,8 @@
 import { useEffect, useState, type FormEvent } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { toast } from "sonner"
-import { AlertCircle, ChevronRight, Save } from "lucide-react"
+import { SuccessDialog } from "@/components/ui/success-dialog"
+import { AlertCircle, ChevronRight, Save, X} from "lucide-react"
 import { AppLayout } from "@/components/layout/app-layout"
 import { Spinner } from "@/components/ui/spinner"
 import { useAuth } from "@/hooks/useAuth"
@@ -53,6 +53,13 @@ const initialFormState: FormState = {
   estado: "BORRADOR",
 }
 
+type FeedbackCard = {
+  id: number
+  type: "error"
+  title: string
+  description?: string
+}
+
 /** Convierte un value de <select> a number seguro (nunca NaN). */
 function toId(value: string): number | undefined {
   if (!value) return undefined
@@ -77,6 +84,30 @@ export default function NuevoDocumentoPage() {
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
+  const [feedbackCards, setFeedbackCards] = useState<FeedbackCard[]>([])
+  const addFeedbackCard = (card: Omit<FeedbackCard, "id">) => {
+    const id = Date.now()
+
+    setFeedbackCards((prev) => [
+      ...prev,
+      {
+        id,
+        ...card,
+      },
+    ])
+
+    setTimeout(() => {
+      setFeedbackCards((prev) => prev.filter((item) => item.id !== id))
+    }, 5000)
+  }
+  const removeFeedbackCard = (id: number) => {
+    setFeedbackCards((prev) => prev.filter((item) => item.id !== id))
+  }
+  const [successOpen, setSuccessOpen] = useState(false)
+  const [successMessage, setSuccessMessage] = useState({
+    title: "",
+    description: "",
+  })
 
   useEffect(() => {
     let cancelled = false
@@ -175,21 +206,34 @@ export default function NuevoDocumentoPage() {
   }
 
   /** Validación cliente, espejo de las reglas del backend. */
-  const validar = (): string | null => {
-    if (!formData.titulo.trim()) return "El título es obligatorio"
-    if (formData.titulo.trim().length > TITULO_MAX)
-      return `El título no puede superar los ${TITULO_MAX} caracteres`
-    if (!formData.tipo) return "Selecciona el tipo de documento"
-    if (!TIPOS_DOCUMENTO.includes(formData.tipo as never))
-      return "El tipo de documento no es válido"
-    if (!formData.idRespElaboracion)
-      return "Selecciona el responsable de elaboración"
+  const validar = (): Record<string, string> => {
+    const errors: Record<string, string> = {}
+
+    if (!formData.titulo.trim()) {
+      errors.titulo = "El título es obligatorio"
+    } else if (formData.titulo.trim().length > TITULO_MAX) {
+      errors.titulo = `El título no puede superar los ${TITULO_MAX} caracteres`
+    }
+
+    if (!formData.tipo) {
+      errors.tipo = "Selecciona el tipo de documento"
+    } else if (!TIPOS_DOCUMENTO.includes(formData.tipo as never)) {
+      errors.tipo = "El tipo de documento no es válido"
+    }
+
+    if (!formData.idRespElaboracion) {
+      errors.idRespElaboracion = "Selecciona el responsable de elaboración"
+    }
+
     if (
       formData.idRespValidacion &&
       formData.idRespValidacion === formData.idRespElaboracion
-    )
-      return "El responsable de validación debe ser distinto al de elaboración"
-    return null
+    ) {
+      errors.idRespValidacion =
+        "El responsable de validación debe ser distinto al de elaboración"
+    }
+
+    return errors
   }
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
@@ -197,11 +241,29 @@ export default function NuevoDocumentoPage() {
     setError(null)
     setFieldErrors({})
 
-    const validationError = validar()
-    if (validationError) {
-      setError(validationError)
-      return
+  const validationErrors = validar()
+
+  if (Object.keys(validationErrors).length > 0) {
+    setFieldErrors(validationErrors)
+
+    const mensajes = Object.values(validationErrors)
+
+    if (mensajes.length === 1) {
+      addFeedbackCard({
+        type: "error",
+        title: mensajes[0],
+        description: "Revisa el campo marcado en el formulario.",
+      })
+    } else {
+      addFeedbackCard({
+        type: "error",
+        title: "Formulario incompleto",
+        description: "Completa los campos obligatorios para continuar.",
+      })
     }
+
+    return
+  }
 
     setSubmitting(true)
     try {
@@ -209,26 +271,53 @@ export default function NuevoDocumentoPage() {
         "/documentos",
         buildPayload(),
       )
-      toast.success(`Documento "${creado.titulo}" registrado correctamente`)
-      router.push("/documentos")
+
+      setSuccessMessage({
+        title: "Documento registrado exitosamente",
+        description: `El documento "${creado.titulo}" se ha guardado correctamente.`,
+      })
+
+      setSuccessOpen(true)
     } catch (err) {
       if (err instanceof ApiError) {
         if (err.body?.fieldErrors?.length) {
           const map: Record<string, string> = {}
           for (const fe of err.body.fieldErrors) map[fe.field] = fe.message
           setFieldErrors(map)
-          setError("Revisa los campos marcados.")
+          const mensajes = Object.values(map)
+          if (mensajes.length === 1) {
+            addFeedbackCard({
+              type: "error",
+              title: mensajes[0],
+              description: "Revisa el campo marcado en el formulario.",
+            })
+          } else {
+            addFeedbackCard({
+              type: "error",
+              title: "No se pudo registrar el documento",
+              description: "Revisa los campos marcados en el formulario.",
+            })
+          }
         } else if (err.status === 403) {
-          setError(
-            "No tienes permiso para registrar documentos (requiere rol Técnico o Administrador).",
-          )
+          addFeedbackCard({
+            type: "error",
+            title: "No tienes permiso para registrar documentos",
+            description: "Requiere rol Técnico o Administrador.",
+          })
         } else {
-          setError(err.message)
+          addFeedbackCard({
+            type: "error",
+            title: "No se pudo registrar el documento",
+            description: err.message,
+          })
         }
       } else {
-        setError(
-          err instanceof Error ? err.message : "No se pudo registrar el documento",
-        )
+        addFeedbackCard({
+          type: "error",
+          title: "No se pudo registrar el documento",
+          description:
+            err instanceof Error ? err.message : "Inténtalo nuevamente.",
+        })
       }
     } finally {
       setSubmitting(false)
@@ -271,7 +360,7 @@ export default function NuevoDocumentoPage() {
           </div>
         )}
 
-        <form onSubmit={handleSubmit} className="space-y-6">
+        <form onSubmit={handleSubmit} noValidate className="space-y-6">
           {/* Información del documento */}
           <section className="rounded-lg border border-[#E0E0E0] bg-white shadow-sm">
             <div className="border-b border-[#E0E0E0] px-6 py-4">
@@ -286,7 +375,6 @@ export default function NuevoDocumentoPage() {
                 </label>
                 <input
                   type="text"
-                  required
                   maxLength={TITULO_MAX}
                   value={formData.titulo}
                   onChange={(event) => updateField("titulo", event.target.value)}
@@ -302,7 +390,6 @@ export default function NuevoDocumentoPage() {
                     Tipo de documento *
                   </label>
                   <select
-                    required
                     value={formData.tipo}
                     onChange={(event) => updateField("tipo", event.target.value)}
                     className={`w-full rounded-lg border px-4 py-2.5 text-sm text-[#1A1A1A] focus:border-[#FFD600] focus:outline-none focus:ring-1 focus:ring-[#FFD600] ${fieldErrorClass("tipo")}`}
@@ -456,7 +543,6 @@ export default function NuevoDocumentoPage() {
                     Responsable de elaboración *
                   </label>
                   <select
-                    required
                     value={formData.idRespElaboracion}
                     onChange={(event) =>
                       updateField("idRespElaboracion", event.target.value)
@@ -488,8 +574,7 @@ export default function NuevoDocumentoPage() {
                       updateField("idRespValidacion", event.target.value)
                     }
                     disabled={loadingCatalogos || usuarios.length === 0}
-                    className="w-full rounded-lg border border-[#E0E0E0] px-4 py-2.5 text-sm text-[#1A1A1A] focus:border-[#FFD600] focus:outline-none focus:ring-1 focus:ring-[#FFD600] disabled:opacity-60"
-                  >
+                    className={`w-full rounded-lg border px-4 py-2.5 text-sm text-[#1A1A1A] focus:border-[#FFD600] focus:outline-none focus:ring-1 focus:ring-[#FFD600] disabled:opacity-60 ${fieldErrorClass("idRespValidacion")}`}                  >
                     <option value="">Sin validador asignado</option>
                     {usuarios
                       .filter(
@@ -502,6 +587,7 @@ export default function NuevoDocumentoPage() {
                         </option>
                       ))}
                   </select>
+                  <FieldError field="idRespValidacion" />
                 </div>
               </div>
 
@@ -528,6 +614,54 @@ export default function NuevoDocumentoPage() {
             </button>
           </div>
         </form>
+
+        {feedbackCards.length > 0 && (
+          <div className="fixed bottom-6 right-6 z-50 flex w-[min(92vw,420px)] flex-col gap-3">
+            {feedbackCards.map((card) => (
+              <div
+                key={card.id}
+                className="rounded-xl border border-[#C8102E]/20 bg-white p-4 shadow-lg"
+              >
+                <div className="flex items-start gap-3">
+                  <div className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[#C8102E]">
+                    <AlertCircle className="h-5 w-5" />
+                  </div>
+
+                  <div className="flex-1">
+                    <p className="font-semibold text-[#C8102E]">
+                      {card.title}
+                    </p>
+
+                    {card.description && (
+                      <p className="mt-1 text-sm text-[#5C5C5C]">
+                        {card.description}
+                      </p>
+                    )}
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => removeFeedbackCard(card.id)}
+                    className="text-[#5C5C5C] hover:text-[#1A1A1A]"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <SuccessDialog
+          open={successOpen}
+          title={successMessage.title}
+          description={successMessage.description}
+          onClose={() => {
+            setSuccessOpen(false)
+            router.push("/documentos")
+          }}
+        />
+
       </div>
     </AppLayout>
   )
