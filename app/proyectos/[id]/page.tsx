@@ -430,7 +430,6 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
   const [editSuccessModalOpen, setEditSuccessModalOpen] = useState(false)
   const [territorioSearch, setTerritorioSearch] = useState("")
   const [institucionSearch, setInstitucionSearch] = useState("")
-  const [responsableSearch, setResponsableSearch] = useState("")
 const [responsableSearch, setResponsableSearch] = useState("")
 
 const [bitacoraData, setBitacoraData] = useState<BitacoraConsultaDTO[]>([])
