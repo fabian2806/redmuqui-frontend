@@ -16,7 +16,7 @@ import {
   Tag,
   User,
 } from "lucide-react"
-import { toast } from "sonner"
+import { SuccessDialog } from "@/components/ui/success-dialog"
 import { AppLayout } from "@/components/layout/app-layout"
 import { Spinner } from "@/components/ui/spinner"
 import { StatusBadge, TypeBadge } from "@/components/ui/status-badge"
@@ -69,6 +69,11 @@ export default function DocumentoDetallePage({
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [cambiandoEstado, setCambiandoEstado] = useState(false)
+  const [successOpen, setSuccessOpen] = useState(false)
+  const [successMessage, setSuccessMessage] = useState({
+    title: "",
+    description: "",
+  })
 
   async function cargarDocumento(cancelled: { value: boolean }) {
     setLoading(true)
@@ -119,20 +124,33 @@ export default function DocumentoDetallePage({
 
   async function handleCambiarEstado(nuevoEstado: EstadoDocumento) {
     if (!doc) return
+
     setCambiandoEstado(true)
+
     try {
       await api.patch<DocumentoResponse>(
         `/documentos/${doc.id}/estado?estado=${nuevoEstado}`,
       )
-      toast.success(`Estado actualizado a "${ESTADO_LABEL[nuevoEstado]}"`)
+
       const cancelled = { value: false }
       await cargarDocumento(cancelled)
+
+      setSuccessMessage({
+        title: "Estado actualizado exitosamente",
+        description: `El documento ahora se encuentra en estado "${ESTADO_LABEL[nuevoEstado]}".`,
+      })
+
+      setSuccessOpen(true)
     } catch (err) {
-      toast.error(
-        err instanceof ApiError
-          ? err.message
-          : "No se pudo cambiar el estado",
-      )
+      setSuccessMessage({
+        title: "No se pudo actualizar el estado",
+        description:
+          err instanceof ApiError
+            ? err.message
+            : "Inténtalo nuevamente.",
+      })
+
+      setSuccessOpen(true)
     } finally {
       setCambiandoEstado(false)
     }
@@ -408,6 +426,12 @@ export default function DocumentoDetallePage({
             </section>
           </>
         ) : null}
+        <SuccessDialog
+          open={successOpen}
+          title={successMessage.title}
+          description={successMessage.description}
+          onClose={() => setSuccessOpen(false)}
+        />
       </div>
     </AppLayout>
   )

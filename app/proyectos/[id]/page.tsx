@@ -1,5 +1,6 @@
 "use client"
 
+import { SuccessDialog } from "@/components/ui/success-dialog"
 import React, { useEffect, useMemo, useState, use } from "react"
 import { PermissionGuard } from "@/components/auth/permission-guard"
 import { AppLayout } from "@/components/layout/app-layout"
@@ -10,9 +11,15 @@ import {
   getProyectoById,
   getHitosByProyecto,
   getDocumentosByProyecto,
-  getBitacoraByEntidad,
   hitos as allHitos
 } from "@/lib/data"
+import {
+  consultarBitacoraPorEntidad,
+  crearObservacion,
+  listarObservacionesPorEntidad,
+  type BitacoraConsultaDTO,
+  type ObservacionResponseDTO,
+} from "@/lib/trazabilidad"
 import type { Hito as HitoMock, Proyecto as ProyectoMock } from "@/lib/data"
 import { api, ApiError } from "@/lib/api"
 import { ESTADOS_PROYECTO, normalizarEstadoProyecto } from "@/lib/project-status"
@@ -66,8 +73,10 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { useToast } from "@/components/ui/use-toast"
 
-type TabType = "resumen" | "actividades" | "hitos" | "informes" | "equipo" | "bitacora"
+type TabType = "resumen" | "actividades" | "hitos" | "informes" | "equipo" | "bitacora" | "observaciones"
 type HitoEstadoUi = "Pendiente" | "En curso" | "Finalizado"
 type HitoDetalle = {
   id: string
@@ -95,6 +104,8 @@ type ProyectoDetalle = Omit<ProyectoMock, "macroregion" | "ejeTematico" | "estad
 
 const DIAS_ALERTA_ACTIVIDAD = 15
 const ACTIVIDADES_POR_PAGINA = 15
+const ENTIDAD_REFERENCIADA_PROYECTO = "PROYECTO"
+const TRAZABILIDAD_PAGE_SIZE = 10
 
 function parseLocalDate(date: string): Date {
   return new Date(`${date}T00:00:00`)
@@ -123,8 +134,24 @@ function formatPercent(value: number | null | undefined, decimals = 1): string {
   return `${safeValue.toFixed(decimals)}%`
 }
 
-function getActividadAvance(actividad: { porcentajeAvance?: number | null; estado: string }): number {
-  return actividad.porcentajeAvance ?? (actividad.estado === "FINALIZADA" ? 100 : 0)
+function getActividadAvance(actividad: {
+  porcentajeAvance?: number | null
+  estado: string
+}): number {
+  return actividad.porcentajeAvance
+    ?? (actividad.estado === "FINALIZADA" ? 100 : 0)
+}
+
+function formatDateTime(iso: string | null | undefined): string {
+  if (!iso) return "—"
+
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return iso
+
+  return date.toLocaleString("es-PE", {
+    dateStyle: "short",
+    timeStyle: "short",
+  })
 }
 
 function normalizeSearch(value: string): string {
@@ -368,6 +395,7 @@ function MockDataTag() {
 
 export default function ProyectoDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params)
+  const { toast } = useToast()
   const { loading: authLoading, hasPermission } = useAuth()
   const puedeVerProyectos = hasPermission("PROYECTOS_READ")
   const puedeActualizarProyectos = hasPermission("PROYECTOS_UPDATE")
@@ -403,6 +431,27 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
   const [territorioSearch, setTerritorioSearch] = useState("")
   const [institucionSearch, setInstitucionSearch] = useState("")
   const [responsableSearch, setResponsableSearch] = useState("")
+const [responsableSearch, setResponsableSearch] = useState("")
+
+const [bitacoraData, setBitacoraData] = useState<BitacoraConsultaDTO[]>([])
+const [bitacoraPage, setBitacoraPage] = useState(0)
+const [bitacoraTotalPages, setBitacoraTotalPages] = useState(0)
+const [bitacoraFirst, setBitacoraFirst] = useState(true)
+const [bitacoraLast, setBitacoraLast] = useState(true)
+const [bitacoraLoading, setBitacoraLoading] = useState(false)
+const [expandedEntries, setExpandedEntries] = useState<Record<string, boolean>>({})
+
+const [observacionesData, setObservacionesData] = useState<ObservacionResponseDTO[]>([])
+const [observacionesPage, setObservacionesPage] = useState(0)
+const [observacionesTotalPages, setObservacionesTotalPages] = useState(0)
+const [observacionesFirst, setObservacionesFirst] = useState(true)
+const [observacionesLast, setObservacionesLast] = useState(true)
+const [observacionesLoading, setObservacionesLoading] = useState(false)
+const [observacionesReloadKey, setObservacionesReloadKey] = useState(0)
+const [observacionModalOpen, setObservacionModalOpen] = useState(false)
+const [observacionDescripcion, setObservacionDescripcion] = useState("")
+const [observacionSubmitting, setObservacionSubmitting] = useState(false)
+
   const [editFormProyecto, setEditFormProyecto] = useState({
     nombre: "",
     codigoInterno: "",
@@ -915,19 +964,178 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
     return () => { cancelled = true }
   }, [id, authLoading, puedeVerProyectos, puedeVerUsuarios])
 
-  const sincronizarAvancePlan = async () => {
+const sincronizarAvancePlan = async () => {
+  try {
+    const [
+      proyectoActualizado,
+      hitosActualizados,
+      actividadesActualizadas,
+    ] = await Promise.all([
+      api.get<ProyectoResponse>(`/proyectos/${id}`),
+      api.get<HitoResponse[] | { content: HitoResponse[] }>(
+        `/proyectos/${id}/hitos`,
+      ),
+      api.get<PageResponse<ActividadResponse>>(
+        `/actividades?proyectoId=${id}&size=100`,
+      ),
+    ])
+
+    setApiProyecto(proyectoActualizado)
+
+    const listaHitos = Array.isArray(hitosActualizados)
+      ? hitosActualizados
+      : hitosActualizados.content
+
+    setHitosState(listaHitos.map(hitoDesdeApi))
+    setActividadesApi(actividadesActualizadas.content)
+  } catch (error) {
+    setHitosError(
+      `La operación se guardó, pero no se pudo actualizar el resumen: ${getApiErrorMessage(error)}`,
+    )
+  }
+}
+  useEffect(() => {
+    setBitacoraPage(0)
+    setObservacionesPage(0)
+  }, [id])
+
+  useEffect(() => {
+    if (authLoading || !puedeVerBitacora || activeTab !== "bitacora") return
+
+    const proyectoId = Number(id)
+    if (Number.isNaN(proyectoId)) return
+
+    let cancelled = false
+
+    async function cargarBitacora() {
+      setBitacoraLoading(true)
+      try {
+        const page = await consultarBitacoraPorEntidad(
+          ENTIDAD_REFERENCIADA_PROYECTO,
+          proyectoId,
+          { page: bitacoraPage, size: TRAZABILIDAD_PAGE_SIZE },
+        )
+        if (!cancelled) {
+          setBitacoraData(page.content)
+          setBitacoraTotalPages(page.totalPages)
+          setBitacoraFirst(page.first)
+          setBitacoraLast(page.last)
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setBitacoraData([])
+          toast({
+            variant: "destructive",
+            title: "Error al cargar la bitácora",
+            description: getApiErrorMessage(error),
+          })
+        }
+      } finally {
+        if (!cancelled) {
+          setBitacoraLoading(false)
+        }
+      }
+    }
+
+    cargarBitacora()
+
+    return () => {
+      cancelled = true
+    }
+  }, [id, authLoading, puedeVerBitacora, activeTab, bitacoraPage, toast])
+
+  useEffect(() => {
+    if (authLoading || !puedeVerProyectos || activeTab !== "observaciones") return
+
+    const proyectoId = Number(id)
+    if (Number.isNaN(proyectoId)) return
+
+    let cancelled = false
+
+    async function cargarObservaciones() {
+      setObservacionesLoading(true)
+      try {
+        const page = await listarObservacionesPorEntidad(
+          ENTIDAD_REFERENCIADA_PROYECTO,
+          proyectoId,
+          { page: observacionesPage, size: TRAZABILIDAD_PAGE_SIZE },
+        )
+        if (!cancelled) {
+          setObservacionesData(page.content)
+          setObservacionesTotalPages(page.totalPages)
+          setObservacionesFirst(page.first)
+          setObservacionesLast(page.last)
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setObservacionesData([])
+          toast({
+            variant: "destructive",
+            title: "Error al cargar observaciones",
+            description: getApiErrorMessage(error),
+          })
+        }
+      } finally {
+        if (!cancelled) {
+          setObservacionesLoading(false)
+        }
+      }
+    }
+
+    cargarObservaciones()
+
+    return () => {
+      cancelled = true
+    }
+  }, [id, authLoading, puedeVerProyectos, activeTab, observacionesPage, observacionesReloadKey, toast])
+
+  const toggleBitacoraEntry = (key: string) =>
+    setExpandedEntries((prev) => ({ ...prev, [key]: !prev[key] }))
+
+  const registrarObservacion = async () => {
+    const descripcion = observacionDescripcion.trim()
+    if (!descripcion) {
+      toast({
+        variant: "destructive",
+        title: "Descripción requerida",
+        description: "Ingresa el detalle de la incidencia antes de enviar.",
+      })
+      return
+    }
+
+    const proyectoId = Number(id)
+    if (Number.isNaN(proyectoId)) {
+      toast({
+        variant: "destructive",
+        title: "Proyecto inválido",
+        description: "No se pudo identificar el proyecto para registrar la observación.",
+      })
+      return
+    }
+
+    setObservacionSubmitting(true)
     try {
-      const [proyectoActualizado, hitosActualizados, actividadesActualizadas] = await Promise.all([
-        api.get<ProyectoResponse>(`/proyectos/${id}`),
-        api.get<HitoResponse[] | { content: HitoResponse[] }>(`/proyectos/${id}/hitos`),
-        api.get<PageResponse<ActividadResponse>>("/actividades?proyectoId=" + id + "&size=100"),
-      ])
-      setApiProyecto(proyectoActualizado)
-      const listaHitos = Array.isArray(hitosActualizados) ? hitosActualizados : hitosActualizados.content
-      setHitosState(listaHitos.map(hitoDesdeApi))
-      setActividadesApi(actividadesActualizadas.content)
+      await crearObservacion({
+        descripcion,
+        entidadReferenciada: ENTIDAD_REFERENCIADA_PROYECTO,
+        idEntidadReferenciada: proyectoId,
+      })
+      setObservacionModalOpen(false)
+      setObservacionDescripcion("")
+      setObservacionesPage(0)
+      setObservacionesReloadKey((current) => current + 1)
+      toast({
+        title: "Incidencia registrada",
+        description: "La observación se guardó correctamente.",
+      })
     } catch (error) {
-      setHitosError(`La operación se guardó, pero no se pudo actualizar el resumen: ${getApiErrorMessage(error)}`)
+      toast({
+        variant: "destructive",
+        title: "No se pudo registrar la incidencia",
+        description: getApiErrorMessage(error),
+      })
+    } finally {
+      setObservacionSubmitting(false)
     }
   }
 
@@ -1144,7 +1352,6 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
   )
 
   const documentos = getDocumentosByProyecto(id)
-  const bitacora = getBitacoraByEntidad(id)
 
   const equipoVisual = apiProyecto
     ? apiEquipo.map(miembro => {
@@ -1186,6 +1393,7 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
     { id: "informes" as TabType, label: "Informes y Productos" },
     { id: "equipo" as TabType, label: "Equipo" },
     { id: "bitacora" as TabType, label: "Bitácora" },
+    { id: "observaciones" as TabType, label: "Observaciones" },
   ]
   const visibleTabs = tabs.filter((tab) => tab.id !== "bitacora" || puedeVerBitacora)
 
@@ -1360,26 +1568,12 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
               </DialogContent>
             </Dialog>
 
-            <Dialog open={editSuccessModalOpen} onOpenChange={setEditSuccessModalOpen}>
-              <DialogContent className="sm:max-w-md" showCloseButton={false}>
-                <DialogHeader>
-                  <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-green-100">
-                    <CheckCircle2 className="h-8 w-8 text-green-600" />
-                  </div>
-                  <DialogTitle className="text-center text-lg">
-                    Proyecto actualizado exitosamente
-                  </DialogTitle>
-                  <DialogDescription className="text-center">
-                    Los cambios se han guardado correctamente.
-                  </DialogDescription>
-                </DialogHeader>
-                <DialogFooter className="sm:justify-center">
-                  <Button type="button" onClick={() => setEditSuccessModalOpen(false)} className="bg-[#FFD600] text-[#1A1A1A] hover:bg-[#C9A42B]">
-                    Aceptar
-                  </Button>
-                </DialogFooter>
-              </DialogContent>
-            </Dialog>
+            <SuccessDialog
+              open={editSuccessModalOpen}
+              title="Proyecto actualizado exitosamente"
+              description="Los cambios se han guardado correctamente."
+              onClose={() => setEditSuccessModalOpen(false)}
+            />
             </>
             )}
 
@@ -3047,30 +3241,229 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
                   <h3 className="text-sm font-bold uppercase tracking-wide text-[#5C5C5C]">
                     Historial de Cambios
                   </h3>
-                  <MockDataTag />
                 </div>
-                {bitacora.length > 0 ? (
+                {bitacoraLoading ? (
+                  <div className="text-center py-8 text-sm text-[#5C5C5C]">
+                    Cargando bitácora...
+                  </div>
+                ) : bitacoraData.length > 0 ? (
                   <div className="space-y-4">
-                    {bitacora.map(entry => (
-                      <div key={entry.id} className="flex gap-4 rounded-lg border border-[#E0E0E0] p-4">
-                        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#F7F7F7]">
-                          <Clock className="h-4 w-4 text-[#5C5C5C]" />
-                        </div>
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2">
-                            <span className="text-sm font-medium text-[#1A1A1A]">{entry.usuario}</span>
-                            <span className="text-xs text-[#5C5C5C]">•</span>
-                            <span className="text-xs text-[#5C5C5C]">{entry.accion}</span>
+                    {bitacoraData.map((entry, index) => {
+                      const entryKey = `${entry.fecha}-${entry.tipoAccion}-${index}`
+                      const exigeControles =
+                        entry.descripcion.length > 120 || entry.descripcion.includes("\n")
+                      const isExpanded = expandedEntries[entryKey]
+
+                      return (
+                        <div
+                          key={entryKey}
+                          className="flex gap-4 rounded-lg border border-[#E0E0E0] p-4"
+                        >
+                          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#F7F7F7]">
+                            <Clock className="h-4 w-4 text-[#5C5C5C]" />
                           </div>
-                          <p className="text-sm text-[#5C5C5C] mt-1">{entry.descripcion}</p>
-                          <p className="text-xs text-[#5C5C5C] mt-2">{entry.fecha}</p>
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2">
+                              <span className="text-sm font-medium text-[#1A1A1A]">{entry.nombre}</span>
+                              <span className="text-xs text-[#5C5C5C]">•</span>
+                              <span className="text-xs text-[#5C5C5C]">{entry.tipoAccion}</span>
+                            </div>
+                            <div 
+                              className={`text-sm text-[#5C5C5C] mt-1 ${
+                                !isExpanded && exigeControles 
+                                  ? "line-clamp-2 text-ellipsis overflow-hidden" 
+                                  : ""
+                              }`}
+                            >
+                              {entry.descripcion.split('\n').map((line, i, array) => (
+                                <React.Fragment key={i}>
+                                  {line}
+                                  {i < array.length - 1 && <br />}
+                                </React.Fragment>
+                              ))}
+                            </div>
+                            {exigeControles && (
+                              <button
+                                type="button"
+                                onClick={() => toggleBitacoraEntry(entryKey)}
+                                className="mt-1 text-xs font-semibold text-[#C9A42B] hover:text-[#FFD600] transition-colors"
+                              >
+                                {isExpanded ? "Ver menos cambios ▲" : "Ver todos los cambios ▼"}
+                              </button>
+                            )}
+                            <p className="text-xs text-[#5C5C5C] mt-2">{formatDateTime(entry.fecha)}</p>
+                          </div>
                         </div>
-                      </div>
-                    ))}
+                      )
+                    })}
                   </div>
                 ) : (
                   <div className="text-center py-8 text-sm text-[#5C5C5C]">
                     No hay registros en la bitácora.
+                  </div>
+                )}
+                {(bitacoraTotalPages > 1 || bitacoraPage > 0) && (
+                  <div className="mt-6 flex items-center justify-between border-t border-[#E0E0E0] pt-4">
+                    <p className="text-xs text-[#5C5C5C]">
+                      Página {bitacoraPage + 1} de {Math.max(bitacoraTotalPages, 1)}
+                    </p>
+                    <div className="flex gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={bitacoraFirst || bitacoraLoading}
+                        onClick={() => setBitacoraPage((current) => current - 1)}
+                      >
+                        Anterior
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={bitacoraLast || bitacoraLoading}
+                        onClick={() => setBitacoraPage((current) => current + 1)}
+                      >
+                        Siguiente
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Observaciones Tab */}
+            {activeTab === "observaciones" && (
+              <div className="p-6">
+                <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <h3 className="text-sm font-bold uppercase tracking-wide text-[#5C5C5C]">
+                    Observaciones e Incidencias
+                  </h3>
+                  <Dialog
+                    open={observacionModalOpen}
+                    onOpenChange={(open) => {
+                      setObservacionModalOpen(open)
+                      if (!open) setObservacionDescripcion("")
+                    }}
+                  >
+                    <DialogTrigger asChild>
+                      <Button className="bg-[#FFD600] text-[#1A1A1A] hover:bg-[#C9A42B]">
+                        <AlertTriangle className="mr-2 h-4 w-4" />
+                        Registrar Incidencia
+                      </Button>
+                    </DialogTrigger>
+                    <DialogContent className="sm:max-w-lg">
+                      <DialogHeader>
+                        <DialogTitle>Registrar incidencia</DialogTitle>
+                        <DialogDescription>
+                          Documenta una observación o incidencia asociada a este proyecto.
+                        </DialogDescription>
+                      </DialogHeader>
+                      <div className="space-y-2">
+                        <Label htmlFor="observacion-descripcion">Descripción</Label>
+                        <Textarea
+                          id="observacion-descripcion"
+                          value={observacionDescripcion}
+                          onChange={(event) => setObservacionDescripcion(event.target.value)}
+                          placeholder="Describe la incidencia o observación..."
+                          rows={5}
+                        />
+                      </div>
+                      <DialogFooter>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => setObservacionModalOpen(false)}
+                          disabled={observacionSubmitting}
+                        >
+                          Cancelar
+                        </Button>
+                        <Button
+                          type="button"
+                          onClick={registrarObservacion}
+                          disabled={observacionSubmitting}
+                          className="bg-[#FFD600] text-[#1A1A1A] hover:bg-[#C9A42B]"
+                        >
+                          {observacionSubmitting ? "Guardando..." : "Registrar"}
+                        </Button>
+                      </DialogFooter>
+                    </DialogContent>
+                  </Dialog>
+                </div>
+
+                <div className="rounded-lg border border-[#E0E0E0]">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Fecha</TableHead>
+                        <TableHead>Descripción</TableHead>
+                        <TableHead>Estado</TableHead>
+                        <TableHead>Registrado por</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {observacionesLoading && (
+                        <TableRow>
+                          <TableCell colSpan={4} className="py-8 text-center text-sm text-[#5C5C5C]">
+                            Cargando observaciones...
+                          </TableCell>
+                        </TableRow>
+                      )}
+                      {!observacionesLoading && observacionesData.length === 0 && (
+                        <TableRow>
+                          <TableCell colSpan={4} className="py-8 text-center text-sm text-[#5C5C5C]">
+                            No hay observaciones registradas para este proyecto.
+                          </TableCell>
+                        </TableRow>
+                      )}
+                      {!observacionesLoading && observacionesData.map((observacion) => (
+                        <TableRow key={observacion.id}>
+                          <TableCell className="whitespace-nowrap text-sm text-[#5C5C5C]">
+                            {formatDateTime(observacion.fecha)}
+                          </TableCell>
+                          <TableCell className="text-sm text-[#1A1A1A]">
+                            {observacion.descripcion}
+                          </TableCell>
+                          <TableCell className="text-sm text-[#5C5C5C]">
+                            {observacion.estado}
+                          </TableCell>
+                          <TableCell className="text-sm text-[#5C5C5C]">
+                            {observacion.nombreUsuario ?? "—"}
+                            {observacion.emailUsuario ? (
+                              <span className="block text-xs text-[#5C5C5C]">{observacion.emailUsuario}</span>
+                            ) : null}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+
+                {(observacionesTotalPages > 1 || observacionesPage > 0) && (
+                  <div className="mt-6 flex items-center justify-between border-t border-[#E0E0E0] pt-4">
+                    <p className="text-xs text-[#5C5C5C]">
+                      Página {observacionesPage + 1} de {Math.max(observacionesTotalPages, 1)}
+                    </p>
+                    <div className="flex gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={observacionesFirst || observacionesLoading}
+                        onClick={() => setObservacionesPage((current) => current - 1)}
+                      >
+                        Anterior
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={observacionesLast || observacionesLoading}
+                        onClick={() => setObservacionesPage((current) => current + 1)}
+                      >
+                        Siguiente
+                      </Button>
+                    </div>
                   </div>
                 )}
               </div>
