@@ -22,6 +22,7 @@ import {
 } from "@/lib/trazabilidad"
 import type { Hito as HitoMock, Proyecto as ProyectoMock } from "@/lib/data"
 import { api, ApiError } from "@/lib/api"
+import { formatDateOnly, parseDateOnly } from "@/lib/date-only"
 import { ESTADOS_PROYECTO, normalizarEstadoProyecto } from "@/lib/project-status"
 import type {
   MacroregionRef,
@@ -107,10 +108,6 @@ const ACTIVIDADES_POR_PAGINA = 15
 const ENTIDAD_REFERENCIADA_PROYECTO = "PROYECTO"
 const TRAZABILIDAD_PAGE_SIZE = 10
 
-function parseLocalDate(date: string): Date {
-  return new Date(`${date}T00:00:00`)
-}
-
 function startOfToday(): Date {
   const today = new Date()
   today.setHours(0, 0, 0, 0)
@@ -118,15 +115,12 @@ function startOfToday(): Date {
 }
 
 function getDiasHastaFecha(date: string, today = startOfToday()): number {
-  const fechaFin = parseLocalDate(date)
+  const fechaFin = parseDateOnly(date)
   return Math.ceil((fechaFin.getTime() - today.getTime()) / (1000 * 60 * 60 * 24))
 }
 
 function formatLocalDate(date: string | null | undefined): string {
-  if (!date) return "—"
-  const [year, month, day] = date.split("-")
-  if (!year || !month || !day) return date
-  return `${day}/${month}/${year}`
+  return formatDateOnly(date)
 }
 
 function formatPercent(value: number | null | undefined, decimals = 1): string {
@@ -2940,7 +2934,7 @@ const sincronizarAvancePlan = async () => {
                                 <div className="flex-1 min-w-0">
                                   <p className="text-sm font-medium text-[#1A1A1A]">{hito.nombre}</p>
                                   <p className="text-xs text-[#5C5C5C] mt-1">
-                                    {new Date(hito.fecha).toLocaleDateString("es-PE", {
+                                    {formatDateOnly(hito.fecha, {
                                       year: "numeric",
                                       month: "long",
                                       day: "numeric"

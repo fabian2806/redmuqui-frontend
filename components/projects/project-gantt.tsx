@@ -10,13 +10,13 @@ import {
   endOfQuarter,
   endOfWeek,
   format,
-  parseISO,
   startOfMonth,
   startOfQuarter,
   startOfWeek,
 } from "date-fns"
 import { es } from "date-fns/locale"
 import { ChevronDown, ChevronRight } from "lucide-react"
+import { parseDateOnly } from "@/lib/date-only"
 import type { ActividadResponse } from "@/lib/types"
 
 type GanttHito = { id: string; nombre: string }
@@ -103,8 +103,8 @@ function buildTimeline(inicio: Date, fin: Date, scale: GanttScale) {
 }
 
 function getActivityRange(actividad: ActividadResponse) {
-  const start = parseISO(actividad.fechaInicio!)
-  const end = parseISO(actividad.fechaFin!)
+  const start = parseDateOnly(actividad.fechaInicio!)
+  const end = parseDateOnly(actividad.fechaFin!)
   const duration = Math.max(1, differenceInCalendarDays(end, start) + 1)
 
   return { start, end, duration }
@@ -142,7 +142,12 @@ export function ProjectGantt({ hitos, actividades }: { hitos: GanttHito[]; activ
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set())
 
   const programadas = useMemo(
-    () => actividades.filter(a => a.fechaInicio && a.fechaFin && parseISO(a.fechaFin) >= parseISO(a.fechaInicio)),
+    () => actividades.filter(a => {
+      if (!a.fechaInicio || !a.fechaFin) return false
+      const start = parseDateOnly(a.fechaInicio)
+      const end = parseDateOnly(a.fechaFin)
+      return !Number.isNaN(start.getTime()) && !Number.isNaN(end.getTime()) && end >= start
+    }),
     [actividades],
   )
 
@@ -164,8 +169,8 @@ export function ProjectGantt({ hitos, actividades }: { hitos: GanttHito[]; activ
     return <div className="rounded-lg border border-dashed border-[#D8D8D8] p-8 text-center text-sm text-[#5C5C5C]">Agrega fechas de inicio y fin a las actividades para generar el diagrama de Gantt.</div>
   }
 
-  const fechasInicio = programadas.map(a => parseISO(a.fechaInicio!))
-  const fechasFin = programadas.map(a => parseISO(a.fechaFin!))
+  const fechasInicio = programadas.map(a => parseDateOnly(a.fechaInicio!))
+  const fechasFin = programadas.map(a => parseDateOnly(a.fechaFin!))
   const timeline = buildTimeline(new Date(Math.min(...fechasInicio.map(Number))), new Date(Math.max(...fechasFin.map(Number))), scale)
   const totalDias = Math.max(1, differenceInCalendarDays(timeline.end, timeline.start) + 1)
   const anchoTimeline = Math.max(720, timeline.units.length * timeline.unitWidth)

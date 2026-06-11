@@ -20,6 +20,7 @@ import {
   TypeBadge,
 } from "@/components/ui/status-badge"
 import { api, ApiError } from "@/lib/api"
+import { formatDateOnly } from "@/lib/date-only"
 import { useAuth } from "@/hooks/useAuth"
 import type {
   EjeTematico,
@@ -48,8 +49,7 @@ function macroregionesProyecto(proyecto: ProyectoResponse) {
 }
 
 function formatDate(date: string | null): string {
-  if (!date) return "-"
-  return new Date(`${date}T00:00:00`).toLocaleDateString("es-PE")
+  return formatDateOnly(date, {}, "-")
 }
 
 function formatCurrency(value: number | null): string {
