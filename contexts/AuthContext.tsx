@@ -19,7 +19,7 @@ import {
   useState,
   type ReactNode,
 } from "react"
-import { api, ApiError } from "@/lib/api"
+import { api } from "@/lib/api"
 import {
   clearTokens,
   login as authLogin,
@@ -150,13 +150,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const me = await api.get<UsuarioResponse>("/usuarios/me")
       setUser(me)
     } catch (err) {
-      if (err instanceof ApiError) {
-        // Si no se puede cargar el usuario real, no concedemos acceso.
-        clearTokens()
-        throw err
-      } else {
-        throw err
-      }
+      // Si no se puede cargar el usuario real (sea ApiError o error de red),
+      // no concedemos acceso: limpiamos tokens y la cookie de presencia para
+      // no dejar una sesión "presente" con user=null que el middleware
+      // dejaría pasar a rutas protegidas.
+      clearTokens()
+      throw err
     }
   }, [])
 
