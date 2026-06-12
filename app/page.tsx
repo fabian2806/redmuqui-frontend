@@ -11,7 +11,8 @@ import {
   FileText,
   BookOpen,
   Eye,
-  ChevronRight
+  ChevronRight,
+  Map as MapaIcon
 } from "lucide-react"
 import Link from "next/link"
 import { useState, useEffect } from "react"
@@ -233,6 +234,26 @@ export default function DashboardPage() {
         </h1>
         <p className="text-sm text-[#5C5C5C] capitalize">{formattedDate}</p>
       </div>
+
+      {/* Teaser Mapa Territorial */}
+      <Link
+        href="/cobertura"
+        className="mb-8 flex items-center gap-4 rounded-lg border border-[#C9A42B]/30 bg-gradient-to-r from-[#FFF8D6] to-white p-4 shadow-sm transition-colors hover:border-[#C9A42B]/60"
+      >
+        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-[#FFD600]">
+          <MapaIcon className="h-6 w-6 text-[#1A1A1A]" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-bold text-[#1A1A1A]">Mapa Territorial del Perú</p>
+          <p className="text-xs text-[#5C5C5C]">
+            Cobertura de la red por departamento: proyectos, presupuesto, beneficiarios e instituciones.
+          </p>
+        </div>
+        <span className="flex items-center gap-1 whitespace-nowrap text-xs font-medium text-[#C9A42B]">
+          Ver mapa
+          <ChevronRight className="h-4 w-4" />
+        </span>
+      </Link>
 
       {/* KPI Cards */}
       {indicadoresError ? (

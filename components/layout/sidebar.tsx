@@ -10,6 +10,7 @@ import {
   FileText,
   FolderKanban,
   LayoutDashboard,
+  Map as MapaIcon,
   Mountain,
   Settings,
   Users,
@@ -19,6 +20,7 @@ import { cn } from "@/lib/utils"
 
 const navItems = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/cobertura", label: "Mapa Territorial", icon: MapaIcon, permiso: "REPORTES_READ" },
   { href: "/proyectos", label: "Proyectos", icon: FolderKanban, permiso: "PROYECTOS_READ" },
   { href: "/documentos", label: "Documentos e Informes", icon: FileText, permiso: "DOCUMENTOS_READ" },
   { href: "/reportes", label: "Reportes", icon: BarChart3, permiso: "REPORTES_READ" },
