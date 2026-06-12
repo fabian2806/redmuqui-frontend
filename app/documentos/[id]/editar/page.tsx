@@ -1,6 +1,13 @@
 "use client"
 
-import { use, useEffect, useState, type ChangeEvent, type FormEvent } from "react"
+import {
+  use,
+  useEffect,
+  useMemo,
+  useState,
+  type ChangeEvent,
+  type FormEvent,
+} from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { SuccessDialog } from "@/components/ui/success-dialog"
@@ -84,7 +91,7 @@ export default function EditarDocumentoPage({
 }) {
   const { id } = use(params)
   const router = useRouter()
-  const { hasPermission } = useAuth()
+  const { hasPermission, user } = useAuth()
   const puedeValidar = hasPermission("DOCUMENTOS_VALIDATE")
 
   const [formData, setFormData] = useState<FormState>(emptyFormState)
@@ -135,25 +142,20 @@ export default function EditarDocumentoPage({
       setLoading(true)
       setError(null)
       try {
-        const [
-          docData,
-          proyectosData,
-          ejesData,
-          territoriosData,
-          usuariosData,
-          archivosData,
-        ] = await Promise.all([
-          api.get<DocumentoResponse>(`/documentos/${id}`),
-          api.get<PageResponse<ProyectoResponse>>(
-            "/proyectos?page=0&size=100&sort=nombre,asc",
-          ),
-          api.get<EjeTematico[]>("/ejes-tematicos"),
-          api.get<Territorio[]>("/territorios"),
-          api.get<PageResponse<UsuarioResponse>>(
-            "/usuarios?page=0&size=100&sort=apellidos,asc",
-          ),
-          obtenerArchivosDocumento(Number(id)),
-        ])
+        // /usuarios NO va aquí: requiere USUARIOS_READ y un TECNICO/CONSULTOR
+        // recibe 403. Se carga en un useEffect aparte (más abajo) con fallback
+        // para no romper la pantalla. Los archivos sí: quien puede editar el
+        // documento puede listarlos.
+        const [docData, proyectosData, ejesData, territoriosData, archivosData] =
+          await Promise.all([
+            api.get<DocumentoResponse>(`/documentos/${id}`),
+            api.get<PageResponse<ProyectoResponse>>(
+              "/proyectos?page=0&size=100&sort=nombre,asc",
+            ),
+            api.get<EjeTematico[]>("/ejes-tematicos"),
+            api.get<Territorio[]>("/territorios"),
+            obtenerArchivosDocumento(Number(id)),
+          ])
 
         if (cancelled) return
 
@@ -185,8 +187,8 @@ export default function EditarDocumentoPage({
         setProyectos(proyectosData.content)
         setEjesTematicos(ejesData)
         setTerritorios(territoriosData)
-        setUsuarios(usuariosData.content.filter((u) => u.estado))
         setArchivosGuardados(archivosData)
+        // setUsuarios lo gestiona el useEffect dedicado a /usuarios (con fallback 403)
       } catch (err) {
         if (!cancelled) {
           setError(
@@ -205,6 +207,45 @@ export default function EditarDocumentoPage({
       cancelled = true
     }
   }, [id])
+
+  // /usuarios requiere USUARIOS_READ (solo ADMINISTRADOR/COORDINADOR). Un
+  // TECNICO con DOCUMENTOS_UPDATE puede editar pero no listar usuarios: lo
+  // cargamos por separado para que su 403 NO impida cargar el documento. Si
+  // falla, degradamos al usuario actual; los responsables ya asignados al
+  // documento se conservan en el formulario y se reenvían al guardar.
+  useEffect(() => {
+    if (!user) return
+    let cancelled = false
+    api
+      .get<PageResponse<UsuarioResponse>>(
+        "/usuarios?page=0&size=100&sort=apellidos,asc",
+      )
+      .then((data) => {
+        if (!cancelled) setUsuarios(data.content.filter((u) => u.estado))
+      })
+      .catch(() => {
+        if (!cancelled) setUsuarios([user])
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [user])
+
+  // Opciones de responsable: la lista de /usuarios MÁS los responsables ya
+  // asignados al documento que no estén en ella (caso TECNICO sin USUARIOS_READ:
+  // se muestran como "Usuario #id" para no perderlos ni reasignarlos por error).
+  const responsableOptions = useMemo(() => {
+    const opciones = usuarios.map((u) => ({ id: u.id, label: nombreCompleto(u) }))
+    const asegurar = (idStr: string) => {
+      const idNum = Number(idStr)
+      if (idStr && Number.isFinite(idNum) && !opciones.some((o) => o.id === idNum)) {
+        opciones.push({ id: idNum, label: `Usuario #${idStr}` })
+      }
+    }
+    asegurar(formData.idRespElaboracion)
+    asegurar(formData.idRespValidacion)
+    return opciones
+  }, [usuarios, formData.idRespElaboracion, formData.idRespValidacion])
 
   const updateField = <K extends keyof FormState>(field: K, value: FormState[K]) => {
     setFormData((current) => ({ ...current, [field]: value }))
@@ -834,17 +875,13 @@ export default function EditarDocumentoPage({
                         onChange={(event) =>
                           updateField("idRespElaboracion", event.target.value)
                         }
-                        disabled={usuarios.length === 0}
+                        disabled={responsableOptions.length === 0}
                         className={`w-full rounded-lg border px-4 py-2.5 text-sm text-[#1A1A1A] focus:border-[#FFD600] focus:outline-none focus:ring-1 focus:ring-[#FFD600] disabled:opacity-60 ${fieldErrorClass("idRespElaboracion")}`}
                       >
-                        <option value="">
-                          {usuarios.length === 0
-                            ? "Sin usuarios disponibles"
-                            : "Seleccionar responsable"}
-                        </option>
-                        {usuarios.map((usuario) => (
-                          <option key={usuario.id} value={usuario.id}>
-                            {nombreCompleto(usuario)}
+                        <option value="">Seleccionar responsable</option>
+                        {responsableOptions.map((opcion) => (
+                          <option key={opcion.id} value={opcion.id}>
+                            {opcion.label}
                           </option>
                         ))}
                       </select>
@@ -860,18 +897,18 @@ export default function EditarDocumentoPage({
                         onChange={(event) =>
                           updateField("idRespValidacion", event.target.value)
                         }
-                        disabled={usuarios.length === 0}
+                        disabled={responsableOptions.length === 0}
                         className={`w-full rounded-lg border px-4 py-2.5 text-sm text-[#1A1A1A] focus:border-[#FFD600] focus:outline-none focus:ring-1 focus:ring-[#FFD600] disabled:opacity-60 ${fieldErrorClass("idRespValidacion")}`}
                       >
                         <option value="">Sin validador asignado</option>
-                        {usuarios
+                        {responsableOptions
                           .filter(
-                            (usuario) =>
-                              String(usuario.id) !== formData.idRespElaboracion,
+                            (opcion) =>
+                              String(opcion.id) !== formData.idRespElaboracion,
                           )
-                          .map((usuario) => (
-                            <option key={usuario.id} value={usuario.id}>
-                              {nombreCompleto(usuario)}
+                          .map((opcion) => (
+                            <option key={opcion.id} value={opcion.id}>
+                              {opcion.label}
                             </option>
                           ))}
                       </select>

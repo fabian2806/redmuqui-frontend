@@ -7,7 +7,7 @@
 //   sepa si hay sesión activa (no contiene el token, solo una bandera).
 // =====================================================================
 
-import { API_BASE_URL } from "./api"
+import { API_BASE_URL, ApiError, DEFAULT_TIMEOUT_MS } from "./api"
 import type {
   LoginRequest,
   RecoverRequest,
@@ -92,22 +92,60 @@ export async function logout(): Promise<void> {
   clearTokens()
 }
 
-export async function refreshAccessToken(): Promise<string | null> {
+// Single-flight: una sola operación de refresh a la vez. Si varios requests
+// reciben 401 simultáneamente (páginas con llamadas en paralelo tras expirar
+// el access token), todos comparten esta misma promesa en lugar de disparar
+// cada uno su propio /auth/refresh. Sin esto, el backend rota y revoca el
+// refresh token en la primera llamada y las siguientes fallan con "revocado",
+// expulsando al usuario al login pese a tener sesión válida.
+let refreshPromise: Promise<string | null> | null = null
+
+export function refreshAccessToken(): Promise<string | null> {
+  if (refreshPromise) return refreshPromise
+  refreshPromise = doRefresh().finally(() => {
+    refreshPromise = null
+  })
+  return refreshPromise
+}
+
+async function doRefresh(): Promise<string | null> {
   const refreshToken = getRefreshToken()
   if (!refreshToken) return null
 
-  const res = await fetch(`${API_BASE_URL}/auth/refresh`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ refreshToken }),
-  })
+  let res: Response
+  try {
+    res = await fetch(`${API_BASE_URL}/auth/refresh`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refreshToken }),
+      signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS),
+    })
+  } catch {
+    // Error de red/timeout: la sesión sigue siendo válida, NO borramos tokens.
+    // Lanzamos ApiError(0) para que el caller lo propague como error de red
+    // (sin clearTokens ni redirect a /login), reservando el `null` de abajo
+    // exclusivamente para "sesión inválida" (token revocado/expirado).
+    throw new ApiError(
+      0,
+      null,
+      "No se pudo conectar con el servidor para renovar la sesión.",
+    )
+  }
 
   if (!res.ok) {
+    // El backend rechazó el refresh (revocado/expirado): sesión inválida.
     clearTokens()
     return null
   }
 
-  const tokens: TokenResponse = await res.json()
+  // Un 200 con cuerpo inválido/vacío se trata como sesión inválida; así un
+  // SyntaxError de res.json() no rechaza la promesa compartida del single-flight.
+  const tokens: TokenResponse | null = await res.json().catch(() => null)
+  if (!tokens?.accessToken) {
+    clearTokens()
+    return null
+  }
+
   setTokens(tokens)
   return tokens.accessToken
 }

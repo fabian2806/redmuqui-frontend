@@ -13,6 +13,10 @@ import type { ErrorResponse } from "./types"
 export const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080/api/v1"
 
+/** Timeout por request (ms). Si el backend acepta la conexión pero no
+ *  responde, abortamos para no dejar spinners colgados indefinidamente. */
+export const DEFAULT_TIMEOUT_MS = 30_000
+
 export class ApiError extends Error {
   constructor(
     public status: number,
@@ -45,11 +49,27 @@ async function rawFetch<T>(
     headers.Authorization = `Bearer ${accessToken}`
   }
 
-  const res = await fetch(`${API_BASE_URL}${path}`, {
-    method: options.method ?? "GET",
-    headers,
-    body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
-  })
+  let res: Response
+  try {
+    res = await fetch(`${API_BASE_URL}${path}`, {
+      method: options.method ?? "GET",
+      headers,
+      body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
+      signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS),
+    })
+  } catch (err) {
+    // fetch rechaza por backend caído / sin red / timeout. Lo normalizamos a
+    // ApiError con status 0 para que los callers lo distingan de un error de
+    // negocio (y para que NO dispare el flujo de refresh/redirect a login).
+    const isTimeout = (err as { name?: string } | null)?.name === "TimeoutError"
+    throw new ApiError(
+      0,
+      null,
+      isTimeout
+        ? "La solicitud tardó demasiado. Revisa tu conexión e inténtalo de nuevo."
+        : "No se pudo conectar con el servidor. Verifica tu conexión.",
+    )
+  }
 
   if (res.status === 204) return undefined as T
 
