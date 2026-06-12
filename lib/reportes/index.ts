@@ -1,4 +1,5 @@
 export type {
+  CoberturaTerritorial,
   Conteo,
   DocumentoReciente,
   Indicadores,
@@ -11,4 +12,5 @@ export {
   obtenerActividadesPorEstado,
   obtenerProyectosEnRiesgo,
   obtenerDocumentosRecientes,
+  obtenerCoberturaTerritorial,
 } from "./reportes.service"
