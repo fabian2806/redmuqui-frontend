@@ -1,16 +1,22 @@
 "use client"
 
-import { use, useEffect, useState, type FormEvent } from "react"
+import { use, useEffect, useState, type ChangeEvent, type FormEvent } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { SuccessDialog } from "@/components/ui/success-dialog"
-import { AlertCircle, ChevronRight, Save , X} from "lucide-react"
+import { AlertCircle, ChevronRight, FileText, Save, Trash2, Upload, X } from "lucide-react"
 import { AppLayout } from "@/components/layout/app-layout"
 import { Spinner } from "@/components/ui/spinner"
 import { useAuth } from "@/hooks/useAuth"
 import { api, ApiError } from "@/lib/api"
 import {
+  obtenerArchivosDocumento,
+  obtenerUrlDescargaArchivo,
+  subirArchivoDocumento,
+} from "@/lib/documentos-archivos"
+import {
   TIPOS_DOCUMENTO,
+  type ArchivoResponse,
   type DocumentoResponse,
   type DocumentoUpdate,
   type EjeTematico,
@@ -22,6 +28,7 @@ import {
 } from "@/lib/types"
 
 const TITULO_MAX = 255
+const MAX_FILE_SIZE = 20 * 1024 * 1024
 
 interface FormState {
   titulo: string
@@ -98,6 +105,8 @@ export default function EditarDocumentoPage({
   })
 
   const [feedbackCards, setFeedbackCards] = useState<FeedbackCard[]>([])
+  const [archivosAdjuntos, setArchivosAdjuntos] = useState<File[]>([])
+  const [archivosGuardados, setArchivosGuardados] = useState<ArchivoResponse[]>([])
 
   const addFeedbackCard = (card: Omit<FeedbackCard, "id">) => {
     const id = Date.now()
@@ -126,18 +135,25 @@ export default function EditarDocumentoPage({
       setLoading(true)
       setError(null)
       try {
-        const [docData, proyectosData, ejesData, territoriosData, usuariosData] =
-          await Promise.all([
-            api.get<DocumentoResponse>(`/documentos/${id}`),
-            api.get<PageResponse<ProyectoResponse>>(
-              "/proyectos?page=0&size=100&sort=nombre,asc",
-            ),
-            api.get<EjeTematico[]>("/ejes-tematicos"),
-            api.get<Territorio[]>("/territorios"),
-            api.get<PageResponse<UsuarioResponse>>(
-              "/usuarios?page=0&size=100&sort=apellidos,asc",
-            ),
-          ])
+        const [
+          docData,
+          proyectosData,
+          ejesData,
+          territoriosData,
+          usuariosData,
+          archivosData,
+        ] = await Promise.all([
+          api.get<DocumentoResponse>(`/documentos/${id}`),
+          api.get<PageResponse<ProyectoResponse>>(
+            "/proyectos?page=0&size=100&sort=nombre,asc",
+          ),
+          api.get<EjeTematico[]>("/ejes-tematicos"),
+          api.get<Territorio[]>("/territorios"),
+          api.get<PageResponse<UsuarioResponse>>(
+            "/usuarios?page=0&size=100&sort=apellidos,asc",
+          ),
+          obtenerArchivosDocumento(Number(id)),
+        ])
 
         if (cancelled) return
 
@@ -170,6 +186,7 @@ export default function EditarDocumentoPage({
         setEjesTematicos(ejesData)
         setTerritorios(territoriosData)
         setUsuarios(usuariosData.content.filter((u) => u.estado))
+        setArchivosGuardados(archivosData)
       } catch (err) {
         if (!cancelled) {
           setError(
@@ -201,6 +218,85 @@ export default function EditarDocumentoPage({
         ? current.idTerritorios.filter((item) => item !== value)
         : [...current.idTerritorios, value],
     }))
+  }
+
+  const handleArchivosChange = (event: ChangeEvent<HTMLInputElement>) => {
+  const files = Array.from(event.target.files ?? [])
+
+  if (files.length === 0) return
+
+  const archivosInvalidos = files.filter((file) => {
+    const nombre = file.name.toLowerCase()
+
+    const extensionValida =
+      nombre.endsWith(".pdf") ||
+      nombre.endsWith(".docx") ||
+      nombre.endsWith(".xlsx")
+
+    const tamanioValido = file.size <= MAX_FILE_SIZE
+
+    return !extensionValida || !tamanioValido
+  })
+
+  if (archivosInvalidos.length > 0) {
+    addFeedbackCard({
+      type: "error",
+      title: "Archivo no permitido",
+      description: "Solo se permiten archivos PDF, DOCX o XLSX de máximo 20 MB.",
+    })
+  }
+
+  const archivosValidos = files.filter((file) => {
+    const nombre = file.name.toLowerCase()
+
+    const extensionValida =
+      nombre.endsWith(".pdf") ||
+      nombre.endsWith(".docx") ||
+      nombre.endsWith(".xlsx")
+
+    const tamanioValido = file.size <= MAX_FILE_SIZE
+
+    return extensionValida && tamanioValido
+  })
+
+  setArchivosAdjuntos((current) => {
+    const nuevos = archivosValidos.filter(
+      (file) =>
+        !current.some(
+          (item) =>
+            item.name === file.name &&
+            item.size === file.size &&
+            item.lastModified === file.lastModified,
+        ),
+    )
+    return [...current, ...nuevos]
+  })
+
+    event.target.value = ""
+  }
+
+  const removeArchivoAdjunto = (index: number) => {
+    setArchivosAdjuntos((current) => current.filter((_, i) => i !== index))
+  }
+
+  const formatFileSize = (size: number) => {
+    if (size < 1024) return `${size} B`
+    if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`
+    return `${(size / (1024 * 1024)).toFixed(1)} MB`
+  }
+
+  const handleDescargarArchivo = async (archivo: ArchivoResponse) => {
+    try {
+      const url = await obtenerUrlDescargaArchivo(Number(id), archivo.id)
+      window.open(url, "_blank", "noopener,noreferrer")
+    } catch (err) {
+      addFeedbackCard({
+        type: "error",
+        title: "No se pudo descargar el archivo",
+        description:
+          err instanceof Error ? err.message : "Inténtalo nuevamente.",
+      })
+    }
   }
 
   const buildPayload = (): DocumentoUpdate => {
@@ -302,6 +398,16 @@ export default function EditarDocumentoPage({
         `/documentos/${id}`,
         buildPayload(),
       )
+
+      if (archivosAdjuntos.length > 0) {
+        await Promise.all(
+          archivosAdjuntos.map((archivo) =>
+            subirArchivoDocumento(Number(id), archivo),
+          ),
+        )
+      }
+
+      setArchivosAdjuntos([])
 
       setSuccessMessage({
         title: "Documento actualizado exitosamente",
@@ -497,6 +603,131 @@ export default function EditarDocumentoPage({
                       placeholder="Describe brevemente el contenido y alcance del documento..."
                     />
                   </div>
+                </div>
+              </section>
+
+              {/* Adjuntos */}
+              <section className="rounded-lg border border-[#E0E0E0] bg-white shadow-sm">
+                <div className="border-b border-[#E0E0E0] px-6 py-4">
+                  <h2 className="text-sm font-bold uppercase tracking-wide text-[#1A1A1A]">
+                    Archivos adjuntos
+                  </h2>
+                </div>
+
+                <div className="space-y-4 p-6">
+                  {archivosGuardados.length > 0 && (
+                    <div className="space-y-2">
+                      <p className="text-xs font-medium text-[#5C5C5C]">
+                        Archivos ya guardados
+                      </p>
+
+                      <div className="space-y-2">
+                        {archivosGuardados.map((archivo) => (
+                          <div
+                            key={archivo.id}
+                            className="flex items-center justify-between rounded-lg border border-[#E0E0E0] bg-white px-4 py-3"
+                          >
+                            <div className="flex min-w-0 items-center gap-3">
+                              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[#FFD600]/20 text-[#1A1A1A]">
+                                <FileText className="h-5 w-5" />
+                              </div>
+
+                              <div className="min-w-0">
+                                <p className="truncate text-sm font-medium text-[#1A1A1A]">
+                                  {archivo.nombre}
+                                </p>
+                                <p className="text-xs text-[#5C5C5C]">
+                                  Archivo guardado
+                                </p>
+                              </div>
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={() => handleDescargarArchivo(archivo)}
+                              className="ml-3 rounded-lg border border-[#E0E0E0] px-3 py-2 text-xs font-medium text-[#5C5C5C] hover:bg-[#FFD600] hover:text-[#1A1A1A]"
+                            >
+                              Descargar
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  <label
+                    htmlFor="archivosAdjuntos"
+                    className="flex cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed border-[#E0E0E0] bg-[#F7F7F7] px-6 py-8 text-center transition-colors hover:border-[#FFD600] hover:bg-[#FFD600]/10"
+                  >
+                    <Upload className="mb-3 h-8 w-8 text-[#5C5C5C]" />
+
+                    <span className="text-sm font-semibold text-[#1A1A1A]">
+                      Selecciona archivos para adjuntar
+                    </span>
+
+                    <span className="mt-1 text-xs text-[#5C5C5C]">
+                      Puedes adjuntar archivos PDF, DOCX o XLSX de hasta 20 MB.
+                    </span>
+
+                    <span className="mt-2 text-xs font-medium text-[#C9A42B]">
+                      Los nuevos archivos se subirán al guardar los cambios.
+                    </span>
+
+                    <input
+                      id="archivosAdjuntos"
+                      type="file"
+                      multiple
+                      accept=".pdf,.docx,.xlsx"
+                      onChange={handleArchivosChange}
+                      className="hidden"
+                    />
+                  </label>
+
+                  {archivosAdjuntos.length > 0 ? (
+                    <div className="space-y-2">
+                      <p className="text-xs font-medium text-[#5C5C5C]">
+                        {archivosAdjuntos.length} archivo
+                        {archivosAdjuntos.length === 1 ? "" : "s"} seleccionado
+                        {archivosAdjuntos.length === 1 ? "" : "s"} para adjuntar
+                      </p>
+
+                      <div className="space-y-2">
+                        {archivosAdjuntos.map((archivo, index) => (
+                          <div
+                            key={`${archivo.name}-${archivo.size}-${archivo.lastModified}`}
+                            className="flex items-center justify-between rounded-lg border border-[#E0E0E0] bg-white px-4 py-3"
+                          >
+                            <div className="flex min-w-0 items-center gap-3">
+                              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[#FFD600]/20 text-[#1A1A1A]">
+                                <FileText className="h-5 w-5" />
+                              </div>
+
+                              <div className="min-w-0">
+                                <p className="truncate text-sm font-medium text-[#1A1A1A]">
+                                  {archivo.name}
+                                </p>
+                                <p className="text-xs text-[#5C5C5C]">
+                                  {formatFileSize(archivo.size)}
+                                </p>
+                              </div>
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={() => removeArchivoAdjunto(index)}
+                              className="ml-3 rounded-lg p-2 text-[#5C5C5C] hover:bg-[#C8102E]/10 hover:text-[#C8102E]"
+                              aria-label={`Quitar archivo ${archivo.name}`}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="text-sm text-[#5C5C5C]">
+                      Todavía no has seleccionado nuevos archivos para adjuntar.
+                    </p>
+                  )}
                 </div>
               </section>
 

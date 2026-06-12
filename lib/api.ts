@@ -105,15 +105,70 @@ export async function authenticatedJsonRequest<T>(
   }
 }
 
+  async function postForm<T>(
+    path: string,
+    formData: FormData,
+  ): Promise<T> {
+    const { getAccessToken, refreshAccessToken, clearTokens } = await import("./auth")
+
+    const makeRequest = async (accessToken: string | null) => {
+      return fetch(`${API_BASE_URL}${path}`, {
+        method: "POST",
+        headers: {
+          ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+        },
+        body: formData,
+      })
+    }
+
+    let res = await makeRequest(getAccessToken())
+
+    if (res.status === 401) {
+      const newToken = await refreshAccessToken()
+
+      if (newToken) {
+        res = await makeRequest(newToken)
+      } else {
+        clearTokens()
+        if (typeof window !== "undefined") {
+          window.location.href = "/login"
+        }
+      }
+    }
+
+    if (res.status === 204) return undefined as T
+
+    const text = await res.text()
+    const parsed = text ? safeParse(text) : null
+
+    if (!res.ok) {
+      const errBody = parsed as ErrorResponse | null
+
+      throw new ApiError(
+        res.status,
+        errBody,
+        errBody?.message ?? "Error al subir archivo",
+      )
+    }
+
+    return parsed as T
+  }
+
 export const api = {
   get: <T>(path: string, opts: Omit<RequestOptions, "method" | "body"> = {}) =>
     authenticatedJsonRequest<T>(path, { ...opts, method: "GET" }),
+
   post: <T>(path: string, body?: unknown, opts: Omit<RequestOptions, "method" | "body"> = {}) =>
     authenticatedJsonRequest<T>(path, { ...opts, method: "POST", body }),
+
   put: <T>(path: string, body?: unknown, opts: Omit<RequestOptions, "method" | "body"> = {}) =>
     authenticatedJsonRequest<T>(path, { ...opts, method: "PUT", body }),
+
   patch: <T>(path: string, body?: unknown, opts: Omit<RequestOptions, "method" | "body"> = {}) =>
     authenticatedJsonRequest<T>(path, { ...opts, method: "PATCH", body }),
+
   delete: <T>(path: string, opts: Omit<RequestOptions, "method" | "body"> = {}) =>
     authenticatedJsonRequest<T>(path, { ...opts, method: "DELETE" }),
+
+  postForm,
 }
