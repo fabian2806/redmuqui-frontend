@@ -29,6 +29,7 @@ import type {
   Macroregion,
   PageResponse,
   ProyectoResponse,
+  Territorio,
 } from "@/lib/types"
 import { ESTADOS_PROYECTO } from "@/lib/project-status"
 
@@ -68,6 +69,7 @@ function buildProyectosPath(params: {
   idMacroregion: string
   idEjeTematico: string
   idInstitucion: string
+  idTerritorio: string
   anio: string
 }) {
   const search = new URLSearchParams({
@@ -81,6 +83,7 @@ function buildProyectosPath(params: {
   if (params.idMacroregion) search.set("idMacroregion", params.idMacroregion)
   if (params.idEjeTematico) search.set("idEjeTematico", params.idEjeTematico)
   if (params.idInstitucion) search.set("idInstitucion", params.idInstitucion)
+  if (params.idTerritorio) search.set("idTerritorio", params.idTerritorio)
   if (params.anio.trim()) search.set("anio", params.anio.trim())
 
   return `/proyectos?${search.toString()}`
@@ -96,17 +99,26 @@ export default function ProyectosPage() {
   const [selectedEje, setSelectedEje] = useState("")
   const [selectedEstado, setSelectedEstado] = useState<EstadoProyecto | "">("")
   const [selectedInstitucion, setSelectedInstitucion] = useState("")
+  const [selectedTerritorio, setSelectedTerritorio] = useState("")
   const [selectedAnio, setSelectedAnio] = useState("")
   const [currentPage, setCurrentPage] = useState(1)
 
   const [macroregiones, setMacroregiones] = useState<Macroregion[]>([])
   const [ejesTematicos, setEjesTematicos] = useState<EjeTematico[]>([])
   const [instituciones, setInstituciones] = useState<Institucion[]>([])
+  const [territorios, setTerritorios] = useState<Territorio[]>([])
   const [proyectosPage, setProyectosPage] =
     useState<PageResponse<ProyectoResponse> | null>(null)
   const [loading, setLoading] = useState(true)
   const [catalogosLoading, setCatalogosLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+
+  // Deep-link desde el Mapa Territorial: /proyectos?idTerritorio=<id>.
+  // Se lee de window.location (no useSearchParams) para no exigir un Suspense boundary.
+  useEffect(() => {
+    const idTerritorio = new URLSearchParams(window.location.search).get("idTerritorio")
+    if (idTerritorio) setSelectedTerritorio(idTerritorio)
+  }, [])
 
   useEffect(() => {
     if (authLoading || !puedeVerProyectos) return
@@ -116,15 +128,17 @@ export default function ProyectosPage() {
     async function loadCatalogos() {
       setCatalogosLoading(true)
       try {
-        const [macroregionesData, ejesData, institucionesData] = await Promise.all([
+        const [macroregionesData, ejesData, institucionesData, territoriosData] = await Promise.all([
           api.get<Macroregion[]>("/macroregiones"),
           api.get<EjeTematico[]>("/ejes-tematicos"),
           api.get<Institucion[]>("/instituciones"),
+          api.get<Territorio[]>("/territorios"),
         ])
         if (!cancelled) {
           setMacroregiones(macroregionesData)
           setEjesTematicos(ejesData)
           setInstituciones(institucionesData)
+          setTerritorios(territoriosData)
         }
       } catch (err) {
         if (!cancelled) {
@@ -162,6 +176,7 @@ export default function ProyectosPage() {
           idMacroregion: selectedMacroregion,
           idEjeTematico: selectedEje,
           idInstitucion: selectedInstitucion,
+          idTerritorio: selectedTerritorio,
           anio: selectedAnio,
         })
         const data = await api.get<PageResponse<ProyectoResponse>>(path)
@@ -191,6 +206,7 @@ export default function ProyectosPage() {
     selectedEstado,
     selectedMacroregion,
     selectedInstitucion,
+    selectedTerritorio,
     selectedAnio,
     authLoading,
     puedeVerProyectos,
@@ -201,7 +217,7 @@ export default function ProyectosPage() {
   const totalElements = proyectosPage?.totalElements ?? 0
   const hasActiveFilters =
     searchQuery || selectedMacroregion || selectedEje || selectedEstado ||
-    selectedInstitucion || selectedAnio
+    selectedInstitucion || selectedTerritorio || selectedAnio
 
   const pageStart = useMemo(() => {
     if (!proyectosPage || totalElements === 0) return 0
@@ -219,6 +235,7 @@ export default function ProyectosPage() {
     setSelectedEje("")
     setSelectedEstado("")
     setSelectedInstitucion("")
+    setSelectedTerritorio("")
     setSelectedAnio("")
     setCurrentPage(1)
   }
@@ -274,6 +291,23 @@ export default function ProyectosPage() {
               {macroregiones.map((macroregion) => (
                 <option key={macroregion.id} value={macroregion.id}>
                   {macroregion.nombre}
+                </option>
+              ))}
+            </select>
+
+            <select
+              value={selectedTerritorio}
+              onChange={(e) => {
+                setSelectedTerritorio(e.target.value)
+                setCurrentPage(1)
+              }}
+              disabled={catalogosLoading}
+              className="h-10 rounded-lg border border-[#E0E0E0] bg-white px-3 text-sm text-[#1A1A1A] focus:border-[#FFD600] focus:outline-none focus:ring-1 focus:ring-[#FFD600] disabled:opacity-60"
+            >
+              <option value="">Territorio</option>
+              {territorios.map((territorio) => (
+                <option key={territorio.id} value={territorio.id}>
+                  {territorio.nombre}
                 </option>
               ))}
             </select>
