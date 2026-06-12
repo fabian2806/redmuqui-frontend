@@ -26,6 +26,7 @@ import {
   AlertCircle
 } from "lucide-react"
 import { useAuth } from "@/hooks/useAuth"
+import { SemaforoPortafolio } from "@/components/reportes/semaforo-portafolio"
 
 export default function ReportesPage() {
   const { hasPermission } = useAuth()
@@ -187,8 +188,12 @@ export default function ReportesPage() {
         </div>
 
         {/* Tabs de reportes */}
-        <Tabs defaultValue="general" className="space-y-4">
+        <Tabs defaultValue="semaforo" className="space-y-4">
           <TabsList>
+            <TabsTrigger value="semaforo">
+              <AlertCircle className="mr-2 h-4 w-4" />
+              Semáforo
+            </TabsTrigger>
             <TabsTrigger value="general">
               <BarChart3 className="mr-2 h-4 w-4" />
               General
@@ -210,6 +215,11 @@ export default function ReportesPage() {
               Actividad Reciente
             </TabsTrigger>
           </TabsList>
+
+          {/* Tab Semáforo de Portafolio (Sprint 4 ③) */}
+          <TabsContent value="semaforo" className="space-y-4">
+            <SemaforoPortafolio />
+          </TabsContent>
 
           {/* Tab General */}
           <TabsContent value="general" className="space-y-4">
