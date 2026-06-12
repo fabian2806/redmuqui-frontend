@@ -80,6 +80,7 @@ export default function NuevoDocumentoPage() {
   const [ejesTematicos, setEjesTematicos] = useState<EjeTematico[]>([])
   const [territorios, setTerritorios] = useState<Territorio[]>([])
   const [usuarios, setUsuarios] = useState<UsuarioResponse[]>([])
+  const [loadingUsuarios, setLoadingUsuarios] = useState(true)
   const [loadingCatalogos, setLoadingCatalogos] = useState(true)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -116,23 +117,18 @@ export default function NuevoDocumentoPage() {
       setLoadingCatalogos(true)
       setError(null)
       try {
-        const [proyectosData, ejesData, territoriosData, usuariosData] =
-          await Promise.all([
-            api.get<PageResponse<ProyectoResponse>>(
-              "/proyectos?page=0&size=100&sort=nombre,asc",
-            ),
-            api.get<EjeTematico[]>("/ejes-tematicos"),
-            api.get<Territorio[]>("/territorios"),
-            api.get<PageResponse<UsuarioResponse>>(
-              "/usuarios?page=0&size=100&sort=apellidos,asc",
-            ),
-          ])
+        const [proyectosData, ejesData, territoriosData] = await Promise.all([
+          api.get<PageResponse<ProyectoResponse>>(
+            "/proyectos?page=0&size=100&sort=nombre,asc",
+          ),
+          api.get<EjeTematico[]>("/ejes-tematicos"),
+          api.get<Territorio[]>("/territorios"),
+        ])
 
         if (cancelled) return
         setProyectos(proyectosData.content)
         setEjesTematicos(ejesData)
         setTerritorios(territoriosData)
-        setUsuarios(usuariosData.content.filter((u) => u.estado))
       } catch (err) {
         if (!cancelled) {
           setError(
@@ -162,6 +158,32 @@ export default function NuevoDocumentoPage() {
       )
     }
   }, [user?.id])
+
+  // /usuarios requiere USUARIOS_READ (solo ADMINISTRADOR/COORDINADOR). Un
+  // TECNICO no lo tiene: lo cargamos por separado para que su 403 NO tumbe el
+  // resto del formulario. Si falla, degradamos al usuario actual como único
+  // responsable seleccionable (la elaboración ya viene prefijada con él).
+  useEffect(() => {
+    if (!user) return
+    let cancelled = false
+    setLoadingUsuarios(true)
+    api
+      .get<PageResponse<UsuarioResponse>>(
+        "/usuarios?page=0&size=100&sort=apellidos,asc",
+      )
+      .then((data) => {
+        if (!cancelled) setUsuarios(data.content.filter((u) => u.estado))
+      })
+      .catch(() => {
+        if (!cancelled) setUsuarios([user])
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingUsuarios(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [user])
 
   const updateField = <K extends keyof FormState>(field: K, value: FormState[K]) => {
     setFormData((current) => ({ ...current, [field]: value }))
@@ -547,13 +569,15 @@ export default function NuevoDocumentoPage() {
                     onChange={(event) =>
                       updateField("idRespElaboracion", event.target.value)
                     }
-                    disabled={loadingCatalogos || usuarios.length === 0}
+                    disabled={loadingCatalogos || loadingUsuarios}
                     className={`w-full rounded-lg border px-4 py-2.5 text-sm text-[#1A1A1A] focus:border-[#FFD600] focus:outline-none focus:ring-1 focus:ring-[#FFD600] disabled:opacity-60 ${fieldErrorClass("idRespElaboracion")}`}
                   >
                     <option value="">
-                      {usuarios.length === 0
-                        ? "Sin usuarios disponibles"
-                        : "Seleccionar responsable"}
+                      {loadingUsuarios
+                        ? "Cargando usuarios..."
+                        : usuarios.length === 0
+                          ? "Sin usuarios disponibles"
+                          : "Seleccionar responsable"}
                     </option>
                     {usuarios.map((usuario) => (
                       <option key={usuario.id} value={usuario.id}>
@@ -573,7 +597,7 @@ export default function NuevoDocumentoPage() {
                     onChange={(event) =>
                       updateField("idRespValidacion", event.target.value)
                     }
-                    disabled={loadingCatalogos || usuarios.length === 0}
+                    disabled={loadingCatalogos || loadingUsuarios}
                     className={`w-full rounded-lg border px-4 py-2.5 text-sm text-[#1A1A1A] focus:border-[#FFD600] focus:outline-none focus:ring-1 focus:ring-[#FFD600] disabled:opacity-60 ${fieldErrorClass("idRespValidacion")}`}                  >
                     <option value="">Sin validador asignado</option>
                     {usuarios

@@ -56,7 +56,7 @@ export default function DocumentoDetallePage({
   params: Promise<{ id: string }>
 }) {
   const { id } = use(params)
-  const { hasPermission } = useAuth()
+  const { hasPermission, user } = useAuth()
   const puedeEditar = hasPermission("DOCUMENTOS_UPDATE")
   const puedeValidar = hasPermission("DOCUMENTOS_VALIDATE")
 
@@ -80,12 +80,18 @@ export default function DocumentoDetallePage({
     setError(null)
     try {
       const documento = await api.get<DocumentoResponse>(`/documentos/${id}`)
-      const [ejesData, territoriosData, usuariosData, archivosData] = await Promise.all([
+      const [ejesData, territoriosData, archivosData] = await Promise.all([
         api.get<EjeTematico[]>("/ejes-tematicos"),
         api.get<Territorio[]>("/territorios"),
-        api.get<PageResponse<UsuarioResponse>>("/usuarios?page=0&size=100"),
         api.get<ArchivoResponse[]>(`/documentos/${id}/archivos`),
       ])
+      // /usuarios requiere USUARIOS_READ; un TECNICO/CONSULTOR no lo tiene.
+      // Best-effort: su 403 no debe romper la vista del documento (los nombres
+      // de responsable se degradan a "—" si no se pueden resolver).
+      const usuariosData = await api
+        .get<PageResponse<UsuarioResponse>>("/usuarios?page=0&size=100")
+        .then((d) => d.content)
+        .catch(() => (user ? [user] : []))
       let proyectoData: ProyectoResponse | null = null
       if (documento.idProyecto != null) {
         proyectoData = await api
@@ -97,7 +103,7 @@ export default function DocumentoDetallePage({
       setDoc(documento)
       setEjes(ejesData)
       setTerritorios(territoriosData)
-      setUsuarios(usuariosData.content)
+      setUsuarios(usuariosData)
       setProyecto(proyectoData)
       setArchivos(archivosData)
     } catch (err) {
