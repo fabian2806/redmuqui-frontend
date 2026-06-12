@@ -4,17 +4,17 @@ import { AppLayout } from "@/components/layout/app-layout"
 import { KpiCard } from "@/components/ui/kpi-card"
 import { StatusBadge, MacroregionBadge } from "@/components/ui/status-badge"
 import { ProgressBar } from "@/components/ui/progress-bar"
-import { 
-  proyectos, 
-  documentos, 
-  getStats, 
+import {
+  proyectos,
+  documentos,
   getProyectosPorMacroregion,
-  getActividadesPorEstado 
+  getActividadesPorEstado
 } from "@/lib/data"
-import { 
-  FolderKanban, 
-  AlertTriangle, 
-  FileText, 
+import {
+  FolderKanban,
+  Users,
+  Wallet,
+  FileText,
   BookOpen,
   Eye,
   ChevronRight
@@ -23,6 +23,9 @@ import Link from "next/link"
 import { useState, useEffect } from "react"
 import { useAuth } from "@/hooks/useAuth"
 import { getUserRoleLabel } from "@/lib/user-display"
+import { ApiError } from "@/lib/api"
+import { obtenerIndicadores } from "@/lib/reportes"
+import type { Indicadores } from "@/lib/reportes"
 import {
   BarChart,
   Bar,
@@ -46,10 +49,13 @@ const MACROREGION_COLORS = {
 const ESTADO_COLORS = ["#2E7D32", "#0277BD", "#C8102E"]
 
 export default function DashboardPage() {
-  const { user } = useAuth()
-  const stats = getStats()
+  const { user, loading: authLoading } = useAuth()
   const proyectosPorMacroregion = getProyectosPorMacroregion()
   const actividadesPorEstado = getActividadesPorEstado()
+
+  const [indicadores, setIndicadores] = useState<Indicadores | null>(null)
+  const [indicadoresLoading, setIndicadoresLoading] = useState(true)
+  const [indicadoresError, setIndicadoresError] = useState<string | null>(null)
   
   // Proyectos con alertas (en riesgo o con poco tiempo)
   const proyectosConAlertas = proyectos
@@ -85,11 +91,52 @@ export default function DashboardPage() {
     )
   }, [])
 
+  useEffect(() => {
+    if (authLoading) return
+
+    let cancelled = false
+
+    async function loadIndicadores() {
+      setIndicadoresLoading(true)
+      setIndicadoresError(null)
+      try {
+        const data = await obtenerIndicadores()
+        if (!cancelled) setIndicadores(data)
+      } catch (err) {
+        if (!cancelled) {
+          setIndicadoresError(
+            err instanceof ApiError
+              ? err.message
+              : "No se pudieron cargar los indicadores",
+          )
+          setIndicadores(null)
+        }
+      } finally {
+        if (!cancelled) setIndicadoresLoading(false)
+      }
+    }
+
+    loadIndicadores()
+    return () => {
+      cancelled = true
+    }
+  }, [authLoading])
+
   // Helper function to format date safely
   const formatDate = (dateString: string) => {
     if (!mounted) return ""
     return new Date(dateString).toLocaleDateString("es-PE")
   }
+
+  const formatCurrency = (value: number) =>
+    new Intl.NumberFormat("es-PE", {
+      style: "currency",
+      currency: "PEN",
+      maximumFractionDigits: 0,
+    }).format(value)
+
+  const formatNumber = (value: number) =>
+    new Intl.NumberFormat("es-PE").format(value)
 
   return (
     <AppLayout>
@@ -102,35 +149,55 @@ export default function DashboardPage() {
       </div>
 
       {/* KPI Cards */}
-      <div className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <KpiCard
-          title="Proyectos Activos"
-          value={stats.proyectosActivos}
-          icon={FolderKanban}
-          variant="default"
-        />
-        <KpiCard
-          title="Actividades Vencidas"
-          value={stats.actividadesVencidas}
-          icon={AlertTriangle}
-          variant="danger"
-          description="Esta semana"
-        />
-        <KpiCard
-          title="Informes Pendientes"
-          value={stats.informesPendientes}
-          icon={FileText}
-          variant="warning"
-          description="Requieren validación"
-        />
-        <KpiCard
-          title="Productos Publicados"
-          value={stats.productosPublicados}
-          icon={BookOpen}
-          variant="success"
-          description="Este año"
-        />
-      </div>
+      {indicadoresError ? (
+        <div className="mb-8 rounded-lg border border-[#C8102E]/20 bg-[#C8102E]/5 px-4 py-3 text-sm font-medium text-[#C8102E]">
+          {indicadoresError}
+        </div>
+      ) : (
+        <div className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          {indicadoresLoading || !indicadores ? (
+            Array.from({ length: 4 }).map((_, i) => (
+              <div
+                key={i}
+                className="h-[108px] animate-pulse rounded-lg border border-[#E0E0E0] bg-[#FAFAFA]"
+              />
+            ))
+          ) : (
+            <>
+              <KpiCard
+                title="Proyectos Activos"
+                value={indicadores.proyectosActivos}
+                icon={FolderKanban}
+                variant="default"
+                description={`${indicadores.proyectosEnRiesgo} en riesgo`}
+              />
+              <KpiCard
+                title="Presupuesto Gestionado"
+                value={formatCurrency(indicadores.presupuestoTotal)}
+                icon={Wallet}
+                variant="default"
+                description="Proyectos activos"
+              />
+              <KpiCard
+                title="Beneficiarios"
+                value={formatNumber(
+                  indicadores.beneficiariosHombres + indicadores.beneficiariosMujeres,
+                )}
+                icon={Users}
+                variant="success"
+                description={`${formatNumber(indicadores.beneficiariosMujeres)} mujeres · ${formatNumber(indicadores.beneficiariosHombres)} hombres`}
+              />
+              <KpiCard
+                title="Documentos Publicados"
+                value={indicadores.documentosPublicados}
+                icon={BookOpen}
+                variant="success"
+                description={`${indicadores.documentosPendientes} en proceso`}
+              />
+            </>
+          )}
+        </div>
+      )}
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         {/* Proyectos con alertas */}
