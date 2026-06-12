@@ -21,6 +21,7 @@ import { AppLayout } from "@/components/layout/app-layout"
 import { Spinner } from "@/components/ui/spinner"
 import { StatusBadge, TypeBadge } from "@/components/ui/status-badge"
 import { api, ApiError } from "@/lib/api"
+import { obtenerUrlDescargaArchivo } from "@/lib/documentos-archivos"
 import { useAuth } from "@/hooks/useAuth"
 import type {
   ArchivoResponse,
@@ -159,6 +160,25 @@ export default function DocumentoDetallePage({
       setSuccessOpen(true)
     } finally {
       setCambiandoEstado(false)
+    }
+  }
+  async function handleDescargarArchivo(archivo: ArchivoResponse) {
+    try {
+      const url = await obtenerUrlDescargaArchivo(Number(id), archivo.id)
+
+      console.log("URL temporal:", url)
+
+      window.open(url, "_blank", "noopener,noreferrer")
+    } catch (err) {
+      setSuccessMessage({
+        title: "No se pudo descargar el archivo",
+        description:
+          err instanceof Error
+            ? err.message
+            : "Inténtalo nuevamente.",
+      })
+
+      setSuccessOpen(true)
     }
   }
 
@@ -415,15 +435,14 @@ export default function DocumentoDetallePage({
                             )}
                           </div>
                         </div>
-                        <a
-                          href={archivo.url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="ml-4 flex shrink-0 items-center gap-2 rounded-lg bg-[#F7F7F7] px-4 py-2 text-sm font-medium text-[#5C5C5C] hover:bg-[#FFD600] hover:text-[#1A1A1A]"
-                        >
-                          <Download className="h-4 w-4" />
-                          Descargar
-                        </a>
+                          <button
+                            type="button"
+                            onClick={() => handleDescargarArchivo(archivo)}
+                            className="ml-4 flex shrink-0 items-center gap-2 rounded-lg bg-[#F7F7F7] px-4 py-2 text-sm font-medium text-[#5C5C5C] hover:bg-[#FFD600] hover:text-[#1A1A1A]"
+                          >
+                            <Download className="h-4 w-4" />
+                            Descargar
+                          </button>
                       </div>
                     ))}
                   </div>
