@@ -43,20 +43,8 @@ const VIEW_H = 680
 const PAD = 14
 
 const COLOR_CERO = "#ECECEC"
-const COLOR_MIN = "#FFF1B8"
-const COLOR_MAX = "#8A6D0F"
-
-function hexToRgb(hex: string): [number, number, number] {
-  const n = parseInt(hex.slice(1), 16)
-  return [(n >> 16) & 255, (n >> 8) & 255, n & 255]
-}
-
-function lerpColor(a: string, b: string, t: number): string {
-  const ca = hexToRgb(a)
-  const cb = hexToRgb(b)
-  const mix = ca.map((c, i) => Math.round(c + (cb[i] - c) * t))
-  return `rgb(${mix[0]}, ${mix[1]}, ${mix[2]})`
-}
+// Rampa por clases (claro → oscuro), 4 tramos lineales sobre el máximo.
+const RAMP = ["#FFEFA8", "#F2D24E", "#D9B233", "#9A7B12"]
 
 function forEachRing(geom: Geometria, cb: (ring: number[][]) => void) {
   if (geom.type === "Polygon") geom.coordinates.forEach(cb)
@@ -82,7 +70,7 @@ function formatNumber(value: number): string {
 }
 
 function formatMetrica(metrica: Metrica, value: number): string {
-  return metrica === "presupuesto" ? formatCurrency(value) : formatNumber(value)
+  return metrica === "presupuesto" ? formatCurrency(value) : formatNumber(Math.round(value))
 }
 
 interface MapaTerritorialProps {
@@ -119,7 +107,6 @@ export function MapaTerritorial({ cobertura, loading = false }: MapaTerritorialP
     }
   }, [])
 
-  // Esc deselecciona lo fijado.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") setPinned(null)
@@ -185,17 +172,33 @@ export function MapaTerritorial({ cobertura, loading = false }: MapaTerritorialP
 
   const valorDe = (c: CoberturaTerritorial | undefined): number => (c ? c[metrica] : 0)
 
-  const maxValor = useMemo(() => {
+  // Tramos lineales (3 cortes → 4 clases) sobre el máximo de la métrica activa.
+  const cortes = useMemo(() => {
     let max = 0
     for (const c of porUbigeo.values()) max = Math.max(max, c[metrica])
-    return max
+    if (max <= 0) return [] as number[]
+    return [max * 0.25, max * 0.5, max * 0.75]
   }, [porUbigeo, metrica])
 
-  const colorDe = (ubigeo: string): string => {
-    const v = valorDe(porUbigeo.get(ubigeo))
-    if (v <= 0 || maxValor <= 0) return COLOR_CERO
-    return lerpColor(COLOR_MIN, COLOR_MAX, Math.sqrt(v / maxValor))
+  const claseDe = (v: number): number => {
+    if (v <= 0 || cortes.length === 0) return -1
+    if (v <= cortes[0]) return 0
+    if (v <= cortes[1]) return 1
+    if (v <= cortes[2]) return 2
+    return 3
   }
+
+  const colorDe = (ubigeo: string): string => {
+    const clase = claseDe(valorDe(porUbigeo.get(ubigeo)))
+    return clase < 0 ? COLOR_CERO : RAMP[clase]
+  }
+
+  const ranking = useMemo(() => {
+    return [...porUbigeo.values()]
+      .filter((c) => c[metrica] > 0)
+      .sort((a, b) => b[metrica] - a[metrica])
+      .slice(0, 6)
+  }, [porUbigeo, metrica])
 
   const totales = useMemo(() => {
     return cobertura.reduce(
@@ -203,21 +206,31 @@ export function MapaTerritorial({ cobertura, loading = false }: MapaTerritorialP
         acc.proyectos += c.proyectos
         acc.presupuesto += c.presupuesto
         acc.beneficiarios += c.beneficiarios
+        acc.beneficiariosHombres += c.beneficiariosHombres
+        acc.beneficiariosMujeres += c.beneficiariosMujeres
         acc.instituciones += c.instituciones
         return acc
       },
-      { proyectos: 0, presupuesto: 0, beneficiarios: 0, instituciones: 0 },
+      {
+        proyectos: 0,
+        presupuesto: 0,
+        beneficiarios: 0,
+        beneficiariosHombres: 0,
+        beneficiariosMujeres: 0,
+        instituciones: 0,
+      },
     )
   }, [cobertura])
 
-  // El panel se queda en lo fijado; si no hay nada fijado, sigue al hover.
   const activoUbigeo = pinned ?? hovered
   const detalle = activoUbigeo ? porUbigeo.get(activoUbigeo) : undefined
   const estaFijado = pinned !== null && pinned === activoUbigeo
 
-  // Tooltip = siempre el departamento bajo el cursor.
   const hoverData = hovered ? porUbigeo.get(hovered) : undefined
   const metricaLabel = METRICAS.find((m) => m.key === metrica)?.label ?? ""
+
+  const generoSub = (h: number, m: number) =>
+    h + m > 0 ? `${formatNumber(m)} mujeres · ${formatNumber(h)} hombres` : undefined
 
   if (geoError) {
     return (
@@ -308,87 +321,159 @@ export function MapaTerritorial({ cobertura, loading = false }: MapaTerritorialP
           )}
         </div>
 
-        {/* Leyenda (nombra la métrica activa) */}
-        <div className="mt-3 flex flex-wrap items-center justify-center gap-2 text-xs text-[#5C5C5C]">
-          <span className="font-medium">Coloreando por {metricaLabel.toLowerCase()}:</span>
-          <span>0</span>
-          <div
-            className="h-2 w-40 rounded-full"
-            style={{ background: `linear-gradient(to right, ${COLOR_CERO}, ${COLOR_MIN}, ${COLOR_MAX})` }}
-          />
-          <span>{formatMetrica(metrica, maxValor)}</span>
+        {/* Leyenda por tramos (nombra la métrica activa) */}
+        <div className="mt-3">
+          <p className="mb-1 text-center text-xs font-medium text-[#5C5C5C]">
+            Coloreando por {metricaLabel.toLowerCase()}
+          </p>
+          <div className="flex items-end justify-center gap-px text-[10px] text-[#5C5C5C]">
+            <LegendSwatch color={COLOR_CERO} label="0" />
+            {RAMP.map((color, i) => (
+              <LegendSwatch
+                key={color}
+                color={color}
+                label={
+                  cortes.length === 0
+                    ? ""
+                    : i === RAMP.length - 1
+                      ? `> ${formatMetrica(metrica, cortes[2])}`
+                      : `≤ ${formatMetrica(metrica, cortes[i])}`
+                }
+              />
+            ))}
+          </div>
         </div>
       </div>
 
-      {/* Eje 2: panel de inspección */}
-      <div className="rounded-lg border border-[#E0E0E0] bg-white shadow-sm">
-        {detalle ? (
-          <div className="p-5">
-            <div className="mb-1 flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
-                <span className="inline-flex items-center rounded-full border border-[#C9A42B]/30 bg-[#FFD600]/10 px-2.5 py-0.5 text-[11px] font-medium text-[#C9A42B]">
-                  {detalle.tipo === "DEPARTAMENTO" ? "Departamento" : detalle.tipo}
-                </span>
-                <span className="text-[11px] text-[#5C5C5C]">UBIGEO {detalle.codigo}</span>
+      {/* Eje 2: inspección + ranking (columna derecha) */}
+      <div className="space-y-6">
+        {/* Panel de detalle */}
+        <div className="rounded-lg border border-[#E0E0E0] bg-white shadow-sm">
+          {detalle ? (
+            <div className="p-5">
+              <div className="mb-1 flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <span className="inline-flex items-center rounded-full border border-[#C9A42B]/30 bg-[#FFD600]/10 px-2.5 py-0.5 text-[11px] font-medium text-[#C9A42B]">
+                    {detalle.tipo === "DEPARTAMENTO" ? "Departamento" : detalle.tipo}
+                  </span>
+                  <span className="text-[11px] text-[#5C5C5C]">UBIGEO {detalle.codigo}</span>
+                </div>
+                {estaFijado && (
+                  <button
+                    onClick={() => setPinned(null)}
+                    className="inline-flex items-center gap-1 rounded-full bg-[#1A1A1A]/5 px-2 py-0.5 text-[11px] font-medium text-[#5C5C5C] hover:bg-[#1A1A1A]/10"
+                    title="Soltar selección (Esc)"
+                  >
+                    <Pin className="h-3 w-3" /> fijado <X className="h-3 w-3" />
+                  </button>
+                )}
               </div>
-              {estaFijado && (
-                <button
-                  onClick={() => setPinned(null)}
-                  className="inline-flex items-center gap-1 rounded-full bg-[#1A1A1A]/5 px-2 py-0.5 text-[11px] font-medium text-[#5C5C5C] hover:bg-[#1A1A1A]/10"
-                  title="Soltar selección (Esc)"
+              <h3 className="text-lg font-bold capitalize text-[#1A1A1A]">
+                {detalle.nombre.toLowerCase()}
+              </h3>
+
+              <div className="mt-4 space-y-2">
+                <PanelStat label="Proyectos" value={formatNumber(detalle.proyectos)} activo={metrica === "proyectos"} />
+                <PanelStat label="Presupuesto" value={formatCurrency(detalle.presupuesto)} activo={metrica === "presupuesto"} />
+                <PanelStat
+                  label="Beneficiarios"
+                  value={formatNumber(detalle.beneficiarios)}
+                  activo={metrica === "beneficiarios"}
+                  sub={generoSub(detalle.beneficiariosHombres, detalle.beneficiariosMujeres)}
+                />
+                <PanelStat label="Instituciones" value={formatNumber(detalle.instituciones)} activo={metrica === "instituciones"} />
+              </div>
+
+              {detalle.proyectos > 0 ? (
+                <Link
+                  href={`/proyectos?idTerritorio=${detalle.idTerritorio}`}
+                  className="mt-4 flex w-full items-center justify-center gap-2 rounded-lg bg-[#FFD600] px-4 py-2.5 text-sm font-bold text-[#1A1A1A] transition-colors hover:bg-[#C9A42B]"
                 >
-                  <Pin className="h-3 w-3" /> fijado <X className="h-3 w-3" />
-                </button>
+                  <Eye className="h-4 w-4" />
+                  Ver {detalle.proyectos} proyecto{detalle.proyectos !== 1 ? "s" : ""}
+                </Link>
+              ) : (
+                <p className="mt-4 text-xs text-[#5C5C5C]">
+                  La red aún no registra proyectos en este territorio.
+                </p>
+              )}
+
+              {!estaFijado && (
+                <p className="mt-3 text-[11px] text-[#5C5C5C]">
+                  Haz clic en el departamento para fijarlo.
+                </p>
               )}
             </div>
-            <h3 className="text-lg font-bold capitalize text-[#1A1A1A]">
-              {detalle.nombre.toLowerCase()}
-            </h3>
-
-            <div className="mt-4 space-y-2">
-              <PanelStat label="Proyectos" value={formatNumber(detalle.proyectos)} activo={metrica === "proyectos"} />
-              <PanelStat label="Presupuesto" value={formatCurrency(detalle.presupuesto)} activo={metrica === "presupuesto"} />
-              <PanelStat label="Beneficiarios" value={formatNumber(detalle.beneficiarios)} activo={metrica === "beneficiarios"} />
-              <PanelStat label="Instituciones" value={formatNumber(detalle.instituciones)} activo={metrica === "instituciones"} />
+          ) : (
+            <div className="p-5">
+              <h3 className="text-sm font-bold uppercase tracking-wide text-[#1A1A1A]">
+                Cobertura nacional
+              </h3>
+              <p className="mt-1 text-xs text-[#5C5C5C]">
+                Pasa el cursor por un departamento para previsualizar; haz clic para fijarlo.
+              </p>
+              <div className="mt-4 space-y-2">
+                <PanelStat label="Proyectos" value={formatNumber(totales.proyectos)} activo={metrica === "proyectos"} />
+                <PanelStat label="Presupuesto" value={formatCurrency(totales.presupuesto)} activo={metrica === "presupuesto"} />
+                <PanelStat
+                  label="Beneficiarios"
+                  value={formatNumber(totales.beneficiarios)}
+                  activo={metrica === "beneficiarios"}
+                  sub={generoSub(totales.beneficiariosHombres, totales.beneficiariosMujeres)}
+                />
+                <PanelStat label="Instituciones" value={formatNumber(totales.instituciones)} activo={metrica === "instituciones"} />
+              </div>
             </div>
+          )}
+        </div>
 
-            {detalle.proyectos > 0 ? (
-              <Link
-                href={`/proyectos?idTerritorio=${detalle.idTerritorio}`}
-                className="mt-4 flex w-full items-center justify-center gap-2 rounded-lg bg-[#FFD600] px-4 py-2.5 text-sm font-bold text-[#1A1A1A] transition-colors hover:bg-[#C9A42B]"
-              >
-                <Eye className="h-4 w-4" />
-                Ver {detalle.proyectos} proyecto{detalle.proyectos !== 1 ? "s" : ""}
-              </Link>
-            ) : (
-              <p className="mt-4 text-xs text-[#5C5C5C]">
-                La red aún no registra proyectos en este territorio.
-              </p>
-            )}
-
-            {!estaFijado && (
-              <p className="mt-3 text-[11px] text-[#5C5C5C]">
-                Haz clic en el departamento para fijarlo.
-              </p>
-            )}
-          </div>
-        ) : (
-          <div className="p-5">
+        {/* Ranking por la métrica activa */}
+        <div className="rounded-lg border border-[#E0E0E0] bg-white shadow-sm">
+          <div className="border-b border-[#E0E0E0] px-5 py-3">
             <h3 className="text-sm font-bold uppercase tracking-wide text-[#1A1A1A]">
-              Cobertura nacional
+              Top por {metricaLabel.toLowerCase()}
             </h3>
-            <p className="mt-1 text-xs text-[#5C5C5C]">
-              Pasa el cursor por un departamento para previsualizar; haz clic para fijarlo.
-            </p>
-            <div className="mt-4 space-y-2">
-              <PanelStat label="Proyectos" value={formatNumber(totales.proyectos)} activo={metrica === "proyectos"} />
-              <PanelStat label="Presupuesto" value={formatCurrency(totales.presupuesto)} activo={metrica === "presupuesto"} />
-              <PanelStat label="Beneficiarios" value={formatNumber(totales.beneficiarios)} activo={metrica === "beneficiarios"} />
-              <PanelStat label="Instituciones" value={formatNumber(totales.instituciones)} activo={metrica === "instituciones"} />
-            </div>
           </div>
-        )}
+          {ranking.length === 0 ? (
+            <p className="px-5 py-4 text-xs text-[#5C5C5C]">Sin datos para esta métrica.</p>
+          ) : (
+            <ol className="divide-y divide-[#E0E0E0]">
+              {ranking.map((c, i) => {
+                const activo = c.codigo === activoUbigeo
+                return (
+                  <li key={c.codigo ?? c.idTerritorio}>
+                    <button
+                      onClick={() => setPinned(c.codigo)}
+                      onMouseEnter={() => setHovered(c.codigo)}
+                      onMouseLeave={() => setHovered(null)}
+                      className={`flex w-full items-center gap-3 px-5 py-2.5 text-left transition-colors hover:bg-[#FFFDE7] ${
+                        activo ? "bg-[#FFF8D6]" : ""
+                      }`}
+                    >
+                      <span className="w-4 text-xs font-bold text-[#C9A42B]">{i + 1}</span>
+                      <span className="flex-1 truncate text-sm capitalize text-[#1A1A1A]">
+                        {c.nombre.toLowerCase()}
+                      </span>
+                      <span className="text-sm font-semibold text-[#1A1A1A]">
+                        {formatMetrica(metrica, c[metrica])}
+                      </span>
+                    </button>
+                  </li>
+                )
+              })}
+            </ol>
+          )}
+        </div>
       </div>
+    </div>
+  )
+}
+
+function LegendSwatch({ color, label }: { color: string; label: string }) {
+  return (
+    <div className="flex flex-col items-center gap-0.5">
+      <span className="h-3 w-9 rounded-sm" style={{ backgroundColor: color }} />
+      <span className="whitespace-nowrap">{label}</span>
     </div>
   )
 }
@@ -397,23 +482,28 @@ function PanelStat({
   label,
   value,
   activo,
+  sub,
 }: {
   label: string
   value: string
   activo: boolean
+  sub?: string
 }) {
   return (
     <div
-      className={`flex items-center justify-between rounded-lg border px-3 py-2 ${
+      className={`rounded-lg border px-3 py-2 ${
         activo ? "border-[#C9A42B]/40 bg-[#FFF8D6]" : "border-[#E0E0E0] bg-[#FAFAFA]"
       }`}
     >
-      <span className="flex items-center gap-1.5 text-xs text-[#5C5C5C]">
-        {activo && <span className="h-1.5 w-1.5 rounded-full bg-[#C9A42B]" />}
-        {label}
-        {activo && <span className="text-[10px] text-[#C9A42B]">coloreando</span>}
-      </span>
-      <span className="text-sm font-bold text-[#1A1A1A]">{value}</span>
+      <div className="flex items-center justify-between">
+        <span className="flex items-center gap-1.5 text-xs text-[#5C5C5C]">
+          {activo && <span className="h-1.5 w-1.5 rounded-full bg-[#C9A42B]" />}
+          {label}
+          {activo && <span className="text-[10px] text-[#C9A42B]">coloreando</span>}
+        </span>
+        <span className="text-sm font-bold text-[#1A1A1A]">{value}</span>
+      </div>
+      {sub && <p className="mt-0.5 text-[10px] text-[#5C5C5C]">{sub}</p>}
     </div>
   )
 }

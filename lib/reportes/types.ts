@@ -71,5 +71,7 @@ export interface CoberturaTerritorial {
   proyectos: number
   presupuesto: number
   beneficiarios: number
+  beneficiariosHombres: number
+  beneficiariosMujeres: number
   instituciones: number
 }
