@@ -19,7 +19,13 @@ import {
   StatusBadge,
   TypeBadge,
 } from "@/components/ui/status-badge"
+import { RiesgoBadge } from "@/components/ui/riesgo-badge"
 import { api, ApiError } from "@/lib/api"
+import {
+  clasificarRiesgo,
+  obtenerProyectosEnRiesgo,
+  type NivelRiesgo,
+} from "@/lib/reportes"
 import { formatDateOnly } from "@/lib/date-only"
 import { useAuth } from "@/hooks/useAuth"
 import type {
@@ -90,6 +96,7 @@ export default function ProyectosPage() {
   const { loading: authLoading, hasPermission } = useAuth()
   const puedeVerProyectos = hasPermission("PROYECTOS_READ")
   const puedeCrearProyectos = hasPermission("PROYECTOS_CREATE")
+  const puedeVerRiesgo = hasPermission("REPORTES_READ")
 
   const [searchQuery, setSearchQuery] = useState("")
   const [selectedMacroregion, setSelectedMacroregion] = useState("")
@@ -107,6 +114,11 @@ export default function ProyectosPage() {
   const [loading, setLoading] = useState(true)
   const [catalogosLoading, setCatalogosLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  // Semáforo (Sprint 4 ③): id de proyecto → nivel de riesgo. El badge es un
+  // adorno opcional; si el endpoint falla o falta permiso, la lista sigue igual.
+  const [riesgoPorId, setRiesgoPorId] = useState<Map<number, NivelRiesgo>>(
+    () => new Map(),
+  )
 
   useEffect(() => {
     if (authLoading || !puedeVerProyectos) return
@@ -144,6 +156,29 @@ export default function ProyectosPage() {
       cancelled = true
     }
   }, [authLoading, puedeVerProyectos])
+
+  useEffect(() => {
+    if (authLoading || !puedeVerProyectos || !puedeVerRiesgo) return
+
+    let cancelled = false
+
+    obtenerProyectosEnRiesgo()
+      .then((enRiesgo) => {
+        if (cancelled) return
+        const mapa = new Map<number, NivelRiesgo>()
+        for (const proyecto of enRiesgo) {
+          mapa.set(proyecto.id, clasificarRiesgo(proyecto))
+        }
+        setRiesgoPorId(mapa)
+      })
+      .catch(() => {
+        // Badge opcional: ante un fallo, la lista de proyectos no se ve afectada.
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [authLoading, puedeVerProyectos, puedeVerRiesgo])
 
   useEffect(() => {
     if (authLoading || !puedeVerProyectos) return
@@ -483,7 +518,12 @@ export default function ProyectosPage() {
                         </div>
                       </td>
                       <td className="px-5 py-4">
-                        <StatusBadge estado={proyecto.estado} />
+                        <div className="flex flex-col items-start gap-1.5">
+                          <StatusBadge estado={proyecto.estado} />
+                          {riesgoPorId.has(proyecto.id) && (
+                            <RiesgoBadge nivel={riesgoPorId.get(proyecto.id)!} />
+                          )}
+                        </div>
                       </td>
                       <td className="px-5 py-4">
                         <div className="flex items-center justify-end gap-1">
