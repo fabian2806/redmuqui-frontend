@@ -6,9 +6,7 @@ import { StatusBadge, MacroregionBadge } from "@/components/ui/status-badge"
 import { ProgressBar } from "@/components/ui/progress-bar"
 import {
   proyectos,
-  documentos,
-  getProyectosPorMacroregion,
-  getActividadesPorEstado
+  documentos
 } from "@/lib/data"
 import {
   FolderKanban,
@@ -24,8 +22,12 @@ import { useState, useEffect } from "react"
 import { useAuth } from "@/hooks/useAuth"
 import { getUserRoleLabel } from "@/lib/user-display"
 import { ApiError } from "@/lib/api"
-import { obtenerIndicadores } from "@/lib/reportes"
-import type { Indicadores } from "@/lib/reportes"
+import {
+  obtenerIndicadores,
+  obtenerProyectosPorMacroregion,
+  obtenerActividadesPorEstado,
+} from "@/lib/reportes"
+import type { Conteo, Indicadores } from "@/lib/reportes"
 import {
   BarChart,
   Bar,
@@ -40,22 +42,41 @@ import {
   Legend
 } from "recharts"
 
-const MACROREGION_COLORS = {
+// Paleta de respaldo: las macroregiones son un catálogo dinámico, así que no se
+// puede colorear por 3 nombres fijos. Se mapean los conocidos (consistente con
+// MacroregionBadge) y se cae a la paleta por índice para cualquier otro.
+const PALETTE = ["#C8102E", "#C9A42B", "#424242", "#0277BD", "#2E7D32", "#6A1B9A"]
+
+const MACROREGION_COLORS: Record<string, string> = {
   Norte: "#C8102E",
   Centro: "#C9A42B",
-  Sur: "#424242"
+  Sur: "#424242",
 }
 
-const ESTADO_COLORS = ["#2E7D32", "#0277BD", "#C8102E"]
+const ESTADO_ACTIVIDAD_COLORS: Record<string, string> = {
+  Finalizadas: "#2E7D32",
+  "En curso": "#0277BD",
+  Pendientes: "#C9A42B",
+  Vencidas: "#C8102E",
+}
+
+const colorMacroregion = (etiqueta: string, index: number) =>
+  MACROREGION_COLORS[etiqueta] ?? PALETTE[index % PALETTE.length]
+
+const colorEstadoActividad = (etiqueta: string, index: number) =>
+  ESTADO_ACTIVIDAD_COLORS[etiqueta] ?? PALETTE[index % PALETTE.length]
 
 export default function DashboardPage() {
   const { user, loading: authLoading } = useAuth()
-  const proyectosPorMacroregion = getProyectosPorMacroregion()
-  const actividadesPorEstado = getActividadesPorEstado()
 
   const [indicadores, setIndicadores] = useState<Indicadores | null>(null)
   const [indicadoresLoading, setIndicadoresLoading] = useState(true)
   const [indicadoresError, setIndicadoresError] = useState<string | null>(null)
+
+  const [proyectosPorMacroregion, setProyectosPorMacroregion] = useState<Conteo[]>([])
+  const [actividadesPorEstado, setActividadesPorEstado] = useState<Conteo[]>([])
+  const [chartsLoading, setChartsLoading] = useState(true)
+  const [chartsError, setChartsError] = useState<string | null>(null)
   
   // Proyectos con alertas (en riesgo o con poco tiempo)
   const proyectosConAlertas = proyectos
@@ -117,6 +138,42 @@ export default function DashboardPage() {
     }
 
     loadIndicadores()
+    return () => {
+      cancelled = true
+    }
+  }, [authLoading])
+
+  useEffect(() => {
+    if (authLoading) return
+
+    let cancelled = false
+
+    async function loadCharts() {
+      setChartsLoading(true)
+      setChartsError(null)
+      try {
+        const [porMacroregion, porEstado] = await Promise.all([
+          obtenerProyectosPorMacroregion(),
+          obtenerActividadesPorEstado(),
+        ])
+        if (!cancelled) {
+          setProyectosPorMacroregion(porMacroregion)
+          setActividadesPorEstado(porEstado)
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setChartsError(
+            err instanceof ApiError
+              ? err.message
+              : "No se pudieron cargar los gráficos",
+          )
+        }
+      } finally {
+        if (!cancelled) setChartsLoading(false)
+      }
+    }
+
+    loadCharts()
     return () => {
       cancelled = true
     }
@@ -343,39 +400,49 @@ export default function DashboardPage() {
             Proyectos por Macroregión
           </h2>
           <div className="h-64">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={proyectosPorMacroregion} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#E0E0E0" />
-                <XAxis 
-                  dataKey="macroregion" 
-                  tick={{ fontSize: 12, fill: "#5C5C5C" }}
-                  axisLine={{ stroke: "#E0E0E0" }}
-                />
-                <YAxis 
-                  tick={{ fontSize: 12, fill: "#5C5C5C" }}
-                  axisLine={{ stroke: "#E0E0E0" }}
-                />
-                <Tooltip
-                  contentStyle={{
-                    backgroundColor: "#fff",
-                    border: "1px solid #E0E0E0",
-                    borderRadius: "8px",
-                    fontSize: "12px"
-                  }}
-                />
-                <Bar 
-                  dataKey="cantidad" 
-                  radius={[4, 4, 0, 0]}
-                >
-                  {proyectosPorMacroregion.map((entry) => (
-                    <Cell 
-                      key={`cell-${entry.macroregion}`} 
-                      fill={MACROREGION_COLORS[entry.macroregion as keyof typeof MACROREGION_COLORS]} 
-                    />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
+            {chartsError ? (
+              <div className="flex h-full items-center justify-center px-4 text-center text-sm text-[#C8102E]">
+                {chartsError}
+              </div>
+            ) : chartsLoading ? (
+              <div className="h-full w-full animate-pulse rounded-lg bg-[#FAFAFA]" />
+            ) : proyectosPorMacroregion.length === 0 ? (
+              <div className="flex h-full items-center justify-center text-sm text-[#5C5C5C]">
+                Sin datos para mostrar
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={proyectosPorMacroregion} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#E0E0E0" />
+                  <XAxis
+                    dataKey="etiqueta"
+                    tick={{ fontSize: 12, fill: "#5C5C5C" }}
+                    axisLine={{ stroke: "#E0E0E0" }}
+                  />
+                  <YAxis
+                    allowDecimals={false}
+                    tick={{ fontSize: 12, fill: "#5C5C5C" }}
+                    axisLine={{ stroke: "#E0E0E0" }}
+                  />
+                  <Tooltip
+                    contentStyle={{
+                      backgroundColor: "#fff",
+                      border: "1px solid #E0E0E0",
+                      borderRadius: "8px",
+                      fontSize: "12px"
+                    }}
+                  />
+                  <Bar dataKey="cantidad" radius={[4, 4, 0, 0]}>
+                    {proyectosPorMacroregion.map((entry, index) => (
+                      <Cell
+                        key={`cell-${entry.etiqueta}`}
+                        fill={colorMacroregion(entry.etiqueta, index)}
+                      />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            )}
           </div>
         </div>
 
@@ -385,38 +452,53 @@ export default function DashboardPage() {
             Estado de Actividades
           </h2>
           <div className="h-64">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie
-                  data={actividadesPorEstado}
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={50}
-                  outerRadius={80}
-                  paddingAngle={5}
-                  dataKey="cantidad"
-                  nameKey="estado"
-                  label={({ estado, cantidad }) => `${estado}: ${cantidad}`}
-                  labelLine={false}
-                >
-                  {actividadesPorEstado.map((_, index) => (
-                    <Cell key={`cell-${index}`} fill={ESTADO_COLORS[index % ESTADO_COLORS.length]} />
-                  ))}
-                </Pie>
-                <Tooltip
-                  contentStyle={{
-                    backgroundColor: "#fff",
-                    border: "1px solid #E0E0E0",
-                    borderRadius: "8px",
-                    fontSize: "12px"
-                  }}
-                />
-                <Legend 
-                  wrapperStyle={{ fontSize: "12px" }}
-                  formatter={(value) => <span className="text-[#5C5C5C]">{value}</span>}
-                />
-              </PieChart>
-            </ResponsiveContainer>
+            {chartsError ? (
+              <div className="flex h-full items-center justify-center px-4 text-center text-sm text-[#C8102E]">
+                {chartsError}
+              </div>
+            ) : chartsLoading ? (
+              <div className="h-full w-full animate-pulse rounded-lg bg-[#FAFAFA]" />
+            ) : actividadesPorEstado.every((a) => a.cantidad === 0) ? (
+              <div className="flex h-full items-center justify-center text-sm text-[#5C5C5C]">
+                Sin datos para mostrar
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={actividadesPorEstado}
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={50}
+                    outerRadius={80}
+                    paddingAngle={5}
+                    dataKey="cantidad"
+                    nameKey="etiqueta"
+                    label={({ etiqueta, cantidad }) => `${etiqueta}: ${cantidad}`}
+                    labelLine={false}
+                  >
+                    {actividadesPorEstado.map((entry, index) => (
+                      <Cell
+                        key={`cell-${entry.etiqueta}`}
+                        fill={colorEstadoActividad(entry.etiqueta, index)}
+                      />
+                    ))}
+                  </Pie>
+                  <Tooltip
+                    contentStyle={{
+                      backgroundColor: "#fff",
+                      border: "1px solid #E0E0E0",
+                      borderRadius: "8px",
+                      fontSize: "12px"
+                    }}
+                  />
+                  <Legend
+                    wrapperStyle={{ fontSize: "12px" }}
+                    formatter={(value) => <span className="text-[#5C5C5C]">{value}</span>}
+                  />
+                </PieChart>
+              </ResponsiveContainer>
+            )}
           </div>
         </div>
       </div>
