@@ -19,13 +19,7 @@ import {
   StatusBadge,
   TypeBadge,
 } from "@/components/ui/status-badge"
-import { RiesgoBadge } from "@/components/ui/riesgo-badge"
 import { api, ApiError } from "@/lib/api"
-import {
-  clasificarRiesgo,
-  obtenerProyectosEnRiesgo,
-  type NivelRiesgo,
-} from "@/lib/reportes"
 import { formatDateOnly } from "@/lib/date-only"
 import { useAuth } from "@/hooks/useAuth"
 import type {
@@ -58,13 +52,20 @@ function formatDate(date: string | null): string {
   return formatDateOnly(date, {}, "-")
 }
 
-function formatCurrency(value: number | null): string {
+function formatCurrency(value: number | null, currency = "PEN"): string {
   if (value === null || value === undefined) return "-"
   return new Intl.NumberFormat("es-PE", {
     style: "currency",
-    currency: "PEN",
+    currency,
     maximumFractionDigits: 0,
   }).format(value)
+}
+
+function budgetAlertClass(alert: ProyectoResponse["alertaPresupuesto"]): string {
+  if (alert === "EXCEDIDO") return "text-[#C8102E]"
+  if (alert === "CRITICO") return "text-[#F57C00]"
+  if (alert === "PREVENTIVO") return "text-[#B58900]"
+  return "text-[#2E7D32]"
 }
 
 function buildProyectosPath(params: {
@@ -96,7 +97,6 @@ export default function ProyectosPage() {
   const { loading: authLoading, hasPermission } = useAuth()
   const puedeVerProyectos = hasPermission("PROYECTOS_READ")
   const puedeCrearProyectos = hasPermission("PROYECTOS_CREATE")
-  const puedeVerRiesgo = hasPermission("REPORTES_READ")
 
   const [searchQuery, setSearchQuery] = useState("")
   const [selectedMacroregion, setSelectedMacroregion] = useState("")
@@ -114,11 +114,6 @@ export default function ProyectosPage() {
   const [loading, setLoading] = useState(true)
   const [catalogosLoading, setCatalogosLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  // Semáforo (Sprint 4 ③): id de proyecto → nivel de riesgo. El badge es un
-  // adorno opcional; si el endpoint falla o falta permiso, la lista sigue igual.
-  const [riesgoPorId, setRiesgoPorId] = useState<Map<number, NivelRiesgo>>(
-    () => new Map(),
-  )
 
   useEffect(() => {
     if (authLoading || !puedeVerProyectos) return
@@ -156,29 +151,6 @@ export default function ProyectosPage() {
       cancelled = true
     }
   }, [authLoading, puedeVerProyectos])
-
-  useEffect(() => {
-    if (authLoading || !puedeVerProyectos || !puedeVerRiesgo) return
-
-    let cancelled = false
-
-    obtenerProyectosEnRiesgo()
-      .then((enRiesgo) => {
-        if (cancelled) return
-        const mapa = new Map<number, NivelRiesgo>()
-        for (const proyecto of enRiesgo) {
-          mapa.set(proyecto.id, clasificarRiesgo(proyecto))
-        }
-        setRiesgoPorId(mapa)
-      })
-      .catch(() => {
-        // Badge opcional: ante un fallo, la lista de proyectos no se ve afectada.
-      })
-
-    return () => {
-      cancelled = true
-    }
-  }, [authLoading, puedeVerProyectos, puedeVerRiesgo])
 
   useEffect(() => {
     if (authLoading || !puedeVerProyectos) return
@@ -506,7 +478,14 @@ export default function ProyectosPage() {
                       </td>
                       <td className="px-5 py-4">
                         <span className="text-sm text-[#1A1A1A]">
-                          {formatCurrency(proyecto.presupuesto)}
+                          {formatCurrency(proyecto.presupuesto, proyecto.moneda)}
+                        </span>
+                        <span className={`mt-1 block text-xs font-semibold ${budgetAlertClass(proyecto.alertaPresupuesto)}`}>
+                          {proyecto.alertaPresupuesto === "NORMAL"
+                            ? "Presupuesto normal"
+                            : proyecto.alertaPresupuesto === "EXCEDIDO"
+                              ? "Presupuesto excedido"
+                              : `${proyecto.porcentajePresupuestoEjecutado.toFixed(0)}% comprometido`}
                         </span>
                       </td>
                       <td className="px-5 py-4">
@@ -518,12 +497,7 @@ export default function ProyectosPage() {
                         </div>
                       </td>
                       <td className="px-5 py-4">
-                        <div className="flex flex-col items-start gap-1.5">
-                          <StatusBadge estado={proyecto.estado} />
-                          {riesgoPorId.has(proyecto.id) && (
-                            <RiesgoBadge nivel={riesgoPorId.get(proyecto.id)!} />
-                          )}
-                        </div>
+                        <StatusBadge estado={proyecto.estado} />
                       </td>
                       <td className="px-5 py-4">
                         <div className="flex items-center justify-end gap-1">
@@ -542,42 +516,31 @@ export default function ProyectosPage() {
             </table>
           </div>
 
-          {totalPages > 1 && (
+          {!loading && (
             <div className="flex flex-col gap-3 border-t border-[#E0E0E0] px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
               <p className="text-sm text-[#5C5C5C]">
-                Mostrando {pageStart} - {pageEnd} de {totalElements}
+                Mostrando {pageStart}-{pageEnd} de {totalElements} proyectos
               </p>
-              <div className="flex items-center gap-1">
+              <p className="text-sm text-[#5C5C5C]">
+                Página {currentPage} de {Math.max(totalPages, 1)}
+              </p>
+              <div className="flex items-center gap-2">
                 <button
                   onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
                   disabled={currentPage === 1 || loading}
-                  className="flex h-8 w-8 items-center justify-center rounded-lg border border-[#E0E0E0] text-[#5C5C5C] hover:bg-[#F7F7F7] disabled:cursor-not-allowed disabled:opacity-50"
+                  className="inline-flex h-9 items-center gap-1 rounded-lg border border-[#E0E0E0] px-3 text-sm text-[#5C5C5C] hover:bg-[#F7F7F7] disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   <ChevronLeft className="h-4 w-4" />
+                  Anterior
                 </button>
-                {Array.from({ length: totalPages }, (_, i) => i + 1).map(
-                  (page) => (
-                    <button
-                      key={page}
-                      onClick={() => setCurrentPage(page)}
-                      disabled={loading}
-                      className={`flex h-8 w-8 items-center justify-center rounded-lg text-sm font-medium disabled:cursor-not-allowed disabled:opacity-50 ${
-                        page === currentPage
-                          ? "bg-[#FFD600] text-[#1A1A1A]"
-                          : "border border-[#E0E0E0] text-[#5C5C5C] hover:bg-[#F7F7F7]"
-                      }`}
-                    >
-                      {page}
-                    </button>
-                  ),
-                )}
                 <button
                   onClick={() =>
                     setCurrentPage((page) => Math.min(totalPages, page + 1))
                   }
                   disabled={currentPage === totalPages || loading}
-                  className="flex h-8 w-8 items-center justify-center rounded-lg border border-[#E0E0E0] text-[#5C5C5C] hover:bg-[#F7F7F7] disabled:cursor-not-allowed disabled:opacity-50"
+                  className="inline-flex h-9 items-center gap-1 rounded-lg border border-[#E0E0E0] px-3 text-sm text-[#5C5C5C] hover:bg-[#F7F7F7] disabled:cursor-not-allowed disabled:opacity-50"
                 >
+                  Siguiente
                   <ChevronRight className="h-4 w-4" />
                 </button>
               </div>

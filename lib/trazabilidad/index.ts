@@ -1,5 +1,6 @@
 export type {
   BitacoraConsultaDTO,
+  CriticidadIncidencia,
   EstadoObservacion,
   ObservacionRequestDTO,
   ObservacionResponseDTO,
@@ -12,4 +13,9 @@ export {
   consultarBitacoraPorEntidad,
 } from "./bitacora.service"
 
-export { crearObservacion, listarObservacionesPorEntidad } from "./observacion.service"
+export {
+  cambiarEstadoObservacion,
+  crearObservacion,
+  listarObservacionesPorEntidad,
+  resolverObservacion,
+} from "./observacion.service"
