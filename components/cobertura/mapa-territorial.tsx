@@ -299,6 +299,10 @@ export function MapaTerritorial({ cobertura, loading = false }: MapaTerritorialP
   const generoSub = (h: number, m: number) =>
     h + m > 0 ? `${formatNumber(m)} mujeres · ${formatNumber(h)} hombres` : undefined
 
+  // Etiqueta compacta para la leyenda (moneda abreviada: S/ 387K, S/ 1.2M).
+  const formatLeyenda = (value: number): string =>
+    metrica === "presupuesto" ? formatCompactCurrency(value) : formatNumber(Math.round(value))
+
   // Datos del gráfico de barras (top por métrica activa).
   const chartData = useMemo(
     () =>
@@ -497,27 +501,20 @@ export function MapaTerritorial({ cobertura, loading = false }: MapaTerritorialP
             )}
           </div>
 
-          {/* Leyenda por tramos (nombra la métrica activa) */}
+          {/* Leyenda: rango explícito por clase (nombra la métrica activa) */}
           <div className="mt-3">
-            <p className="mb-1 text-center text-xs font-medium text-[#5C5C5C]">
+            <p className="mb-2 text-center text-xs font-medium text-[#5C5C5C]">
               Coloreando por {metricaLabel.toLowerCase()}
             </p>
-            <div className="flex items-end justify-center gap-px text-[10px] text-[#5C5C5C]">
-              <LegendSwatch color={COLOR_CERO} label="0" />
-              {RAMP.map((color, i) => (
-                <LegendSwatch
-                  key={color}
-                  color={color}
-                  label={
-                    cortes.length === 0
-                      ? ""
-                      : i === RAMP.length - 1
-                        ? `> ${formatMetrica(metrica, cortes[2])}`
-                        : `≤ ${formatMetrica(metrica, cortes[i])}`
-                  }
-                />
-              ))}
-            </div>
+            {cortes.length === 0 ? (
+              <p className="text-center text-[10px] text-[#5C5C5C]">
+                Sin datos para esta métrica.
+              </p>
+            ) : (
+              <div className="flex justify-center">
+                <LegendLista cortes={cortes} format={formatLeyenda} />
+              </div>
+            )}
           </div>
         </div>
 
@@ -745,11 +742,35 @@ export function MapaTerritorial({ cobertura, loading = false }: MapaTerritorialP
   )
 }
 
-function LegendSwatch({ color, label }: { color: string; label: string }) {
+// Leyenda: lista vertical con el rango explícito de cada clase.
+function LegendLista({
+  cortes,
+  format,
+}: {
+  cortes: number[]
+  format: (v: number) => string
+}) {
+  const filas = [
+    { color: RAMP[3], label: `Más de ${format(cortes[2])}` },
+    { color: RAMP[2], label: `${format(cortes[1])} – ${format(cortes[2])}` },
+    { color: RAMP[1], label: `${format(cortes[0])} – ${format(cortes[1])}` },
+    { color: RAMP[0], label: `Hasta ${format(cortes[0])}` },
+  ]
   return (
-    <div className="flex flex-col items-center gap-0.5">
-      <span className="h-3 w-9 rounded-sm" style={{ backgroundColor: color }} />
-      <span className="whitespace-nowrap">{label}</span>
+    <div className="inline-flex flex-col gap-1">
+      {filas.map((fila) => (
+        <div key={fila.label} className="flex items-center gap-2 text-[10px] text-[#5C5C5C]">
+          <span
+            className="h-3 w-6 shrink-0 rounded-sm"
+            style={{ backgroundColor: fila.color }}
+          />
+          <span>{fila.label}</span>
+        </div>
+      ))}
+      <div className="flex items-center gap-2 text-[10px] text-[#5C5C5C]">
+        <span className="h-3 w-6 shrink-0 rounded-sm" style={{ backgroundColor: COLOR_CERO }} />
+        <span>Sin datos</span>
+      </div>
     </div>
   )
 }
