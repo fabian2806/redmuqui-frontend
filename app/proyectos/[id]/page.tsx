@@ -7,6 +7,7 @@ import { AppLayout } from "@/components/layout/app-layout"
 import { StatusBadge, MacroregionBadge, TypeBadge } from "@/components/ui/status-badge"
 import { ProgressBar } from "@/components/ui/progress-bar"
 import { ProjectGantt } from "@/components/projects/project-gantt"
+import { ResumenIaCard } from "@/components/proyectos/resumen-ia-card"
 import {
   getProyectoById,
   getHitosByProyecto,
@@ -1605,6 +1606,7 @@ const sincronizarAvancePlan = async () => {
               {/* Resumen Tab */}
               {activeTab === "resumen" && (
                 <div className="p-6 space-y-6">
+                  <ResumenIaCard proyectoId={id} />
                   <div>
                     <h3 className="text-sm font-bold uppercase tracking-wide text-[#5C5C5C] mb-2">
                       Descripción
