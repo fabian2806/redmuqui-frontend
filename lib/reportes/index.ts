@@ -1,4 +1,5 @@
 export type {
+  CoberturaTerritorial,
   Conteo,
   DocumentoReciente,
   Indicadores,
@@ -11,6 +12,7 @@ export {
   obtenerActividadesPorEstado,
   obtenerProyectosEnRiesgo,
   obtenerDocumentosRecientes,
+  obtenerCoberturaTerritorial,
 } from "./reportes.service"
 
 export type { NivelSemaforo, NivelRiesgo } from "./semaforo"

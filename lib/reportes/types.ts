@@ -56,3 +56,22 @@ export interface DocumentoReciente {
   /** LocalDate serializado como ISO (yyyy-MM-dd). */
   fechaCarga: string
 }
+
+/**
+ * `com.redmuqui.platform.reporte.dto.CoberturaTerritorialDTO` (Sprint 4 ④).
+ * Cobertura de la red por unidad territorial para el Mapa Territorial.
+ */
+export interface CoberturaTerritorial {
+  idTerritorio: number
+  /** UBIGEO (INEI); cruza con la geometría del mapa. Null en territorios libres. */
+  codigo: string | null
+  nombre: string
+  /** Nivel del territorio (hoy "DEPARTAMENTO"). */
+  tipo: string
+  proyectos: number
+  presupuesto: number
+  beneficiarios: number
+  beneficiariosHombres: number
+  beneficiariosMujeres: number
+  instituciones: number
+}

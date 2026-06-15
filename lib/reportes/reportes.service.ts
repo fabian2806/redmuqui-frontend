@@ -1,5 +1,6 @@
 import { api } from "@/lib/api"
 import type {
+  CoberturaTerritorial,
   Conteo,
   DocumentoReciente,
   Indicadores,
@@ -34,4 +35,13 @@ export async function obtenerProyectosEnRiesgo(): Promise<ProyectoRiesgo[]> {
 /** RF-072 — GET `/reportes/documentos-recientes`. */
 export async function obtenerDocumentosRecientes(): Promise<DocumentoReciente[]> {
   return api.get<DocumentoReciente[]>("/reportes/documentos-recientes")
+}
+
+/** Sprint 4 ④ — GET `/reportes/cobertura-territorial`. Cobertura por territorio para el mapa. */
+export async function obtenerCoberturaTerritorial(
+  nivel: string = "DEPARTAMENTO",
+): Promise<CoberturaTerritorial[]> {
+  return api.get<CoberturaTerritorial[]>(
+    `/reportes/cobertura-territorial?nivel=${encodeURIComponent(nivel)}`,
+  )
 }
