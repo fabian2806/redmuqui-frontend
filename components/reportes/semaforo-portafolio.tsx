@@ -61,7 +61,11 @@ function motivos(p: ProyectoRiesgo): { label: string; tono: Tono }[] {
  * `/reportes/indicadores` y `/reportes/proyectos-en-riesgo`. Pensado para
  * vivir dentro de una pestaña de `/reportes`.
  */
-export function SemaforoPortafolio() {
+interface SemaforoPortafolioProps {
+  anio?: number
+}
+
+export function SemaforoPortafolio({ anio }: SemaforoPortafolioProps) {
   const { loading: authLoading } = useAuth()
 
   const [indicadores, setIndicadores] = useState<Indicadores | null>(null)
@@ -79,8 +83,8 @@ export function SemaforoPortafolio() {
       setError(null)
       try {
         const [indicadoresData, riesgoData] = await Promise.all([
-          obtenerIndicadores(),
-          obtenerProyectosEnRiesgo(),
+          obtenerIndicadores(anio),
+          obtenerProyectosEnRiesgo(anio),
         ])
         if (!cancelled) {
           setIndicadores(indicadoresData)
@@ -103,7 +107,7 @@ export function SemaforoPortafolio() {
     return () => {
       cancelled = true
     }
-  }, [authLoading])
+  }, [authLoading, anio])
 
   const criticos = enRiesgo.filter((p) => clasificarRiesgo(p) === "critico").length
   const atencion = enRiesgo.length - criticos

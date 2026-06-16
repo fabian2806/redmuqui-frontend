@@ -46,6 +46,7 @@ import { useAuth } from "@/hooks/useAuth"
 import { SemaforoPortafolio } from "@/components/reportes/semaforo-portafolio"
 
 const ESTADO_COLORES = ["bg-blue-500", "bg-green-500", "bg-yellow-500"]
+const ANIO_ACTUAL = String(new Date().getFullYear())
 
 function porcentaje(cantidad: number, total: number) {
   return total > 0 ? (cantidad / total) * 100 : 0
@@ -91,11 +92,20 @@ function EmptyState({ children }: { children: string }) {
   return <p className="py-6 text-center text-sm text-muted-foreground">{children}</p>
 }
 
+function csvValue(value: string | number | null | undefined): string {
+  const text = value === null || value === undefined ? "" : String(value)
+  return `"${text.replaceAll("\"", "\"\"")}"`
+}
+
+function csvLine(values: Array<string | number | null | undefined>): string {
+  return values.map(csvValue).join(",")
+}
+
 export default function ReportesPage() {
   const { hasPermission, loading: authLoading } = useAuth()
   const puedeExportarReportes = hasPermission("REPORTES_EXPORT")
 
-  const [periodoSeleccionado, setPeriodoSeleccionado] = useState("2024")
+  const [periodoSeleccionado, setPeriodoSeleccionado] = useState(ANIO_ACTUAL)
   const [indicadores, setIndicadores] = useState<Indicadores | null>(null)
   const [totalInstituciones, setTotalInstituciones] = useState<number | null>(null)
   const [instituciones, setInstituciones] = useState<Institucion[]>([])
@@ -110,6 +120,7 @@ export default function ReportesPage() {
   const [actividadReciente, setActividadReciente] = useState<ActividadReciente[]>([])
   const [loadingReportes, setLoadingReportes] = useState(true)
   const [errorReportes, setErrorReportes] = useState<string | null>(null)
+  const anioReporte = Number(periodoSeleccionado)
 
   useEffect(() => {
     if (authLoading) return
@@ -122,17 +133,17 @@ export default function ReportesPage() {
 
       try {
         const resultados = await Promise.allSettled([
-          obtenerIndicadores(),
+          obtenerIndicadores(anioReporte),
           api.get<Institucion[]>("/instituciones"),
-          obtenerProyectosPorEstado(),
-          obtenerActividadesPorEstado(),
-          obtenerProyectosPorEje(),
-          obtenerAvanceProyectos(),
-          obtenerDocumentosPorTipo(),
-          obtenerDocumentosPorEstado(),
-          obtenerDocumentosRecientes(),
-          obtenerResumenMacroregiones(),
-          obtenerActividadReciente(),
+          obtenerProyectosPorEstado(anioReporte),
+          obtenerActividadesPorEstado(anioReporte),
+          obtenerProyectosPorEje(anioReporte),
+          obtenerAvanceProyectos(anioReporte),
+          obtenerDocumentosPorTipo(anioReporte),
+          obtenerDocumentosPorEstado(anioReporte),
+          obtenerDocumentosRecientes(anioReporte),
+          obtenerResumenMacroregiones(anioReporte),
+          obtenerActividadReciente(anioReporte),
         ])
 
         if (!cancelled) {
@@ -182,7 +193,7 @@ export default function ReportesPage() {
     return () => {
       cancelled = true
     }
-  }, [authLoading])
+  }, [authLoading, anioReporte])
 
   const kpiProyectosActivos = indicadores?.proyectosActivos ?? null
   const kpiDocumentos = indicadores
@@ -192,6 +203,59 @@ export default function ReportesPage() {
   const totalProyectosReportados = proyectosPorEstado.reduce((acc, item) => acc + item.cantidad, 0)
   const totalDocumentosReportados = documentosPorTipo.reduce((acc, item) => acc + item.cantidad, 0)
   const totalActividadesReportadas = actividadesPorEstado.reduce((acc, item) => acc + item.cantidad, 0)
+
+  function exportarCsv() {
+    const rows: string[] = [
+      csvLine(["Reporte", "Periodo", periodoSeleccionado]),
+      "",
+      csvLine(["KPI", "Valor"]),
+      csvLine(["Proyectos activos", indicadores?.proyectosActivos ?? ""]),
+      csvLine(["Proyectos en riesgo", indicadores?.proyectosEnRiesgo ?? ""]),
+      csvLine(["Documentos registrados", kpiDocumentos ?? ""]),
+      csvLine(["Documentos publicados", indicadores?.documentosPublicados ?? ""]),
+      csvLine(["Instituciones", totalInstituciones ?? ""]),
+      csvLine(["Presupuesto proyectos activos", indicadores?.presupuestoTotal ?? ""]),
+      csvLine(["Avance promedio", indicadores?.avancePromedio ?? ""]),
+      "",
+      csvLine(["Proyectos por estado", "Cantidad"]),
+      ...proyectosPorEstado.map((item) => csvLine([item.etiqueta, item.cantidad])),
+      "",
+      csvLine(["Actividades por estado", "Cantidad"]),
+      ...actividadesPorEstado.map((item) => csvLine([item.etiqueta, item.cantidad])),
+      "",
+      csvLine(["Proyectos por eje", "Cantidad", "Presupuesto"]),
+      ...proyectosPorEje.map((item) => csvLine([item.etiqueta, item.cantidad, item.presupuesto])),
+      "",
+      csvLine(["Avance proyectos", "Macroregion", "Estado", "Avance"]),
+      ...avanceProyectos.map((item) => csvLine([item.nombre, item.macroregion, item.estado, item.porcentajeAvance])),
+      "",
+      csvLine(["Documentos por tipo", "Cantidad"]),
+      ...documentosPorTipo.map((item) => csvLine([item.etiqueta, item.cantidad])),
+      "",
+      csvLine(["Documentos por estado", "Cantidad"]),
+      ...documentosPorEstado.map((item) => csvLine([item.etiqueta, item.cantidad])),
+      "",
+      csvLine(["Macroregion", "Total proyectos", "Activos", "Finalizados", "Instituciones"]),
+      ...resumenMacroregiones.map((item) =>
+        csvLine([item.nombre, item.totalProyectos, item.activos, item.finalizados, item.instituciones]),
+      ),
+      "",
+      csvLine(["Actividad reciente", "Usuario", "Accion", "Entidad", "Fecha"]),
+      ...actividadReciente.map((item) =>
+        csvLine([item.descripcion, item.usuario, item.tipoAccion, item.entidadReferenciada, item.fecha]),
+      ),
+    ]
+
+    const blob = new Blob([`\uFEFF${rows.join("\r\n")}`], {
+      type: "text/csv;charset=utf-8",
+    })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement("a")
+    link.href = url
+    link.download = `reportes-redmuqui-${periodoSeleccionado}.csv`
+    link.click()
+    URL.revokeObjectURL(url)
+  }
 
   return (
     <AppLayout>
@@ -208,13 +272,15 @@ export default function ReportesPage() {
                   <SelectValue placeholder="Periodo" />
                 </SelectTrigger>
                 <SelectContent>
+                  <SelectItem value="2026">2026</SelectItem>
+                  <SelectItem value="2025">2025</SelectItem>
                   <SelectItem value="2024">2024</SelectItem>
                   <SelectItem value="2023">2023</SelectItem>
                   <SelectItem value="2022">2022</SelectItem>
                 </SelectContent>
               </Select>
               {puedeExportarReportes && (
-                <Button variant="outline">
+                <Button variant="outline" onClick={exportarCsv} disabled={loadingReportes}>
                   <Download className="mr-2 h-4 w-4" />
                   Exportar
                 </Button>
@@ -327,7 +393,7 @@ export default function ReportesPage() {
             </TabsList>
 
             <TabsContent value="semaforo" className="space-y-4">
-              <SemaforoPortafolio />
+              <SemaforoPortafolio anio={anioReporte} />
             </TabsContent>
 
             <TabsContent value="general" className="space-y-4">

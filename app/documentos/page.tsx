@@ -2,8 +2,18 @@
 
 import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
-import { AlertCircle, Eye, FileText, Pencil, Plus } from "lucide-react"
+import { AlertCircle, Eye, FileText, Pencil, Plus, Trash2 } from "lucide-react"
 import { AppLayout } from "@/components/layout/app-layout"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { Spinner } from "@/components/ui/spinner"
 import { StatusBadge, TypeBadge } from "@/components/ui/status-badge"
 import { api } from "@/lib/api"
@@ -34,6 +44,8 @@ export default function DocumentosPage() {
   const [proyectos, setProyectos] = useState<ProyectoResponse[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [documentoAEliminar, setDocumentoAEliminar] = useState<DocumentoResponse | null>(null)
+  const [eliminandoId, setEliminandoId] = useState<number | null>(null)
   const { hasPermission } = useAuth()
   const puedeEditar = hasPermission("DOCUMENTOS_UPDATE")
 
@@ -78,6 +90,28 @@ export default function DocumentosPage() {
     for (const p of proyectos) map.set(p.id, p.nombre)
     return (id: number | null) => (id != null ? (map.get(id) ?? "—") : "—")
   }, [proyectos])
+
+  async function handleEliminarDocumento() {
+    if (!documentoAEliminar) return
+
+    setEliminandoId(documentoAEliminar.id)
+    setError(null)
+    try {
+      await api.delete<void>(`/documentos/${documentoAEliminar.id}`)
+      setDocumentos((actuales) =>
+        actuales.filter((doc) => doc.id !== documentoAEliminar.id),
+      )
+      setDocumentoAEliminar(null)
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "No se pudo eliminar el documento",
+      )
+    } finally {
+      setEliminandoId(null)
+    }
+  }
 
   return (
     <AppLayout title="Documentos">
@@ -178,22 +212,43 @@ export default function DocumentosPage() {
                             <Eye className="h-4 w-4" />
                           </Link>
                           {puedeEditar ? (
-                            <Link
-                              href={`/documentos/${doc.id}/editar`}
-                              title="Editar documento"
-                              className="inline-flex items-center justify-center rounded-lg border border-[#E0E0E0] p-2 text-[#5C5C5C] transition-colors hover:bg-[#F7F7F7] hover:text-[#1A1A1A]"
-                            >
-                              <Pencil className="h-4 w-4" />
-                            </Link>
+                            <>
+                              <Link
+                                href={`/documentos/${doc.id}/editar`}
+                                title="Editar documento"
+                                className="inline-flex items-center justify-center rounded-lg border border-[#E0E0E0] p-2 text-[#5C5C5C] transition-colors hover:bg-[#F7F7F7] hover:text-[#1A1A1A]"
+                              >
+                                <Pencil className="h-4 w-4" />
+                              </Link>
+                              <button
+                                type="button"
+                                title="Eliminar documento"
+                                disabled={eliminandoId === doc.id}
+                                onClick={() => setDocumentoAEliminar(doc)}
+                                className="inline-flex items-center justify-center rounded-lg border border-[#E0E0E0] p-2 text-[#5C5C5C] transition-colors hover:border-[#C8102E]/30 hover:bg-[#C8102E]/5 hover:text-[#C8102E] disabled:cursor-not-allowed disabled:opacity-60"
+                              >
+                                {eliminandoId === doc.id ? <Spinner /> : <Trash2 className="h-4 w-4" />}
+                              </button>
+                            </>
                           ) : (
-                            <button
-                              type="button"
-                              disabled
-                              title="Sin permiso para editar"
-                              className="inline-flex cursor-not-allowed items-center justify-center rounded-lg border border-[#E0E0E0] p-2 text-[#C0C0C0]"
-                            >
-                              <Pencil className="h-4 w-4" />
-                            </button>
+                            <>
+                              <button
+                                type="button"
+                                disabled
+                                title="Sin permiso para editar"
+                                className="inline-flex cursor-not-allowed items-center justify-center rounded-lg border border-[#E0E0E0] p-2 text-[#C0C0C0]"
+                              >
+                                <Pencil className="h-4 w-4" />
+                              </button>
+                              <button
+                                type="button"
+                                disabled
+                                title="Sin permiso para eliminar"
+                                className="inline-flex cursor-not-allowed items-center justify-center rounded-lg border border-[#E0E0E0] p-2 text-[#C0C0C0]"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </button>
+                            </>
                           )}
                         </div>
                       </td>
@@ -205,6 +260,38 @@ export default function DocumentosPage() {
           )}
         </div>
       </div>
+
+      <AlertDialog
+        open={!!documentoAEliminar}
+        onOpenChange={(open) => {
+          if (!open && eliminandoId === null) setDocumentoAEliminar(null)
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Eliminar documento</AlertDialogTitle>
+            <AlertDialogDescription>
+              Esta accion eliminara "{documentoAEliminar?.titulo}" y sus archivos asociados.
+              No se puede deshacer.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={eliminandoId !== null}>
+              Cancelar
+            </AlertDialogCancel>
+            <AlertDialogAction
+              disabled={eliminandoId !== null}
+              onClick={(event) => {
+                event.preventDefault()
+                void handleEliminarDocumento()
+              }}
+              className="bg-[#C8102E] text-white hover:bg-[#A50D25]"
+            >
+              {eliminandoId !== null ? "Eliminando..." : "Eliminar"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </AppLayout>
   )
 }
