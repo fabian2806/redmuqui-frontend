@@ -1,9 +1,13 @@
 import { api } from "@/lib/api"
 import type {
+  ActividadReciente,
   CoberturaTerritorial,
   Conteo,
+  ConteoPresupuesto,
   DocumentoReciente,
   Indicadores,
+  MacroregionResumen,
+  ProyectoAvance,
   ProyectoRiesgo,
 } from "./types"
 
@@ -22,6 +26,18 @@ export async function obtenerProyectosPorMacroregion(): Promise<Conteo[]> {
   return api.get<Conteo[]>("/reportes/proyectos-por-macroregion")
 }
 
+export async function obtenerProyectosPorEstado(): Promise<Conteo[]> {
+  return api.get<Conteo[]>("/reportes/proyectos-por-estado")
+}
+
+export async function obtenerProyectosPorEje(): Promise<ConteoPresupuesto[]> {
+  return api.get<ConteoPresupuesto[]>("/reportes/proyectos-por-eje")
+}
+
+export async function obtenerAvanceProyectos(): Promise<ProyectoAvance[]> {
+  return api.get<ProyectoAvance[]>("/reportes/avance-proyectos")
+}
+
 /** RF-074 — GET `/reportes/actividades-por-estado`. */
 export async function obtenerActividadesPorEstado(): Promise<Conteo[]> {
   return api.get<Conteo[]>("/reportes/actividades-por-estado")
@@ -35,6 +51,22 @@ export async function obtenerProyectosEnRiesgo(): Promise<ProyectoRiesgo[]> {
 /** RF-072 — GET `/reportes/documentos-recientes`. */
 export async function obtenerDocumentosRecientes(): Promise<DocumentoReciente[]> {
   return api.get<DocumentoReciente[]>("/reportes/documentos-recientes")
+}
+
+export async function obtenerDocumentosPorTipo(): Promise<Conteo[]> {
+  return api.get<Conteo[]>("/reportes/documentos-por-tipo")
+}
+
+export async function obtenerDocumentosPorEstado(): Promise<Conteo[]> {
+  return api.get<Conteo[]>("/reportes/documentos-por-estado")
+}
+
+export async function obtenerResumenMacroregiones(): Promise<MacroregionResumen[]> {
+  return api.get<MacroregionResumen[]>("/reportes/resumen-macroregiones")
+}
+
+export async function obtenerActividadReciente(): Promise<ActividadReciente[]> {
+  return api.get<ActividadReciente[]>("/reportes/actividad-reciente")
 }
 
 /** Sprint 4 ④ — GET `/reportes/cobertura-territorial`. Cobertura por territorio para el mapa. */

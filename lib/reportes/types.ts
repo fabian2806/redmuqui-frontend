@@ -29,6 +29,34 @@ export interface Conteo {
   cantidad: number
 }
 
+export interface ConteoPresupuesto extends Conteo {
+  presupuesto: number
+}
+
+export interface ProyectoAvance {
+  id: number
+  nombre: string
+  macroregion: string
+  estado: "ACTIVO" | "CERRADO" | "SUSPENDIDO"
+  porcentajeAvance: number
+}
+
+export interface MacroregionResumen {
+  nombre: string
+  totalProyectos: number
+  activos: number
+  finalizados: number
+  instituciones: number
+}
+
+export interface ActividadReciente {
+  usuario: string
+  descripcion: string
+  tipoAccion: string
+  entidadReferenciada: string | null
+  fecha: string
+}
+
 /**
  * `com.redmuqui.platform.reporte.dto.ProyectoRiesgoDTO` (RF-071).
  * Proyecto activo clasificado en riesgo.
