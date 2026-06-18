@@ -134,9 +134,21 @@ export default function DocumentosPage() {
     setError(null)
     try {
       await api.delete<void>(`/documentos/${documentoAEliminar.id}`)
-      setDocumentos((actuales) =>
-        actuales.filter((doc) => doc.id !== documentoAEliminar.id),
-      )
+      setData((actual) => {
+        if (!actual) return actual
+
+        const content = actual.content.filter((doc) => doc.id !== documentoAEliminar.id)
+        const totalElements = Math.max(0, actual.totalElements - 1)
+        return {
+          ...actual,
+          content,
+          totalElements,
+          totalPages: Math.max(1, Math.ceil(totalElements / actual.size)),
+        }
+      })
+      if (documentos.length === 1 && page > 0) {
+        setPage((current) => Math.max(0, current - 1))
+      }
       setDocumentoAEliminar(null)
     } catch (err) {
       setError(
