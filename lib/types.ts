@@ -73,6 +73,18 @@ export interface UsuarioUpdate {
   idInstitucion?: number | null
 }
 
+export interface UsuarioPerfilUpdate {
+  nombres: string
+  apellidos: string
+  email: string
+  telefono?: string | null
+}
+
+export interface UsuarioPerfilUpdateResponse {
+  usuario: UsuarioResponse
+  tokens: TokenResponse
+}
+
 // ----- Rol y permisos -----
 
 export interface Rol {

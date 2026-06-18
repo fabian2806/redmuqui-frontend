@@ -100,6 +100,7 @@ export interface AuthContextValue {
   loading: boolean
   login: (credentials: LoginRequest) => Promise<void>
   logout: () => Promise<void>
+  updateUser: (user: UsuarioResponse) => void
   hasPermission: (permiso: string) => boolean
 }
 
@@ -169,6 +170,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null)
   }, [])
 
+  const updateUser = useCallback((nextUser: UsuarioResponse) => {
+    setUser(nextUser)
+  }, [])
+
   const hasPermission = useCallback(
     (permiso: string) => {
       if (!user) return false
@@ -189,6 +194,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     loading,
     login,
     logout,
+    updateUser,
     hasPermission,
   }
 

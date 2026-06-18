@@ -8,12 +8,16 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { api } from "@/lib/api"
+import { api, ApiError } from "@/lib/api"
+import { setTokens } from "@/lib/auth"
 import { useAuth } from "@/hooks/useAuth"
 import { formatPermiso, getPermisoTexto } from "@/lib/permissions"
-import type { BitacoraResponse, EquipoMember, PageResponse, Permiso, ProyectoResponse, UsuarioResponse } from "@/lib/types"
+import type { BitacoraResponse, EquipoMember, PageResponse, Permiso, ProyectoResponse, UsuarioPerfilUpdateResponse, UsuarioResponse } from "@/lib/types"
 import {
   ArrowLeft,
   Mail,
@@ -23,24 +27,42 @@ import {
   FolderOpen,
   Clock,
   CheckCircle2,
+  Edit,
   FileText,
   MapPin,
   Phone,
+  Save,
 } from "lucide-react"
 
 export default function UsuarioDetallePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params)
-  const { loading: authLoading, hasPermission } = useAuth()
+  const { user: usuarioActual, loading: authLoading, hasPermission, updateUser } = useAuth()
   const puedeVerUsuarios = hasPermission("USUARIOS_READ")
+  const idNumerico = Number(id)
+  const esPerfilPropio = usuarioActual?.id === idNumerico
+  const puedeVerPerfil = puedeVerUsuarios || esPerfilPropio
   const [usuario, setUsuario] = useState<UsuarioResponse | null>(null)
   const [permisos, setPermisos] = useState<Permiso[]>([])
   const [proyectosUsuario, setProyectosUsuario] = useState<ProyectoResponse[]>([])
   const [actividadUsuario, setActividadUsuario] = useState<BitacoraResponse[]>([])
   const [cargando, setCargando] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [editOpen, setEditOpen] = useState(false)
+  const [editSubmitting, setEditSubmitting] = useState(false)
+  const [editError, setEditError] = useState<string | null>(null)
+  const [editSuccess, setEditSuccess] = useState<string | null>(null)
+  const [editForm, setEditForm] = useState({
+    nombres: "",
+    apellidos: "",
+    email: "",
+    telefono: "",
+  })
 
   useEffect(() => {
-    if (authLoading || !puedeVerUsuarios) return
+    if (authLoading || !puedeVerPerfil) {
+      if (!authLoading && !puedeVerPerfil) setCargando(false)
+      return
+    }
 
     let cancelado = false
 
@@ -49,7 +71,7 @@ export default function UsuarioDetallePage({ params }: { params: Promise<{ id: s
       setError(null)
 
       try {
-        const usuarioData = await api.get<UsuarioResponse>(`/usuarios/${id}`)
+        const usuarioData = await api.get<UsuarioResponse>(esPerfilPropio ? "/usuarios/me" : `/usuarios/${id}`)
         if (cancelado) return
 
         setUsuario(usuarioData)
@@ -113,12 +135,69 @@ export default function UsuarioDetallePage({ params }: { params: Promise<{ id: s
     return () => {
       cancelado = true
     }
-  }, [id, authLoading, puedeVerUsuarios])
+  }, [id, authLoading, puedeVerPerfil, esPerfilPropio])
 
   const nombreCompleto = usuario ? getNombreCompleto(usuario) : ""
   const descripcionRol = useMemo(() => getRolDescripcion(usuario?.nombreRol ?? ""), [usuario?.nombreRol])
 
-  if (!authLoading && !puedeVerUsuarios) {
+  const abrirEditor = () => {
+    if (!usuario) return
+    setEditForm({
+      nombres: usuario.nombres,
+      apellidos: usuario.apellidos,
+      email: usuario.email,
+      telefono: usuario.telefono ?? "",
+    })
+    setEditError(null)
+    setEditSuccess(null)
+    setEditOpen(true)
+  }
+
+  const guardarPerfil = async () => {
+    const nombres = editForm.nombres.trim()
+    const apellidos = editForm.apellidos.trim()
+    const email = editForm.email.trim()
+    const telefono = editForm.telefono.trim()
+
+    if (!nombres || !apellidos || !email) {
+      setEditError("Completa nombres, apellidos y correo electronico.")
+      return
+    }
+
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setEditError("Ingresa un correo electronico valido.")
+      return
+    }
+
+    if (telefono && !/^\d{9}$/.test(telefono)) {
+      setEditError("El telefono debe contener exactamente 9 digitos.")
+      return
+    }
+
+    setEditSubmitting(true)
+    setEditError(null)
+
+    try {
+      const response = await api.put<UsuarioPerfilUpdateResponse>("/usuarios/me", {
+        nombres,
+        apellidos,
+        email,
+        telefono: telefono || null,
+      })
+
+      setTokens(response.tokens)
+      setUsuario(response.usuario)
+      updateUser(response.usuario)
+      setEditOpen(false)
+      setEditSuccess("Datos personales actualizados correctamente.")
+    } catch (err) {
+      setEditError(getApiErrorMessage(err))
+    } finally {
+      setEditSubmitting(false)
+    }
+  }
+
+  if (!authLoading && !puedeVerPerfil) {
     return (
       <AppLayout>
         <PermissionGuard permiso="USUARIOS_READ">
@@ -167,7 +246,19 @@ export default function UsuarioDetallePage({ params }: { params: Promise<{ id: s
             <h1 className="text-2xl font-bold text-foreground">Perfil de Usuario</h1>
             <p className="text-muted-foreground">Información detallada y actividad</p>
           </div>
+          {esPerfilPropio && (
+            <Button onClick={abrirEditor} className="bg-primary hover:bg-primary/90">
+              <Edit className="mr-2 h-4 w-4" />
+              Editar datos
+            </Button>
+          )}
         </div>
+
+        {editSuccess && (
+          <div className="rounded-md border border-green-200 bg-green-50 px-4 py-3 text-sm font-medium text-green-700">
+            {editSuccess}
+          </div>
+        )}
 
         <div className="grid gap-6 lg:grid-cols-3">
           <Card className="lg:col-span-1">
@@ -352,8 +443,89 @@ export default function UsuarioDetallePage({ params }: { params: Promise<{ id: s
           </Card>
         </div>
       </div>
+
+      <Dialog open={editOpen} onOpenChange={(open) => {
+        setEditOpen(open)
+        if (!open) setEditError(null)
+      }}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Editar datos personales</DialogTitle>
+            <DialogDescription>
+              Actualiza solo la informacion autorizada de tu perfil.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-2">
+              <Label htmlFor="perfil-nombres">Nombres</Label>
+              <Input
+                id="perfil-nombres"
+                value={editForm.nombres}
+                onChange={(event) => setEditForm((form) => ({ ...form, nombres: event.target.value }))}
+                maxLength={100}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="perfil-apellidos">Apellidos</Label>
+              <Input
+                id="perfil-apellidos"
+                value={editForm.apellidos}
+                onChange={(event) => setEditForm((form) => ({ ...form, apellidos: event.target.value }))}
+                maxLength={100}
+              />
+            </div>
+            <div className="space-y-2 sm:col-span-2">
+              <Label htmlFor="perfil-email">Correo electronico</Label>
+              <Input
+                id="perfil-email"
+                type="email"
+                value={editForm.email}
+                onChange={(event) => setEditForm((form) => ({ ...form, email: event.target.value }))}
+                maxLength={150}
+              />
+            </div>
+            <div className="space-y-2 sm:col-span-2">
+              <Label htmlFor="perfil-telefono">Telefono</Label>
+              <Input
+                id="perfil-telefono"
+                inputMode="numeric"
+                maxLength={9}
+                value={editForm.telefono}
+                onChange={(event) => setEditForm((form) => ({
+                  ...form,
+                  telefono: event.target.value.replace(/\D/g, "").slice(0, 9),
+                }))}
+              />
+            </div>
+          </div>
+
+          {editError && (
+            <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">
+              {editError}
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditOpen(false)} disabled={editSubmitting}>
+              Cancelar
+            </Button>
+            <Button onClick={guardarPerfil} disabled={editSubmitting} className="bg-primary hover:bg-primary/90">
+              <Save className="mr-2 h-4 w-4" />
+              {editSubmitting ? "Guardando..." : "Guardar cambios"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </AppLayout>
   )
+}
+
+function getApiErrorMessage(error: unknown): string {
+  if (error instanceof ApiError) {
+    return error.body?.message ?? error.message
+  }
+  return error instanceof Error ? error.message : "No se pudieron guardar los cambios"
 }
 
 function getNombreCompleto(usuario: UsuarioResponse) {
