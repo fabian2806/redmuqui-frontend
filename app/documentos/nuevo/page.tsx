@@ -24,8 +24,6 @@ import {
 
 const ESTADOS: Array<{ value: EstadoDocumento; label: string }> = [
   { value: "BORRADOR", label: "Borrador" },
-  { value: "EN_REVISION", label: "En revisión" },
-  { value: "PUBLICADO", label: "Publicado" },
 ]
 
 const TITULO_MAX = 255
@@ -110,8 +108,35 @@ export default function NuevoDocumentoPage() {
     title: "",
     description: "",
   })
+  const [createdDocumentId, setCreatedDocumentId] = useState<number | null>(null)
+  const [linkedSubactivityId, setLinkedSubactivityId] = useState<number | null>(null)
+  const [linkedSubactivityName, setLinkedSubactivityName] = useState("")
+  const [returnPath, setReturnPath] = useState("/documentos")
 
   const [archivosAdjuntos, setArchivosAdjuntos] = useState<File[]>([])
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const proyecto = toId(params.get("proyecto") ?? "")
+    const subactividad = toId(params.get("subactividad") ?? "")
+    const nombreSubactividad = params.get("nombreSubactividad")?.trim() ?? ""
+    const volver = params.get("returnTo")
+
+    if (volver?.startsWith("/")) setReturnPath(volver)
+    if (subactividad !== undefined) {
+      setLinkedSubactivityId(subactividad)
+      setLinkedSubactivityName(nombreSubactividad)
+    }
+    setFormData((current) => ({
+      ...current,
+      idProyecto: proyecto !== undefined ? String(proyecto) : current.idProyecto,
+      titulo: subactividad !== undefined && !current.titulo
+        ? `Entregable final${nombreSubactividad ? ` - ${nombreSubactividad}` : ""}`
+        : current.titulo,
+      tipo: subactividad !== undefined && !current.tipo ? "Informe" : current.tipo,
+      estado: "BORRADOR",
+    }))
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -276,6 +301,10 @@ export default function NuevoDocumentoPage() {
 
     const idProyecto = toId(formData.idProyecto)
     if (idProyecto !== undefined) payload.idProyecto = idProyecto
+    if (linkedSubactivityId !== null) {
+      payload.idSubactividad = linkedSubactivityId
+      payload.tipoVinculo = "ENTREGABLE_FINAL"
+    }
 
     const idEjeTematico = toId(formData.idEjeTematico)
     if (idEjeTematico !== undefined) payload.idEjeTematico = idEjeTematico
@@ -310,6 +339,15 @@ export default function NuevoDocumentoPage() {
 
     if (!formData.idRespElaboracion) {
       errors.idRespElaboracion = "Selecciona el responsable de elaboración"
+    }
+    if (linkedSubactivityId !== null && !formData.idProyecto) {
+      errors.idProyecto = "El entregable debe mantener el proyecto de la subactividad"
+    }
+    if (linkedSubactivityId !== null && !formData.idRespValidacion) {
+      errors.idRespValidacion = "Selecciona quién validará el entregable"
+    }
+    if (linkedSubactivityId !== null && archivosAdjuntos.length === 0) {
+      errors.archivos = "Adjunta al menos un archivo para registrar el entregable"
     }
 
     if (
@@ -368,10 +406,13 @@ export default function NuevoDocumentoPage() {
       }
 
       setArchivosAdjuntos([])
+      setCreatedDocumentId(creado.id)
 
       setSuccessMessage({
         title: "Documento registrado exitosamente",
-        description: `El documento "${creado.titulo}" se ha guardado correctamente.`,
+        description: linkedSubactivityId !== null
+          ? `El entregable "${creado.titulo}" quedó vinculado a la subactividad.`
+          : `El documento "${creado.titulo}" se ha guardado correctamente.`,
       })
 
       setSuccessOpen(true)
@@ -433,8 +474,8 @@ export default function NuevoDocumentoPage() {
     <AppLayout title="Nuevo Documento">
       <div className="mx-auto max-w-4xl space-y-6">
         <nav className="flex items-center gap-2 text-sm text-[#5C5C5C]">
-          <Link href="/documentos" className="hover:text-[#1A1A1A]">
-            Documentos
+          <Link href={returnPath} className="hover:text-[#1A1A1A]">
+            {linkedSubactivityId !== null ? "Proyecto" : "Documentos"}
           </Link>
           <ChevronRight className="h-4 w-4" />
           <span className="font-medium text-[#1A1A1A]">Nuevo Documento</span>
@@ -446,6 +487,18 @@ export default function NuevoDocumentoPage() {
             Completa la información del documento o informe institucional
           </p>
         </div>
+
+        {linkedSubactivityId !== null && (
+          <div className="rounded-lg border border-[#0277BD]/20 bg-[#0277BD]/5 px-4 py-3">
+            <p className="text-sm font-semibold text-[#01579B]">
+              Entregable final de subactividad
+            </p>
+            <p className="mt-1 text-xs text-[#5C5C5C]">
+              {linkedSubactivityName || `Subactividad #${linkedSubactivityId}`}. Al publicarse,
+              completará automáticamente la subactividad y recalculará el proyecto.
+            </p>
+          </div>
+        )}
 
         {error && (
           <div
@@ -507,10 +560,8 @@ export default function NuevoDocumentoPage() {
                   </label>
                   <select
                     value={formData.estado}
-                    onChange={(event) =>
-                      updateField("estado", event.target.value as EstadoDocumento)
-                    }
-                    className="w-full rounded-lg border border-[#E0E0E0] px-4 py-2.5 text-sm text-[#1A1A1A] focus:border-[#FFD600] focus:outline-none focus:ring-1 focus:ring-[#FFD600]"
+                    disabled
+                    className="w-full rounded-lg border border-[#E0E0E0] bg-[#F7F7F7] px-4 py-2.5 text-sm text-[#1A1A1A] disabled:opacity-80"
                   >
                     {ESTADOS.map((estado) => (
                       <option key={estado.value} value={estado.value}>
@@ -572,6 +623,7 @@ export default function NuevoDocumentoPage() {
                   className="hidden"
                 />
               </label>
+              <FieldError field="archivos" />
 
               {archivosAdjuntos.length > 0 ? (
                 <div className="space-y-2">
@@ -638,8 +690,8 @@ export default function NuevoDocumentoPage() {
                   <select
                     value={formData.idProyecto}
                     onChange={(event) => updateField("idProyecto", event.target.value)}
-                    disabled={loadingCatalogos}
-                    className="w-full rounded-lg border border-[#E0E0E0] px-4 py-2.5 text-sm text-[#1A1A1A] focus:border-[#FFD600] focus:outline-none focus:ring-1 focus:ring-[#FFD600] disabled:opacity-60"
+                    disabled={loadingCatalogos || linkedSubactivityId !== null}
+                    className={`w-full rounded-lg border px-4 py-2.5 text-sm text-[#1A1A1A] focus:border-[#FFD600] focus:outline-none focus:ring-1 focus:ring-[#FFD600] disabled:bg-[#F7F7F7] disabled:opacity-80 ${fieldErrorClass("idProyecto")}`}
                   >
                     <option value="">Sin proyecto asociado</option>
                     {proyectos.map((proyecto) => (
@@ -648,6 +700,7 @@ export default function NuevoDocumentoPage() {
                       </option>
                     ))}
                   </select>
+                  <FieldError field="idProyecto" />
                 </div>
 
                 <div>
@@ -784,7 +837,7 @@ export default function NuevoDocumentoPage() {
 
           <div className="flex items-center justify-end gap-3 pt-4">
             <Link
-              href="/documentos"
+              href={returnPath}
               className="rounded-lg border border-[#E0E0E0] bg-white px-6 py-2.5 text-sm font-medium text-[#5C5C5C] hover:bg-[#F7F7F7]"
             >
               Cancelar
@@ -843,7 +896,11 @@ export default function NuevoDocumentoPage() {
           description={successMessage.description}
           onClose={() => {
             setSuccessOpen(false)
-            router.push("/documentos")
+            router.push(
+              createdDocumentId !== null
+                ? `/documentos/${createdDocumentId}`
+                : returnPath,
+            )
           }}
         />
 

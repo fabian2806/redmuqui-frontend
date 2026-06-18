@@ -30,10 +30,13 @@ export interface ObservacionRequestDTO {
   descripcion: string
   entidadReferenciada: string
   idEntidadReferenciada: number
+  criticidad?: CriticidadIncidencia
+  idResponsable?: number
 }
 
 /** `com.redmuqui.platform.trazabilidad.entity.EstadoObservacion` */
 export type EstadoObservacion = "PENDIENTE" | "RESUELTA"
+export type CriticidadIncidencia = "BAJA" | "MEDIA" | "ALTA" | "CRITICA"
 
 /**
  * `com.redmuqui.platform.trazabilidad.dto.ObservacionResponseDTO` (HU022, RF-068).
@@ -44,9 +47,17 @@ export interface ObservacionResponseDTO {
   /** LocalDateTime serializado como ISO-8601 */
   fecha: string
   estado: EstadoObservacion
+  criticidad: CriticidadIncidencia
+  fechaVencimiento: string
+  fechaResolucion: string | null
+  comentarioResolucion: string | null
+  idUsuarioResolucion: number | null
+  nombreUsuarioResolucion: string | null
   entidadReferenciada: string
   idEntidadReferenciada: number
   idUsuario: number | null
   nombreUsuario: string | null
   emailUsuario: string | null
+  idResponsable: number | null
+  nombreResponsable: string | null
 }
