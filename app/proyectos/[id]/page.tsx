@@ -525,8 +525,9 @@ const [observacionesLast, setObservacionesLast] = useState(true)
 const [observacionesLoading, setObservacionesLoading] = useState(false)
 const [observacionesReloadKey, setObservacionesReloadKey] = useState(0)
 const [observacionModalOpen, setObservacionModalOpen] = useState(false)
-const [observacionDescripcion, setObservacionDescripcion] = useState("")
-const [observacionCriticidad, setObservacionCriticidad] = useState<"BAJA" | "MEDIA" | "ALTA" | "CRITICA">("MEDIA")
+  const [observacionDescripcion, setObservacionDescripcion] = useState("")
+  const [observacionDescripcionError, setObservacionDescripcionError] = useState("")
+  const [observacionCriticidad, setObservacionCriticidad] = useState<"BAJA" | "MEDIA" | "ALTA" | "CRITICA">("MEDIA")
 const [observacionResponsable, setObservacionResponsable] = useState("")
 const [observacionSubmitting, setObservacionSubmitting] = useState(false)
 const [resolverIncidencia, setResolverIncidencia] = useState<ObservacionResponseDTO | null>(null)
@@ -794,6 +795,9 @@ const [organigrama, setOrganigrama] = useState<OrganigramaProyecto | null>(null)
     if (!actForm.fechaInicio) {
       errors["act-fechaInicio"] = "La fecha de inicio es obligatoria"
     }
+    if (!actForm.fechaFin) {
+      errors["act-fechaFin"] = "La fecha de fin es obligatoria"
+    }
     if (actForm.fechaInicio && actForm.fechaFin && actForm.fechaFin < actForm.fechaInicio) {
       errors["act-fechaFin"] = "La fecha de fin no puede ser anterior a la fecha de inicio"
     }
@@ -844,6 +848,9 @@ const [organigrama, setOrganigrama] = useState<OrganigramaProyecto | null>(null)
     if (!editForm.fechaInicio) {
       errors["edit-inicio"] = "La fecha de inicio es obligatoria"
     }
+    if (!editForm.fechaFin) {
+      errors["edit-fin"] = "La fecha de fin es obligatoria"
+    }
     if (editForm.fechaInicio && editForm.fechaFin && editForm.fechaFin < editForm.fechaInicio) {
       errors["edit-fin"] = "La fecha de fin no puede ser anterior a la fecha de inicio"
     }
@@ -876,6 +883,9 @@ const [organigrama, setOrganigrama] = useState<OrganigramaProyecto | null>(null)
     if (!subactForm.fechaInicio) {
       errors["sub-inicio"] = "La fecha de inicio es obligatoria"
     }
+    if (!subactForm.fechaFin) {
+      errors["sub-fin"] = "La fecha de fin es obligatoria"
+    }
     if (subactForm.fechaInicio && subactForm.fechaFin && subactForm.fechaFin < subactForm.fechaInicio) {
       errors["sub-fin"] = "La fecha de fin no puede ser anterior a la fecha de inicio"
     }
@@ -886,8 +896,10 @@ const [organigrama, setOrganigrama] = useState<OrganigramaProyecto | null>(null)
     if (actividad?.fechaFinPlanificada && subactForm.fechaFin && subactForm.fechaFin > actividad.fechaFinPlanificada) {
       errors["sub-fin"] = "La subactividad no puede terminar después que su actividad"
     }
-    if (subactForm.presupuesto && Number(subactForm.presupuesto) < 0) {
-      errors["sub-presu"] = "El presupuesto no puede ser negativo"
+    if (!subactForm.presupuesto) {
+      errors["sub-presu"] = "El presupuesto es obligatorio"
+    } else if (Number(subactForm.presupuesto) <= 0) {
+      errors["sub-presu"] = "El presupuesto debe ser mayor a cero"
     }
     if (subactForm.hombresInvolucrados && Number(subactForm.hombresInvolucrados) < 0) {
       errors["sub-hombres"] = "El número no puede ser negativo"
@@ -911,6 +923,9 @@ const [organigrama, setOrganigrama] = useState<OrganigramaProyecto | null>(null)
     if (!editSubactForm.fechaInicio) {
       errors["edit-sub-inicio"] = "La fecha de inicio es obligatoria"
     }
+    if (!editSubactForm.fechaFin) {
+      errors["edit-sub-fin"] = "La fecha de fin es obligatoria"
+    }
     if (editSubactForm.fechaInicio && editSubactForm.fechaFin && editSubactForm.fechaFin < editSubactForm.fechaInicio) {
       errors["edit-sub-fin"] = "La fecha de fin no puede ser anterior a la fecha de inicio"
     }
@@ -921,8 +936,10 @@ const [organigrama, setOrganigrama] = useState<OrganigramaProyecto | null>(null)
     if (actividad?.fechaFinPlanificada && editSubactForm.fechaFin && editSubactForm.fechaFin > actividad.fechaFinPlanificada) {
       errors["edit-sub-fin"] = "La subactividad no puede terminar después que su actividad"
     }
-    if (editSubactForm.presupuesto && Number(editSubactForm.presupuesto) < 0) {
-      errors["edit-sub-presu"] = "El presupuesto no puede ser negativo"
+    if (!editSubactForm.presupuesto) {
+      errors["edit-sub-presu"] = "El presupuesto es obligatorio"
+    } else if (Number(editSubactForm.presupuesto) <= 0) {
+      errors["edit-sub-presu"] = "El presupuesto debe ser mayor a cero"
     }
     if (editSubactForm.estado === "FINALIZADA" && !editSubactForm.costoReal) {
       errors["edit-sub-costo-real"] = "Registra el costo real para finalizar"
@@ -1340,13 +1357,10 @@ const sincronizarAvancePlan = async () => {
   const registrarObservacion = async () => {
     const descripcion = observacionDescripcion.trim()
     if (!descripcion) {
-      toast({
-        variant: "destructive",
-        title: "Descripción requerida",
-        description: "Ingresa el detalle de la incidencia antes de enviar.",
-      })
+      setObservacionDescripcionError("La descripción es obligatoria")
       return
     }
+    setObservacionDescripcionError("")
 
     const proyectoId = Number(id)
     if (Number.isNaN(proyectoId)) {
@@ -2528,7 +2542,7 @@ const sincronizarAvancePlan = async () => {
                               {subactFieldErrors["sub-inicio"] && <p className="text-xs text-[#C8102E]">{subactFieldErrors["sub-inicio"]}</p>}
                             </div>
                             <div className="grid gap-2" data-field="sub-fin">
-                              <Label htmlFor="sub-fin">Fecha de Fin</Label>
+                              <Label htmlFor="sub-fin">Fecha de Fin <span className="text-[#C8102E]">*</span></Label>
                               <Input id="sub-fin" type="date" min={subactForm.fechaInicio || actividadSubactividadNueva?.fechaInicioPlanificada || undefined} max={actividadSubactividadNueva?.fechaFinPlanificada ?? undefined} value={subactForm.fechaFin} onChange={e => { const v = e.target.value; setSubactForm(f => ({ ...f, fechaFin: v })); setSubactFieldErrors(p => { const { "sub-fin": _, ...r } = p; if (v && subactForm.fechaInicio && v < subactForm.fechaInicio) { r["sub-fin"] = "La fecha de fin no puede ser anterior a la fecha de inicio" }; return r }) }} className={subactFieldErrors["sub-fin"] ? "border-[#C8102E]" : ""} />
                               {subactFieldErrors["sub-fin"] && <p className="text-xs text-[#C8102E]">{subactFieldErrors["sub-fin"]}</p>}
                             </div>
@@ -2551,17 +2565,19 @@ const sincronizarAvancePlan = async () => {
                           </div>
                           <div className="grid grid-cols-3 gap-4">
                             <div className="grid gap-2" data-field="sub-presu">
-                              <Label htmlFor="sub-presu">Presupuesto ({apiProyecto?.moneda ?? "PEN"})</Label>
+                              <Label htmlFor="sub-presu">Presupuesto ({apiProyecto?.moneda ?? "PEN"}) <span className="text-[#C8102E]">*</span></Label>
                               <Input id="sub-presu" type="number" min="0" value={subactForm.presupuesto} onChange={e => { const v = e.target.value; setSubactForm(f => ({ ...f, presupuesto: v })); setSubactFieldErrors(p => { const { "sub-presu": _, ...r } = p; if (v && Number(v) < 0) { r["sub-presu"] = "El presupuesto no puede ser negativo" }; return r }) }} className={subactFieldErrors["sub-presu"] ? "border-[#C8102E]" : ""} />
                               {subactFieldErrors["sub-presu"] && <p className="text-xs text-[#C8102E]">{subactFieldErrors["sub-presu"]}</p>}
                             </div>
-                            <div className="grid gap-2">
-                              <Label htmlFor="sub-hombres">Hombres Involucrados</Label>
-                              <Input id="sub-hombres" type="number" min="0" value={subactForm.hombresInvolucrados} onChange={e => setSubactForm(f => ({ ...f, hombresInvolucrados: e.target.value }))} />
+                            <div className="grid gap-2" data-field="sub-hombres">
+                              <Label htmlFor="sub-hombres">Hombres Involucrados <span className="text-[#C8102E]">*</span></Label>
+                              <Input id="sub-hombres" type="number" min="0" value={subactForm.hombresInvolucrados} onChange={e => { const v = e.target.value; setSubactForm(f => ({ ...f, hombresInvolucrados: v })); setSubactFieldErrors(p => { const { "sub-hombres": _, ...r } = p; if (v && Number(v) < 0) { r["sub-hombres"] = "El número no puede ser negativo" }; return r }) }} className={subactFieldErrors["sub-hombres"] ? "border-[#C8102E]" : ""} />
+                              {subactFieldErrors["sub-hombres"] && <p className="text-xs text-[#C8102E]">{subactFieldErrors["sub-hombres"]}</p>}
                             </div>
-                            <div className="grid gap-2">
-                              <Label htmlFor="sub-mujeres">Mujeres Involucradas</Label>
-                              <Input id="sub-mujeres" type="number" min="0" value={subactForm.mujeresInvolucradas} onChange={e => setSubactForm(f => ({ ...f, mujeresInvolucradas: e.target.value }))} />
+                            <div className="grid gap-2" data-field="sub-mujeres">
+                              <Label htmlFor="sub-mujeres">Mujeres Involucradas <span className="text-[#C8102E]">*</span></Label>
+                              <Input id="sub-mujeres" type="number" min="0" value={subactForm.mujeresInvolucradas} onChange={e => { const v = e.target.value; setSubactForm(f => ({ ...f, mujeresInvolucradas: v })); setSubactFieldErrors(p => { const { "sub-mujeres": _, ...r } = p; if (v && Number(v) < 0) { r["sub-mujeres"] = "El número no puede ser negativo" }; return r }) }} className={subactFieldErrors["sub-mujeres"] ? "border-[#C8102E]" : ""} />
+                              {subactFieldErrors["sub-mujeres"] && <p className="text-xs text-[#C8102E]">{subactFieldErrors["sub-mujeres"]}</p>}
                             </div>
                           </div>
                         </div>
@@ -2815,7 +2831,7 @@ const sincronizarAvancePlan = async () => {
                           )}
                           <div className="grid grid-cols-3 gap-4">
                             <div className="grid gap-2" data-field="edit-sub-presu">
-                              <Label htmlFor="edit-sub-presu">Presupuesto ({apiProyecto?.moneda ?? "PEN"})</Label>
+                              <Label htmlFor="edit-sub-presu">Presupuesto ({apiProyecto?.moneda ?? "PEN"}) <span className="text-[#C8102E]">*</span></Label>
                               <Input id="edit-sub-presu" type="number" min="0" value={editSubactForm.presupuesto} onChange={e => { const v = e.target.value; setEditSubactForm(f => ({ ...f, presupuesto: v })); setEditSubactFieldErrors(p => { const { "edit-sub-presu": _, ...r } = p; if (v && Number(v) < 0) { r["edit-sub-presu"] = "El presupuesto no puede ser negativo" }; return r }) }} className={editSubactFieldErrors["edit-sub-presu"] ? "border-[#C8102E]" : ""} />
                               {editSubactFieldErrors["edit-sub-presu"] && <p className="text-xs text-[#C8102E]">{editSubactFieldErrors["edit-sub-presu"]}</p>}
                             </div>
@@ -2841,12 +2857,12 @@ const sincronizarAvancePlan = async () => {
                             </div>
                             <div className="grid gap-2" data-field="edit-sub-hombres">
                               <Label htmlFor="edit-sub-hombres">Hombres Involucrados</Label>
-                              <Input id="edit-sub-hombres" type="number" min="0" value={editSubactForm.hombresInvolucrados} onChange={e => { setEditSubactForm(f => ({ ...f, hombresInvolucrados: e.target.value })); setEditSubactFieldErrors(p => { const { "edit-sub-hombres": _, ...r } = p; return r }) }} className={editSubactFieldErrors["edit-sub-hombres"] ? "border-[#C8102E]" : ""} />
+                              <Input id="edit-sub-hombres" type="number" min="0" value={editSubactForm.hombresInvolucrados} onChange={e => { const v = e.target.value; setEditSubactForm(f => ({ ...f, hombresInvolucrados: v })); setEditSubactFieldErrors(p => { const { "edit-sub-hombres": _, ...r } = p; if (v && Number(v) < 0) { r["edit-sub-hombres"] = "El número no puede ser negativo" }; return r }) }} className={editSubactFieldErrors["edit-sub-hombres"] ? "border-[#C8102E]" : ""} />
                               {editSubactFieldErrors["edit-sub-hombres"] && <p className="text-xs text-[#C8102E]">{editSubactFieldErrors["edit-sub-hombres"]}</p>}
                             </div>
                             <div className="grid gap-2" data-field="edit-sub-mujeres">
                               <Label htmlFor="edit-sub-mujeres">Mujeres Involucradas</Label>
-                              <Input id="edit-sub-mujeres" type="number" min="0" value={editSubactForm.mujeresInvolucradas} onChange={e => { setEditSubactForm(f => ({ ...f, mujeresInvolucradas: e.target.value })); setEditSubactFieldErrors(p => { const { "edit-sub-mujeres": _, ...r } = p; return r }) }} className={editSubactFieldErrors["edit-sub-mujeres"] ? "border-[#C8102E]" : ""} />
+                              <Input id="edit-sub-mujeres" type="number" min="0" value={editSubactForm.mujeresInvolucradas} onChange={e => { const v = e.target.value; setEditSubactForm(f => ({ ...f, mujeresInvolucradas: v })); setEditSubactFieldErrors(p => { const { "edit-sub-mujeres": _, ...r } = p; if (v && Number(v) < 0) { r["edit-sub-mujeres"] = "El número no puede ser negativo" }; return r }) }} className={editSubactFieldErrors["edit-sub-mujeres"] ? "border-[#C8102E]" : ""} />
                               {editSubactFieldErrors["edit-sub-mujeres"] && <p className="text-xs text-[#C8102E]">{editSubactFieldErrors["edit-sub-mujeres"]}</p>}
                             </div>
                           </div>
@@ -4170,14 +4186,16 @@ const sincronizarAvancePlan = async () => {
                         </DialogDescription>
                       </DialogHeader>
                       <div className="space-y-2">
-                        <Label htmlFor="observacion-descripcion">Descripción</Label>
+                        <Label htmlFor="observacion-descripcion">Descripción <span className="text-[#C8102E]">*</span></Label>
                         <Textarea
                           id="observacion-descripcion"
                           value={observacionDescripcion}
-                          onChange={(event) => setObservacionDescripcion(event.target.value)}
+                          onChange={(event) => { setObservacionDescripcion(event.target.value); setObservacionDescripcionError("") }}
                           placeholder="Describe la incidencia o observación..."
                           rows={5}
+                          className={observacionDescripcionError ? "border-[#C8102E]" : ""}
                         />
+                        {observacionDescripcionError && <p className="text-xs text-[#C8102E]">{observacionDescripcionError}</p>}
                       </div>
                       <div className="grid gap-4 sm:grid-cols-2">
                         <div className="space-y-2">

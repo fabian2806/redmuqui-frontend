@@ -25,3 +25,6 @@ export {
   obtenerActividadReciente,
   obtenerCoberturaTerritorial,
 } from "./reportes.service"
+
+export type { NivelSemaforo, NivelRiesgo } from "./semaforo"
+export { clasificarRiesgo, SEMAFORO } from "./semaforo"

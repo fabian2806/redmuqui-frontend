@@ -476,6 +476,7 @@ export default function DocumentosPage() {
             </div>
           </div>
         )}
+      </div>
 
       <AlertDialog
         open={!!documentoAEliminar}

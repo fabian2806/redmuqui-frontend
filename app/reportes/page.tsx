@@ -43,6 +43,7 @@ import {
   Users,
 } from "lucide-react"
 import { useAuth } from "@/hooks/useAuth"
+import { SemaforoPortafolio } from "@/components/reportes/semaforo-portafolio"
 
 const ESTADO_COLORES = ["bg-blue-500", "bg-green-500", "bg-yellow-500"]
 const ANIO_ACTUAL = String(new Date().getFullYear())
