@@ -3913,7 +3913,7 @@ const sincronizarAvancePlan = async () => {
                       Equipo del Proyecto
                     </h3>
                   </div>
-                  <Dialog open={addMemberOpen} onOpenChange={setAddMemberOpen}>
+                  {/* <Dialog open={addMemberOpen} onOpenChange={setAddMemberOpen}>
                     <DialogTrigger asChild>
                       <button className="flex items-center gap-2 rounded-lg bg-[#FFD600] px-3 py-1.5 text-xs font-bold text-[#1A1A1A] hover:bg-[#C9A42B] transition-colors">
                         <UserPlus className="h-3.5 w-3.5" />
@@ -3993,11 +3993,10 @@ const sincronizarAvancePlan = async () => {
                         </DialogFooter>
                       </form>
                     </DialogContent>
-                  </Dialog>
+                  </Dialog> */}
                 </div>
                 {organigrama && <ProjectResponsibilityTree data={organigrama} />}
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {/* Responsable principal */}
+                {/* <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                   <div className="rounded-lg border-2 border-[#FFD600] bg-[#FFFDE7] p-4">
                     <div className="flex items-center gap-3">
                       <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#FFD600]">
@@ -4009,7 +4008,6 @@ const sincronizarAvancePlan = async () => {
                       </div>
                     </div>
                   </div>
-                  {/* Equipo dinámico */}
                   {equipoVisual.map((miembro) => (
                     <div key={miembro.id} className="group relative rounded-lg border border-[#E0E0E0] p-4 hover:border-[#FFD600] transition-colors">
                       <div className="flex items-center gap-3">
@@ -4041,7 +4039,7 @@ const sincronizarAvancePlan = async () => {
                       </div>
                     </div>
                   ))}
-                </div>
+                </div> */}
                 {equipo.length === 0 && (
                   <p className="mt-4 text-center text-sm text-[#5C5C5C]">No hay miembros en el equipo. Agrega uno.</p>
                 )}
