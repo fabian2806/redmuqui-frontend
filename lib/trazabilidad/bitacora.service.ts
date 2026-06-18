@@ -20,9 +20,12 @@ export async function consultarBitacoraPorEntidad(
   entidadReferenciada: string,
   idEntidadRef: number,
   pagination?: PaginationParams,
+  q?: string,
 ): Promise<Page<BitacoraConsultaDTO>> {
   const entidad = encodeURIComponent(entidadReferenciada)
+  const search = new URLSearchParams(toPageQueryString(pagination).replace(/^\?/, ""))
+  if (q?.trim()) search.set("q", q.trim())
   return api.get<Page<BitacoraConsultaDTO>>(
-    `/bitacora/entidades/${entidad}/${idEntidadRef}${toPageQueryString(pagination)}`,
+    `/bitacora/entidades/${entidad}/${idEntidadRef}?${search.toString()}`,
   )
 }

@@ -11,7 +11,9 @@ import {
   FileText,
   FolderKanban,
   Hash,
+  History,
   MapPin,
+  MessageSquare,
   Pencil,
   Tag,
   User,
@@ -26,6 +28,8 @@ import { useAuth } from "@/hooks/useAuth"
 import type {
   ArchivoResponse,
   DocumentoResponse,
+  DocumentoComentarioResponse,
+  DocumentoVersionResponse,
   EjeTematico,
   EstadoDocumento,
   PageResponse,
@@ -67,6 +71,10 @@ export default function DocumentoDetallePage({
   const [territorios, setTerritorios] = useState<Territorio[]>([])
   const [usuarios, setUsuarios] = useState<UsuarioResponse[]>([])
   const [archivos, setArchivos] = useState<ArchivoResponse[]>([])
+  const [versiones, setVersiones] = useState<DocumentoVersionResponse[]>([])
+  const [comentarios, setComentarios] = useState<DocumentoComentarioResponse[]>([])
+  const [comentario, setComentario] = useState("")
+  const [comentando, setComentando] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [cambiandoEstado, setCambiandoEstado] = useState(false)
@@ -81,10 +89,12 @@ export default function DocumentoDetallePage({
     setError(null)
     try {
       const documento = await api.get<DocumentoResponse>(`/documentos/${id}`)
-      const [ejesData, territoriosData, archivosData] = await Promise.all([
+      const [ejesData, territoriosData, archivosData, versionesData, comentariosData] = await Promise.all([
         api.get<EjeTematico[]>("/ejes-tematicos"),
         api.get<Territorio[]>("/territorios"),
         api.get<ArchivoResponse[]>(`/documentos/${id}/archivos`),
+        api.get<DocumentoVersionResponse[]>(`/documentos/${id}/versiones`),
+        api.get<PageResponse<DocumentoComentarioResponse>>(`/documentos/${id}/comentarios?page=0&size=100&sort=fechaCreacion,desc`),
       ])
       // /usuarios requiere USUARIOS_READ; un TECNICO/CONSULTOR no lo tiene.
       // Best-effort: su 403 no debe romper la vista del documento (los nombres
@@ -107,6 +117,8 @@ export default function DocumentoDetallePage({
       setUsuarios(usuariosData)
       setProyecto(proyectoData)
       setArchivos(archivosData)
+      setVersiones(versionesData)
+      setComentarios(comentariosData.content)
     } catch (err) {
       if (!cancelled.value) {
         if (err instanceof ApiError && err.status === 404) {
@@ -144,7 +156,12 @@ export default function DocumentoDetallePage({
 
       setSuccessMessage({
         title: "Estado actualizado exitosamente",
-        description: `El documento ahora se encuentra en estado "${ESTADO_LABEL[nuevoEstado]}".`,
+        description:
+          doc.tipoVinculo === "ENTREGABLE_FINAL" && nuevoEstado === "PUBLICADO"
+            ? "El entregable fue publicado y la subactividad se completó automáticamente."
+            : doc.tipoVinculo === "ENTREGABLE_FINAL" && nuevoEstado === "EN_REVISION"
+              ? "El entregable volvió a revisión y la subactividad fue reabierta."
+              : `El documento ahora se encuentra en estado "${ESTADO_LABEL[nuevoEstado]}".`,
       })
 
       setSuccessOpen(true)
@@ -179,6 +196,28 @@ export default function DocumentoDetallePage({
       })
 
       setSuccessOpen(true)
+    }
+  }
+
+  async function handleComentar() {
+    const texto = comentario.trim()
+    if (!texto || !doc) return
+    setComentando(true)
+    try {
+      const creado = await api.post<DocumentoComentarioResponse>(
+        `/documentos/${doc.id}/comentarios`,
+        { comentario: texto },
+      )
+      setComentarios((current) => [creado, ...current])
+      setComentario("")
+    } catch (err) {
+      setSuccessMessage({
+        title: "No se pudo registrar el comentario",
+        description: err instanceof Error ? err.message : "Inténtalo nuevamente.",
+      })
+      setSuccessOpen(true)
+    } finally {
+      setComentando(false)
     }
   }
 
@@ -312,6 +351,9 @@ export default function DocumentoDetallePage({
                   <Campo icon={<Hash className="h-4 w-4" />} label="Versión">
                     {doc.version != null ? `v${doc.version}` : "—"}
                   </Campo>
+                  <Campo icon={<User className="h-4 w-4" />} label="Cargado por">
+                    {doc.usuarioCarga || "—"}
+                  </Campo>
                   {doc.enlace && (
                     <div className="md:col-span-2">
                       <p className="mb-1 flex items-center gap-1.5 text-xs font-medium text-[#5C5C5C]">
@@ -362,6 +404,20 @@ export default function DocumentoDetallePage({
                   <Campo icon={<Tag className="h-4 w-4" />} label="Eje temático">
                     {ejeNombre}
                   </Campo>
+                  {doc.tipoVinculo === "ENTREGABLE_FINAL" && doc.idSubactividad != null && (
+                    <Campo icon={<FileText className="h-4 w-4" />} label="Entregable de subactividad">
+                      {doc.idProyecto != null ? (
+                        <Link
+                          href={`/proyectos/${doc.idProyecto}?tab=actividades`}
+                          className="text-[#0277BD] hover:underline"
+                        >
+                          {doc.nombreSubactividad || `Subactividad #${doc.idSubactividad}`}
+                        </Link>
+                      ) : (
+                        doc.nombreSubactividad || `Subactividad #${doc.idSubactividad}`
+                      )}
+                    </Campo>
+                  )}
                 </div>
                 <div>
                   <p className="mb-2 flex items-center gap-1.5 text-xs font-medium text-[#5C5C5C]">
@@ -430,9 +486,12 @@ export default function DocumentoDetallePage({
                             </p>
                             {archivo.extension && (
                               <p className="text-xs text-[#5C5C5C] uppercase">
-                                {archivo.extension}
+                                {archivo.extension} · versión {archivo.numeroVersion}
                               </p>
                             )}
+                            <p className="text-xs text-[#5C5C5C]">
+                              Cargado por {archivo.usuarioCarga || "—"}
+                            </p>
                           </div>
                         </div>
                           <button
@@ -447,6 +506,83 @@ export default function DocumentoDetallePage({
                     ))}
                   </div>
                 )}
+              </div>
+            </section>
+
+            <section id="historial" className="scroll-mt-6 rounded-lg border border-[#E0E0E0] bg-white shadow-sm">
+              <div className="flex items-center gap-2 border-b border-[#E0E0E0] px-6 py-4">
+                <History className="h-4 w-4 text-[#5C5C5C]" />
+                <h2 className="text-sm font-bold uppercase tracking-wide text-[#1A1A1A]">
+                  Historial de cambios
+                </h2>
+              </div>
+              <div className="p-6">
+                {versiones.length === 0 ? (
+                  <p className="text-sm text-[#5C5C5C]">No hay versiones registradas.</p>
+                ) : (
+                  <div className="space-y-3">
+                    {versiones.map((version) => (
+                      <div key={version.id} className="rounded-lg border border-[#E0E0E0] p-4">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <p className="font-semibold text-[#1A1A1A]">Versión {version.numeroVersion}</p>
+                          <span className="text-xs text-[#5C5C5C]">
+                            {new Date(version.fechaCreacion).toLocaleString("es-PE")}
+                          </span>
+                        </div>
+                        <p className="mt-1 text-sm text-[#5C5C5C]">{version.motivoCambio}</p>
+                        <p className="mt-2 text-xs text-[#5C5C5C]">
+                          {version.usuarioCambio} · {ESTADO_LABEL[version.estado]}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </section>
+
+            <section className="rounded-lg border border-[#E0E0E0] bg-white shadow-sm">
+              <div className="flex items-center gap-2 border-b border-[#E0E0E0] px-6 py-4">
+                <MessageSquare className="h-4 w-4 text-[#5C5C5C]" />
+                <h2 className="text-sm font-bold uppercase tracking-wide text-[#1A1A1A]">
+                  Comentarios de revisión
+                </h2>
+              </div>
+              <div className="space-y-4 p-6">
+                {doc.estado === "EN_REVISION" ? (
+                  <div className="space-y-2">
+                    <textarea
+                      rows={3}
+                      maxLength={2000}
+                      value={comentario}
+                      onChange={(event) => setComentario(event.target.value)}
+                      placeholder="Agrega una observación específica sobre este documento..."
+                      className="w-full rounded-lg border border-[#E0E0E0] px-4 py-3 text-sm focus:border-[#FFD600] focus:outline-none"
+                    />
+                    <button
+                      type="button"
+                      disabled={comentando || !comentario.trim()}
+                      onClick={handleComentar}
+                      className="rounded-lg bg-[#FFD600] px-4 py-2 text-sm font-bold disabled:opacity-50"
+                    >
+                      {comentando ? "Guardando..." : "Agregar comentario"}
+                    </button>
+                  </div>
+                ) : (
+                  <p className="rounded-lg bg-[#F7F7F7] p-3 text-sm text-[#5C5C5C]">
+                    Se pueden agregar comentarios únicamente mientras el documento está en revisión.
+                  </p>
+                )}
+                {comentarios.length === 0 ? (
+                  <p className="text-sm text-[#5C5C5C]">No hay comentarios de revisión.</p>
+                ) : comentarios.map((item) => (
+                  <div key={item.id} className="rounded-lg border border-[#E0E0E0] p-4">
+                    <div className="flex justify-between gap-3 text-xs text-[#5C5C5C]">
+                      <strong className="text-[#1A1A1A]">{item.usuario}</strong>
+                      <span>{new Date(item.fechaCreacion).toLocaleString("es-PE")}</span>
+                    </div>
+                    <p className="mt-2 whitespace-pre-wrap text-sm text-[#1A1A1A]">{item.comentario}</p>
+                  </div>
+                ))}
               </div>
             </section>
           </>

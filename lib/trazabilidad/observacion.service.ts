@@ -48,3 +48,22 @@ export async function listarObservacionesPorEntidad(
     `/observaciones${toListadoQueryString(entidadReferenciada, idEntidadReferenciada, pagination)}`,
   )
 }
+
+export async function cambiarEstadoObservacion(
+  id: number,
+  estado: "PENDIENTE" | "RESUELTA",
+): Promise<ObservacionResponseDTO> {
+  return api.patch<ObservacionResponseDTO>(
+    `/observaciones/${id}/estado?estado=${estado}`,
+  )
+}
+
+export async function resolverObservacion(
+  id: number,
+  comentario: string,
+): Promise<ObservacionResponseDTO> {
+  return api.patch<ObservacionResponseDTO>(
+    `/observaciones/${id}/resolver`,
+    { comentario },
+  )
+}

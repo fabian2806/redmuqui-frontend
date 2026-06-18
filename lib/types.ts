@@ -160,11 +160,17 @@ export interface ProyectoResponse {
   descripcion: string | null
   objetivoGeneral: string | null
   fechaInicio: string
-  fechaFinEstimada: string | null
+  fechaFinEstimada: string
   estado: EstadoProyecto
   nivelPrioridad: number | null
   porcentajeAvance: number | null
-  presupuesto: number | null
+  avancePlanificado: number
+  presupuesto: number
+  moneda: string
+  costoEstimado: number
+  costoReal: number
+  porcentajePresupuestoEjecutado: number
+  alertaPresupuesto: "NORMAL" | "PREVENTIVO" | "CRITICO" | "EXCEDIDO"
   nombreMacroregion: string | null
   idMacroregion: number | null
   macroregiones: MacroregionRef[]
@@ -181,10 +187,11 @@ export interface ProyectoCreate {
   descripcion?: string
   objetivoGeneral?: string
   fechaInicio: string
-  fechaFinEstimada?: string
+  fechaFinEstimada: string
   estado?: EstadoProyecto
   nivelPrioridad?: number
-  presupuesto?: number
+  presupuesto: number
+  moneda: string
   idMacroregion?: number
   idMacroregiones?: number[]
   idEjeTematico?: number
@@ -208,23 +215,53 @@ export interface AsociarInstitucionesRequest {
 // ----- Actividad y Subactividad -----
 
 export type EstadoActividad = "PENDIENTE" | "EN_CURSO" | "FINALIZADA" | "COMPLETADA" | "VENCIDA"
+export type EstadoCronograma = "PENDIENTE" | "EN_FECHA" | "ADELANTADO" | "ATRASADO"
+export type EstadoFase = "PENDIENTE" | "EN_CURSO" | "FINALIZADA"
+
+export interface CronogramaReprogramacion {
+  id: number
+  fechaInicioAnterior: string | null
+  fechaFinAnterior: string | null
+  fechaInicioNueva: string | null
+  fechaFinNueva: string | null
+  motivo: string
+  idUsuario: number
+  nombreUsuario: string
+  fechaCreacion: string
+}
 
 export interface SubactividadArchivoResponse {
   id: number
   nombre: string
   url: string
+  estado: "EN_REVISION" | "ACEPTADO" | "RECHAZADO"
+  idUsuarioCarga: number
+  usuarioCarga: string
+}
+
+export interface DocumentoEntregableResponse {
+  id: number
+  titulo: string
+  estado: EstadoDocumento
+  version: number
+  fechaCarga: string
+  usuarioCarga: string | null
 }
 
 export interface SubactividadCreate {
   nombre: string
   idResponsable: number
   presupuesto?: number
+  costoReal?: number
   hombresInvolucrados?: number
   mujeresInvolucradas?: number
-  fechaInicio?: string
-  fechaFin?: string
+  fechaInicioPlanificada: string
+  fechaFinPlanificada: string
+  fechaInicioReal?: string
+  fechaFinReal?: string
   estado?: EstadoActividad
   descripcion?: string
+  motivoReprogramacion?: string
 }
 
 export interface SubactividadCofinanciamientoResponse {
@@ -237,25 +274,48 @@ export interface SubactividadResponse {
   nombre: string
   responsable: string
   presupuesto?: number
+  costoReal?: number
+  moneda: string
+  porcentajeAvance?: number
+  avancePlanificado?: number
   hombresInvolucrados?: number
   mujeresInvolucradas?: number
-  fechaInicio?: string
-  fechaFin?: string
+  fechaInicioPlanificada: string
+  fechaFinPlanificada: string
+  fechaInicioReal?: string | null
+  fechaFinReal?: string | null
+  desfaseDias?: number | null
+  estadoCronograma?: EstadoCronograma
   estado?: EstadoActividad
   descripcion?: string
+  documentosEntregables?: DocumentoEntregableResponse[]
   archivosEvidencia?: SubactividadArchivoResponse[]
   cofinanciadoPor?: SubactividadCofinanciamientoResponse[]
+  reprogramaciones?: CronogramaReprogramacion[]
+  idActividad: number
+  idProyecto: number
 }
 
 export interface ActividadResponse {
   id: number
   nombre: string
   descripcion: string | null
-  fechaInicio: string | null
-  fechaFin: string | null
+  fechaInicioPlanificada: string | null
+  fechaFinPlanificada: string | null
   estado: EstadoActividad
   porcentajeAvance: number | null
+  avancePlanificado: number
+  costoEstimado: number
+  costoReal: number
+  moneda: string
+  fechaInicioReal: string | null
+  fechaFinReal: string | null
+  desfaseDias: number | null
+  estadoCronograma: EstadoCronograma
+  reprogramaciones: CronogramaReprogramacion[]
   idProyecto: number
+  idFase: number
+  nombreFase: string
   idHito: number | null
   nombreHito: string | null
   idResponsables: number[]
@@ -265,15 +325,47 @@ export interface ActividadResponse {
 export interface ActividadCreate {
   nombre: string
   descripcion?: string
-  fechaInicio?: string
-  fechaFin?: string
+  fechaInicioPlanificada: string
+  fechaFinPlanificada: string
   estado?: EstadoActividad
   idProyecto: number
-  idHito: number
+  idFase: number
+  idHito?: number
   idResponsables?: number[]
+  fechaInicioReal?: string
+  fechaFinReal?: string
+  motivoReprogramacion?: string
 }
 
 // ----- Hito -----
+
+export interface FaseResponse {
+  id: number
+  nombre: string
+  descripcion: string | null
+  fechaInicioPlanificada: string
+  fechaFinPlanificada: string
+  fechaInicioReal: string | null
+  fechaFinReal: string | null
+  estado: EstadoFase
+  porcentajeAvance: number
+  desfaseDias: number | null
+  estadoCronograma: EstadoCronograma
+  idProyecto: number
+  totalActividades: number
+  actividadesFinalizadas: number
+  reprogramaciones: CronogramaReprogramacion[]
+}
+
+export interface FaseCreate {
+  nombre: string
+  descripcion?: string | null
+  fechaInicioPlanificada: string
+  fechaFinPlanificada: string
+  fechaInicioReal?: string
+  fechaFinReal?: string
+  motivoReprogramacion?: string
+}
 
 export type EstadoHito = "PENDIENTE" | "EN_CURSO" | "FINALIZADO"
 
@@ -284,12 +376,19 @@ export interface HitoResponse {
   fechaClave: string
   estado: EstadoHito
   idProyecto: number
+  idFase: number
+  nombreFase: string
+  idsActividades: number[]
   porcentajeAvance: number
-  fechaInicio: string | null
-  fechaFin: string | null
+  fechaInicioPlanificada: string | null
+  fechaFinPlanificada: string | null
   duracionDias: number
   totalActividades: number
   actividadesFinalizadas: number
+  fechaCumplimientoReal: string | null
+  desfaseDias: number | null
+  estadoCronograma: EstadoCronograma
+  reprogramaciones: CronogramaReprogramacion[]
   fechaCreacion?: string | null
   fechaModificacion?: string | null
 }
@@ -297,14 +396,19 @@ export interface HitoResponse {
 export interface HitoCreate {
   nombre: string
   descripcion?: string | null
-  fechaClave: string
-  estado: EstadoHito
+  fechaClave?: string
+  estado?: EstadoHito
+  idFase: number
+  idsActividades: number[]
+  fechaCumplimientoReal?: string
+  motivoReprogramacion?: string
 }
 
 // ----- Documento -----
 
 // Alineado con el enum EstadoDocumento del backend (RF-056).
 export type EstadoDocumento = "BORRADOR" | "EN_REVISION" | "PUBLICADO"
+export type TipoVinculoDocumento = "GENERAL" | "ENTREGABLE_FINAL"
 
 // Tipos de documento permitidos al registrar (RF-046).
 // Debe mantenerse IDÉNTICO al Set TIPOS_PERMITIDOS del backend (DocumentoService).
@@ -330,10 +434,16 @@ export interface DocumentoResponse {
   enlace: string | null
   version: number
   idProyecto: number | null
+  idSubactividad: number | null
+  nombreSubactividad: string | null
+  idActividad: number | null
+  tipoVinculo: TipoVinculoDocumento
   idEjeTematico: number | null
   idRespElaboracion: number | null
   idRespValidacion: number | null
   idTerritorios: number[]
+  idUsuarioCarga: number
+  usuarioCarga: string
 }
 
 export interface DocumentoCreate {
@@ -342,6 +452,8 @@ export interface DocumentoCreate {
   descripcion?: string
   estado?: EstadoDocumento
   idProyecto?: number
+  idSubactividad?: number
+  tipoVinculo?: TipoVinculoDocumento
   idEjeTematico?: number
   idRespElaboracion: number
   idRespValidacion?: number
@@ -358,6 +470,8 @@ export interface DocumentoUpdate {
   enlace?: string
   fechaCarga: string
   idProyecto?: number
+  idSubactividad?: number
+  tipoVinculo?: TipoVinculoDocumento
   idEjeTematico?: number
   idRespElaboracion: number
   idRespValidacion?: number
@@ -370,6 +484,61 @@ export interface ArchivoResponse {
   url: string
   extension: string | null
   idDocumento: number | null
+  tipoContenido: string | null
+  descripcion: string | null
+  tamanioBytes: number | null
+  numeroVersion: number
+  idUsuarioCarga: number
+  usuarioCarga: string
+}
+
+export interface DocumentoVersionResponse {
+  id: number
+  numeroVersion: number
+  titulo: string
+  descripcion: string | null
+  tipo: string | null
+  estado: EstadoDocumento
+  motivoCambio: string
+  idUsuarioCambio: number
+  usuarioCambio: string
+  fechaCreacion: string
+}
+
+export interface DocumentoComentarioResponse {
+  id: number
+  comentario: string
+  idUsuario: number
+  usuario: string
+  fechaCreacion: string
+}
+
+export interface OrganigramaProyecto {
+  responsableProyecto: OrganigramaPersona | null
+  fases: OrganigramaFase[]
+}
+
+export interface OrganigramaPersona {
+  idUsuario: number
+  nombre: string
+  rol: string
+}
+
+export interface OrganigramaActividad {
+  idActividad: number
+  nombre: string
+  responsables: OrganigramaPersona[]
+  subactividades: Array<{
+    idSubactividad: number
+    nombre: string
+    responsable: OrganigramaPersona
+  }>
+}
+
+export interface OrganigramaFase {
+  idFase: number
+  nombre: string
+  actividades: OrganigramaActividad[]
 }
 
 // ----- Bitacora -----

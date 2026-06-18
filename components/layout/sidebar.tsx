@@ -22,7 +22,7 @@ const navItems = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
   { href: "/cobertura", label: "Mapa Territorial", icon: MapaIcon, permiso: "REPORTES_READ" },
   { href: "/proyectos", label: "Proyectos", icon: FolderKanban, permiso: "PROYECTOS_READ" },
-  { href: "/documentos", label: "Documentos e Informes", icon: FileText, permiso: "DOCUMENTOS_READ" },
+  { href: "/documentos", label: "Documentos", icon: FileText, permiso: "DOCUMENTOS_READ" },
   { href: "/reportes", label: "Reportes", icon: BarChart3, permiso: "REPORTES_READ" },
   { href: "/usuarios", label: "Usuarios y Permisos", icon: Users, permiso: "USUARIOS_READ" },
   { href: "/configuracion", label: "Configuracion", icon: Settings, permiso: "CATALOGOS_MANAGE" },

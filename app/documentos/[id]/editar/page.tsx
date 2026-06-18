@@ -96,6 +96,7 @@ export default function EditarDocumentoPage({
 
   const [formData, setFormData] = useState<FormState>(emptyFormState)
   const [tituloOriginal, setTituloOriginal] = useState<string>("")
+  const [estadoOriginal, setEstadoOriginal] = useState<EstadoDocumento>("BORRADOR")
   const [proyectos, setProyectos] = useState<ProyectoResponse[]>([])
   const [ejesTematicos, setEjesTematicos] = useState<EjeTematico[]>([])
   const [territorios, setTerritorios] = useState<Territorio[]>([])
@@ -114,6 +115,7 @@ export default function EditarDocumentoPage({
   const [feedbackCards, setFeedbackCards] = useState<FeedbackCard[]>([])
   const [archivosAdjuntos, setArchivosAdjuntos] = useState<File[]>([])
   const [archivosGuardados, setArchivosGuardados] = useState<ArchivoResponse[]>([])
+  const [idSubactividad, setIdSubactividad] = useState<number | null>(null)
 
   const addFeedbackCard = (card: Omit<FeedbackCard, "id">) => {
     const id = Date.now()
@@ -184,6 +186,8 @@ export default function EditarDocumentoPage({
               : "",
         })
         setTituloOriginal(docData.titulo)
+        setEstadoOriginal(docData.estado)
+        setIdSubactividad(docData.idSubactividad)
         setProyectos(proyectosData.content)
         setEjesTematicos(ejesData)
         setTerritorios(territoriosData)
@@ -355,6 +359,10 @@ export default function EditarDocumentoPage({
 
     const idProyecto = toId(formData.idProyecto)
     if (idProyecto !== undefined) payload.idProyecto = idProyecto
+    if (idSubactividad !== null) {
+      payload.idSubactividad = idSubactividad
+      payload.tipoVinculo = "ENTREGABLE_FINAL"
+    }
 
     const idEjeTematico = toId(formData.idEjeTematico)
     if (idEjeTematico !== undefined) payload.idEjeTematico = idEjeTematico
@@ -487,11 +495,28 @@ export default function EditarDocumentoPage({
     ) : null
 
   // Estados disponibles según el permiso del usuario (RF-056)
-  const estadosDisponibles: Array<{ value: EstadoDocumento; label: string }> = [
-    { value: "BORRADOR", label: "Borrador" },
-    { value: "EN_REVISION", label: "En revisión" },
-    ...(puedeValidar ? [{ value: "PUBLICADO" as EstadoDocumento, label: "Publicado" }] : []),
-  ]
+  const estadosDisponibles: Array<{ value: EstadoDocumento; label: string }> =
+    estadoOriginal === "BORRADOR"
+      ? [
+          { value: "BORRADOR", label: "Borrador" },
+          { value: "EN_REVISION", label: "En revisión" },
+        ]
+      : estadoOriginal === "EN_REVISION"
+        ? [
+            { value: "EN_REVISION", label: "En revisión" },
+            ...(puedeValidar
+              ? [
+                  { value: "BORRADOR" as EstadoDocumento, label: "Borrador" },
+                  { value: "PUBLICADO" as EstadoDocumento, label: "Publicado" },
+                ]
+              : []),
+          ]
+        : [
+            { value: "PUBLICADO", label: "Publicado" },
+            ...(puedeValidar
+              ? [{ value: "EN_REVISION" as EstadoDocumento, label: "En revisión" }]
+              : []),
+          ]
 
   return (
     <AppLayout title="Editar Documento">
@@ -790,7 +815,8 @@ export default function EditarDocumentoPage({
                         onChange={(event) =>
                           updateField("idProyecto", event.target.value)
                         }
-                        className="w-full rounded-lg border border-[#E0E0E0] px-4 py-2.5 text-sm text-[#1A1A1A] focus:border-[#FFD600] focus:outline-none focus:ring-1 focus:ring-[#FFD600]"
+                        disabled={idSubactividad !== null}
+                        className="w-full rounded-lg border border-[#E0E0E0] px-4 py-2.5 text-sm text-[#1A1A1A] focus:border-[#FFD600] focus:outline-none focus:ring-1 focus:ring-[#FFD600] disabled:bg-[#F7F7F7] disabled:opacity-80"
                       >
                         <option value="">Sin proyecto asociado</option>
                         {proyectos.map((proyecto) => (

@@ -50,6 +50,7 @@ interface FormState {
   fechaFinEstimada: string
   nivelPrioridad: string
   presupuesto: string
+  moneda: string
 }
 
 const initialFormState: FormState = {
@@ -66,6 +67,7 @@ const initialFormState: FormState = {
   fechaFinEstimada: "",
   nivelPrioridad: "",
   presupuesto: "",
+  moneda: "PEN",
 }
 
 function toOptionalNumber(value: string): number | undefined {
@@ -265,6 +267,9 @@ export default function NuevoProyectoPage() {
       nombre: formData.nombre.trim(),
       codigoInterno: formData.codigoInterno.trim(),
       fechaInicio: formData.fechaInicio,
+      fechaFinEstimada: formData.fechaFinEstimada,
+      presupuesto: Number(formData.presupuesto),
+      moneda: formData.moneda,
     }
 
     if (formData.descripcion.trim()) {
@@ -272,9 +277,6 @@ export default function NuevoProyectoPage() {
     }
     if (formData.objetivoGeneral.trim()) {
       payload.objetivoGeneral = formData.objetivoGeneral.trim()
-    }
-    if (formData.fechaFinEstimada) {
-      payload.fechaFinEstimada = formData.fechaFinEstimada
     }
     if (formData.idMacroregiones.length > 0) {
       payload.idMacroregiones = formData.idMacroregiones.map(Number)
@@ -291,9 +293,6 @@ export default function NuevoProyectoPage() {
 
     const nivelPrioridad = toOptionalNumber(formData.nivelPrioridad)
     if (nivelPrioridad !== undefined) payload.nivelPrioridad = nivelPrioridad
-
-    const presupuesto = toOptionalNumber(formData.presupuesto)
-    if (presupuesto !== undefined) payload.presupuesto = presupuesto
 
     return payload
   }
@@ -317,7 +316,9 @@ export default function NuevoProyectoPage() {
     } else if (!isIsoDate(formData.fechaInicio)) {
       errors.fechaInicio = "La fecha de inicio no tiene un formato válido"
     }
-    if (formData.fechaFinEstimada && !isIsoDate(formData.fechaFinEstimada)) {
+    if (!formData.fechaFinEstimada) {
+      errors.fechaFinEstimada = "La fecha de fin estimada es obligatoria"
+    } else if (!isIsoDate(formData.fechaFinEstimada)) {
       errors.fechaFinEstimada = "La fecha de fin estimada no tiene un formato válido"
     }
     if (
@@ -330,7 +331,9 @@ export default function NuevoProyectoPage() {
       errors.fechaFinEstimada =
         "La fecha de fin estimada no puede ser anterior a la fecha de inicio"
     }
-    if (formData.presupuesto && !Number.isFinite(Number(formData.presupuesto))) {
+    if (!formData.presupuesto) {
+      errors.presupuesto = "El presupuesto es obligatorio"
+    } else if (!Number.isFinite(Number(formData.presupuesto))) {
       errors.presupuesto = "El presupuesto debe ser un número válido"
     } else if (formData.presupuesto && Number(formData.presupuesto) < 0) {
       errors.presupuesto = "El presupuesto no puede ser negativo"
@@ -824,10 +827,11 @@ export default function NuevoProyectoPage() {
                 </div>
                 <div data-field="fechaFinEstimada">
                   <label className="mb-1.5 block text-xs font-medium text-[#5C5C5C]">
-                    Fecha de fin estimada
+                    Fecha de fin estimada <span className="text-[#C8102E]">*</span>
                   </label>
                   <input
                     type="date"
+                    required
                     value={formData.fechaFinEstimada}
                     onChange={(event) => {
                       const newValue = event.target.value
@@ -889,10 +893,11 @@ export default function NuevoProyectoPage() {
                 </div>
                 <div data-field="presupuesto">
                   <label className="mb-1.5 block text-xs font-medium text-[#5C5C5C]">
-                    Presupuesto
+                    Presupuesto <span className="text-[#C8102E]">*</span>
                   </label>
                   <input
                     type="number"
+                    required
                     min="0"
                     step="0.01"
                     value={formData.presupuesto}
@@ -917,6 +922,21 @@ export default function NuevoProyectoPage() {
                   {fieldErrors.presupuesto && (
                     <p className="mt-1 text-xs text-[#C8102E]">{fieldErrors.presupuesto}</p>
                   )}
+                </div>
+                <div data-field="moneda">
+                  <label className="mb-1.5 block text-xs font-medium text-[#5C5C5C]">
+                    Moneda <span className="text-[#C8102E]">*</span>
+                  </label>
+                  <select
+                    required
+                    value={formData.moneda}
+                    onChange={(event) => updateField("moneda", event.target.value)}
+                    className="w-full rounded-lg border border-[#E0E0E0] px-4 py-2.5 text-sm text-[#1A1A1A] focus:border-[#FFD600] focus:outline-none focus:ring-1 focus:ring-[#FFD600]"
+                  >
+                    <option value="PEN">Soles (PEN)</option>
+                    <option value="USD">Dólares (USD)</option>
+                    <option value="EUR">Euros (EUR)</option>
+                  </select>
                 </div>
               </div>
             </div>
