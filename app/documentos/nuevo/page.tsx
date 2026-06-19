@@ -624,7 +624,7 @@ export default function NuevoDocumentoPage() {
                   id="archivosAdjuntos"
                   type="file"
                   multiple
-                  accept=".pdf,.docx,.xlsx*"
+                  accept=".pdf,.docx,.png,.jpeg,.jpg,.xlsx*"
                   onChange={handleArchivosChange}
                   className="hidden"
                 />
