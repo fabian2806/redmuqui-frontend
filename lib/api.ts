@@ -56,6 +56,7 @@ async function rawFetch<T>(
       headers,
       body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
       signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS),
+      cache: "no-store",
     })
   } catch (err) {
     // fetch rechaza por backend caído / sin red / timeout. Lo normalizamos a
@@ -138,6 +139,7 @@ export async function authenticatedJsonRequest<T>(
           ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
         },
         body: formData,
+        cache: "no-store",
       })
     }
 

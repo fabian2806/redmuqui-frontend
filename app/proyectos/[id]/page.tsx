@@ -3645,6 +3645,26 @@ const sincronizarAvancePlan = async () => {
                                       <span>Disponible: {formatProjectCurrency(act.presupuestoDisponible, act.moneda)}</span>
                                       <span>Real: {formatProjectCurrency(act.costoReal, act.moneda)}</span>
                                     </div>
+                                    {(act.cofinanciamientosSalientes ?? []).length > 0 && (
+                                      <div className="space-y-1">
+                                        {(act.cofinanciamientosSalientes ?? []).map(cofin => (
+                                          <div key={`saliente-${act.id}-${cofin.subactividadId}`} className="flex w-fit max-w-full flex-wrap items-center gap-1.5 rounded-md border border-[#90CAF9] bg-[#E3F2FD] px-2 py-1 text-[10px] text-[#1565C0]">
+                                            <DollarSign className="h-3 w-3" />
+                                            <span className="font-semibold">
+                                              {formatProjectCurrency(cofin.monto, act.moneda)}
+                                            </span>
+                                            <span>
+                                              → {cofin.proyectoDestinoNombre} / {cofin.subactividadNombre}
+                                            </span>
+                                            {cofin.justificacion && (
+                                              <span className="text-[#5C5C5C]">
+                                                Motivo: {cofin.justificacion}
+                                              </span>
+                                            )}
+                                          </div>
+                                        ))}
+                                      </div>
+                                    )}
                                     <span className={`text-[11px] font-semibold ${cronogramaTextClass(act.estadoCronograma)}`}>
                                       {cronogramaLabel(act.estadoCronograma, act.desfaseDias)}
                                       {act.fechaFinReal ? ` · fin real ${formatLocalDate(act.fechaFinReal)}` : ""}

@@ -300,6 +300,15 @@ export interface CofinanciamientoDisponibleResponse {
   proyectos: CofinanciamientoProyectoDisponible[]
 }
 
+export interface CofinanciamientoSaliente {
+  subactividadId: number
+  subactividadNombre: string
+  proyectoDestinoId: number
+  proyectoDestinoNombre: string
+  monto: number
+  justificacion: string
+}
+
 export interface SubactividadResponse {
   id: number
   nombre: string
@@ -353,6 +362,7 @@ export interface ActividadResponse {
   nombreHito: string | null
   idResponsables: number[]
   subactividades?: SubactividadResponse[]
+  cofinanciamientosSalientes?: CofinanciamientoSaliente[]
 }
 
 export interface ActividadCreate {
