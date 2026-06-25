@@ -238,7 +238,10 @@ export default function NuevoDocumentoPage() {
       const extensionValida =
         file.name.toLowerCase().endsWith(".pdf") ||
         file.name.toLowerCase().endsWith(".docx") ||
-        file.name.toLowerCase().endsWith(".xlsx")
+        file.name.toLowerCase().endsWith(".xlsx") ||
+        file.name.toLowerCase().endsWith(".png") ||
+        file.name.toLowerCase().endsWith(".jpeg") ||
+        file.name.toLowerCase().endsWith(".jpg")
 
       const tamanioValido = file.size <= MAX_FILE_SIZE
 
@@ -246,14 +249,17 @@ export default function NuevoDocumentoPage() {
     })
 
     if (archivosInvalidos.length > 0) {
-      alert("Solo se permiten archivos PDF, DOCX o XLSX de máximo 20 MB.")
+      alert("Solo se permiten archivos PDF, DOCX, PNG, JPEG o XLSX de máximo 20 MB.")
     }
 
     const archivosValidos = files.filter((file) => {
       const extensionValida =
         file.name.toLowerCase().endsWith(".pdf") ||
         file.name.toLowerCase().endsWith(".docx") ||
-        file.name.toLowerCase().endsWith(".xlsx")
+        file.name.toLowerCase().endsWith(".xlsx") ||
+        file.name.toLowerCase().endsWith(".png") ||
+        file.name.toLowerCase().endsWith(".jpeg") ||
+        file.name.toLowerCase().endsWith(".jpg")
 
       const tamanioValido = file.size <= MAX_FILE_SIZE
 
@@ -618,7 +624,7 @@ export default function NuevoDocumentoPage() {
                   id="archivosAdjuntos"
                   type="file"
                   multiple
-                  accept=".pdf,.docx,.xlsx*"
+                  accept=".pdf,.docx,.png,.jpeg,.jpg,.xlsx*"
                   onChange={handleArchivosChange}
                   className="hidden"
                 />
