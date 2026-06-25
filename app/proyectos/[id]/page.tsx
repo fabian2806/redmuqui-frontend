@@ -568,6 +568,10 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
       setActiveTab(tab as TabType)
     }
   }, [])
+  const proyectoActividadesReturnPath = `/proyectos/${id}?tab=actividades`
+  const proyectoInformesReturnPath = `/proyectos/${id}?tab=informes`
+  const proyectoActividadesReturnParam = encodeURIComponent(proyectoActividadesReturnPath)
+  const proyectoInformesReturnParam = encodeURIComponent(proyectoInformesReturnPath)
   const [equipo, setEquipo] = useState<{ nombre: string; rol: string }[]>(
     () => (mockProyecto?.equipo ?? []).map(nombre => ({ nombre, rol: "Equipo T\u00e9cnico" }))
   )
@@ -3144,7 +3148,7 @@ const sincronizarAvancePlan = async () => {
                                     </p>
                                     {entregableSubactividadEdicion && (
                                       <Link
-                                        href={`/documentos/${entregableSubactividadEdicion.id}`}
+                                        href={`/documentos/${entregableSubactividadEdicion.id}?returnTo=${proyectoActividadesReturnParam}`}
                                         className="mt-2 inline-flex font-semibold underline underline-offset-2"
                                       >
                                         Ver entregable
@@ -3169,7 +3173,7 @@ const sincronizarAvancePlan = async () => {
                                     </p>
                                     <Link
                                       href={entregableSubactividadEdicion
-                                        ? `/documentos/${entregableSubactividadEdicion.id}`
+                                        ? `/documentos/${entregableSubactividadEdicion.id}?returnTo=${proyectoActividadesReturnParam}`
                                         : urlNuevoEntregableSubactividad}
                                       className="mt-2 inline-flex items-center gap-1.5 font-semibold text-[#8A6500] underline underline-offset-2"
                                     >
@@ -3787,7 +3791,7 @@ const sincronizarAvancePlan = async () => {
                                       {(sub.documentosEntregables ?? []).map((documento) => (
                                         <Link
                                           key={documento.id}
-                                          href={`/documentos/${documento.id}`}
+                                          href={`/documentos/${documento.id}?returnTo=${proyectoActividadesReturnParam}`}
                                           className="mt-1 flex w-fit flex-wrap items-center gap-1.5 rounded-md border border-[#E0E0E0] bg-white px-2 py-1 text-[10px] hover:border-[#FFD600]"
                                         >
                                           <FileText className="h-3 w-3 text-[#C9A42B]" />
@@ -3871,7 +3875,7 @@ const sincronizarAvancePlan = async () => {
                                     <div className="flex items-center gap-1">
                                       {(sub.documentosEntregables ?? []).length > 0 ? (
                                         <Link
-                                          href={`/documentos/${sub.documentosEntregables?.[0].id}`}
+                                          href={`/documentos/${sub.documentosEntregables?.[0].id}?returnTo=${proyectoActividadesReturnParam}`}
                                           className="flex h-7 w-7 items-center justify-center rounded-full text-[#0277BD] hover:bg-[#0277BD]/10"
                                           title="Gestionar entregable"
                                         >
@@ -4445,7 +4449,7 @@ const sincronizarAvancePlan = async () => {
                     </h3>
                   </div>
                   <Link
-                    href={`/documentos/nuevo?proyecto=${id}`}
+                    href={`/documentos/nuevo?proyecto=${id}&returnTo=${proyectoInformesReturnParam}`}
                     className="flex items-center gap-2 rounded-lg bg-[#FFD600] px-3 py-1.5 text-xs font-bold text-[#1A1A1A] hover:bg-[#C9A42B]"
                   >
                     <Plus className="h-3.5 w-3.5" />
@@ -4455,7 +4459,7 @@ const sincronizarAvancePlan = async () => {
                 {documentos.length > 0 ? (
                   <div className="space-y-3">
                     {documentos.map(doc => (
-                      <Link href={`/documentos/${doc.id}`} key={doc.id} className="flex items-center gap-4 rounded-lg border border-[#E0E0E0] p-4 hover:bg-[#FFFDE7]">
+                      <Link href={`/documentos/${doc.id}?returnTo=${proyectoInformesReturnParam}`} key={doc.id} className="flex items-center gap-4 rounded-lg border border-[#E0E0E0] p-4 hover:bg-[#FFFDE7]">
                         <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-[#FFD600]/20">
                           <FileText className="h-5 w-5 text-[#C9A42B]" />
                         </div>

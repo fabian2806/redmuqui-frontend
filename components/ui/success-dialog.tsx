@@ -1,6 +1,6 @@
 "use client"
 
-import { CheckCircle2 } from "lucide-react"
+import { ArrowLeft, CheckCircle2 } from "lucide-react"
 import {
   Dialog,
   DialogContent,
@@ -16,6 +16,8 @@ type SuccessDialogProps = {
   title: string
   description: string
   buttonText?: string
+  secondaryButtonText?: string
+  onSecondaryAction?: () => void
   onClose: () => void
 }
 
@@ -24,6 +26,8 @@ export function SuccessDialog({
   title,
   description,
   buttonText = "Aceptar",
+  secondaryButtonText,
+  onSecondaryAction,
   onClose,
 }: SuccessDialogProps) {
   return (
@@ -45,7 +49,18 @@ export function SuccessDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <DialogFooter className="sm:justify-center">
+        <DialogFooter className="gap-2 sm:justify-center">
+          {secondaryButtonText && onSecondaryAction && (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={onSecondaryAction}
+              className="gap-2"
+            >
+              <ArrowLeft className="h-4 w-4" />
+              {secondaryButtonText}
+            </Button>
+          )}
           <Button
             type="button"
             onClick={onClose}

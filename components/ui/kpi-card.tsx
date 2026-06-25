@@ -1,9 +1,10 @@
 import { cn } from "@/lib/utils"
 import { LucideIcon } from "lucide-react"
+import type { ReactNode } from "react"
 
 interface KpiCardProps {
   title: string
-  value: number | string
+  value: ReactNode
   icon: LucideIcon
   variant?: "default" | "warning" | "danger" | "success"
   description?: string
@@ -51,19 +52,19 @@ export function KpiCard({
         className
       )}
     >
-      <div className="flex items-start justify-between">
-        <div className="space-y-1">
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0 flex-1 space-y-1">
           <p className="text-xs font-medium uppercase tracking-wide text-[#5C5C5C]">
             {title}
           </p>
-          <p className={cn("text-3xl font-bold", getValueStyles())}>
+          <div className={cn("min-w-0 text-3xl font-bold", getValueStyles())}>
             {value}
-          </p>
+          </div>
           {description && (
             <p className="text-xs text-[#5C5C5C]">{description}</p>
           )}
         </div>
-        <div className={cn("rounded-lg p-2.5", getIconStyles())}>
+        <div className={cn("shrink-0 rounded-lg p-2.5", getIconStyles())}>
           <Icon className="h-5 w-5" />
         </div>
       </div>

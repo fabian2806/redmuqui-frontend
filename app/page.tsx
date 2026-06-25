@@ -72,6 +72,19 @@ const colorMacroregion = (etiqueta: string, index: number) =>
 const colorEstadoActividad = (etiqueta: string, index: number) =>
   ESTADO_ACTIVIDAD_COLORS[etiqueta] ?? PALETTE[index % PALETTE.length]
 
+const MONEDA_ORDEN = ["PEN", "USD", "EUR"]
+
+const ordenarPresupuestos = <T extends { moneda: string }>(items: T[]) =>
+  [...items].sort((a, b) => {
+    const ia = MONEDA_ORDEN.indexOf(a.moneda)
+    const ib = MONEDA_ORDEN.indexOf(b.moneda)
+    if (ia !== -1 || ib !== -1) {
+      return (ia === -1 ? Number.MAX_SAFE_INTEGER : ia)
+        - (ib === -1 ? Number.MAX_SAFE_INTEGER : ib)
+    }
+    return a.moneda.localeCompare(b.moneda)
+  })
+
 // El backend envía el estado en mayúsculas (enum); StatusBadge espera la
 // etiqueta en español para colorear y rotular.
 const ESTADO_DOC_LABEL: Record<EstadoDocumento, string> = {
@@ -215,15 +228,60 @@ export default function DashboardPage() {
     }
   }, [authLoading])
 
-  const formatCurrency = (value: number) =>
-    new Intl.NumberFormat("es-PE", {
-      style: "currency",
-      currency: "PEN",
-      maximumFractionDigits: 0,
-    }).format(value)
+  const formatCurrencyByCode = (value: number, currency = "PEN") => {
+    try {
+      return new Intl.NumberFormat("es-PE", {
+        style: "currency",
+        currency,
+        maximumFractionDigits: 0,
+      }).format(value)
+    } catch {
+      return `${currency} ${new Intl.NumberFormat("es-PE", {
+        maximumFractionDigits: 0,
+      }).format(value)}`
+    }
+  }
+
+  const presupuestosPorMoneda = ordenarPresupuestos(
+    indicadores?.presupuestosPorMoneda?.length
+      ? indicadores.presupuestosPorMoneda
+      : indicadores
+        ? [{ moneda: "PEN", monto: indicadores.presupuestoTotal, proyectos: indicadores.proyectosActivos }]
+        : [],
+  )
+
+  const presupuestoGestionadoValue = presupuestosPorMoneda.length <= 1
+    ? formatCurrencyByCode(presupuestosPorMoneda[0]?.monto ?? 0, presupuestosPorMoneda[0]?.moneda ?? "PEN")
+    : (
+      <div className="mt-1 w-full space-y-1">
+        {presupuestosPorMoneda.map(item => (
+          <div
+            key={item.moneda}
+            title={formatCurrencyByCode(item.monto, item.moneda)}
+            className="flex w-full items-center justify-between gap-3 rounded-md border border-[#E0E0E0] bg-[#FAFAFA] px-2.5 py-1"
+          >
+            <span className="inline-flex min-w-10 justify-center rounded bg-[#FFF4C2] px-1.5 py-0.5 text-[10px] font-bold text-[#7A6200]">
+              {item.moneda}
+            </span>
+            <span className="min-w-0 truncate text-right text-sm font-bold leading-none text-[#1A1A1A] tabular-nums">
+              {formatCurrencyByCode(item.monto, item.moneda)}
+            </span>
+          </div>
+        ))}
+      </div>
+    )
 
   const formatNumber = (value: number) =>
     new Intl.NumberFormat("es-PE").format(value)
+
+  const actividadesPorEstadoVisibles = actividadesPorEstado.filter(
+    (item) => item.cantidad > 0,
+  )
+  const actividadesPorEstadoLegend = actividadesPorEstado.map((item, index) => ({
+    value: item.etiqueta,
+    type: "circle" as const,
+    color: colorEstadoActividad(item.etiqueta, index),
+  }))
 
   return (
     <AppLayout>
@@ -280,10 +338,14 @@ export default function DashboardPage() {
               />
               <KpiCard
                 title="Presupuesto Gestionado"
-                value={formatCurrency(indicadores.presupuestoTotal)}
+                value={presupuestoGestionadoValue}
                 icon={Wallet}
                 variant="default"
-                description="Proyectos activos"
+                description={
+                  presupuestosPorMoneda.length > 1
+                    ? `${presupuestosPorMoneda.length} monedas · Proyectos activos`
+                    : "Proyectos activos"
+                }
               />
               <KpiCard
                 title="Beneficiarios"
@@ -564,7 +626,7 @@ export default function DashboardPage() {
               </div>
             ) : chartsLoading ? (
               <div className="h-full w-full animate-pulse rounded-lg bg-[#FAFAFA]" />
-            ) : actividadesPorEstado.every((a) => a.cantidad === 0) ? (
+            ) : actividadesPorEstadoVisibles.length === 0 ? (
               <div className="flex h-full items-center justify-center text-sm text-[#5C5C5C]">
                 Sin datos para mostrar
               </div>
@@ -572,7 +634,7 @@ export default function DashboardPage() {
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
                   <Pie
-                    data={actividadesPorEstado}
+                    data={actividadesPorEstadoVisibles}
                     cx="50%"
                     cy="50%"
                     innerRadius={50}
@@ -583,7 +645,7 @@ export default function DashboardPage() {
                     label={({ etiqueta, cantidad }) => `${etiqueta}: ${cantidad}`}
                     labelLine={false}
                   >
-                    {actividadesPorEstado.map((entry, index) => (
+                    {actividadesPorEstadoVisibles.map((entry, index) => (
                       <Cell
                         key={`cell-${entry.etiqueta}`}
                         fill={colorEstadoActividad(entry.etiqueta, index)}
@@ -599,6 +661,7 @@ export default function DashboardPage() {
                     }}
                   />
                   <Legend
+                    payload={actividadesPorEstadoLegend}
                     wrapperStyle={{ fontSize: "12px" }}
                     formatter={(value) => <span className="text-[#5C5C5C]">{value}</span>}
                   />

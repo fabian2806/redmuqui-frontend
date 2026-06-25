@@ -83,6 +83,12 @@ export default function DocumentoDetallePage({
     title: "",
     description: "",
   })
+  const [returnPath, setReturnPath] = useState("/documentos")
+
+  useEffect(() => {
+    const volver = new URLSearchParams(window.location.search).get("returnTo")
+    if (volver?.startsWith("/")) setReturnPath(volver)
+  }, [])
 
   async function cargarDocumento(cancelled: { value: boolean }) {
     setLoading(true)
@@ -230,13 +236,17 @@ export default function DocumentoDetallePage({
     : []
   const respElaboracion = usuarios.find((u) => u.id === doc?.idRespElaboracion)
   const respValidacion = usuarios.find((u) => u.id === doc?.idRespValidacion)
+  const returnLabel = returnPath.startsWith("/proyectos/") ? "Proyecto" : "Documentos"
+  const returnQuery = returnPath !== "/documentos"
+    ? `?returnTo=${encodeURIComponent(returnPath)}`
+    : ""
 
   return (
     <AppLayout title="Detalle de Documento">
       <div className="mx-auto max-w-4xl space-y-6">
         <nav className="flex items-center gap-2 text-sm text-[#5C5C5C]">
-          <Link href="/documentos" className="hover:text-[#1A1A1A]">
-            Documentos
+          <Link href={returnPath} className="hover:text-[#1A1A1A]">
+            {returnLabel}
           </Link>
           <ChevronRight className="h-4 w-4" />
           <span className="max-w-md truncate font-medium text-[#1A1A1A]">
@@ -277,7 +287,7 @@ export default function DocumentoDetallePage({
               <div className="flex flex-wrap items-center gap-2">
                 {puedeEditar && (
                   <Link
-                    href={`/documentos/${doc.id}/editar`}
+                    href={`/documentos/${doc.id}/editar${returnQuery}`}
                     className="flex items-center gap-2 rounded-lg border border-[#E0E0E0] bg-white px-3 py-2 text-sm font-medium text-[#5C5C5C] hover:bg-[#F7F7F7]"
                   >
                     <Pencil className="h-4 w-4" />

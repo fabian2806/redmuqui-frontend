@@ -116,6 +116,12 @@ export default function EditarDocumentoPage({
   const [archivosAdjuntos, setArchivosAdjuntos] = useState<File[]>([])
   const [archivosGuardados, setArchivosGuardados] = useState<ArchivoResponse[]>([])
   const [idSubactividad, setIdSubactividad] = useState<number | null>(null)
+  const [returnPath, setReturnPath] = useState("/documentos")
+
+  useEffect(() => {
+    const volver = new URLSearchParams(window.location.search).get("returnTo")
+    if (volver?.startsWith("/")) setReturnPath(volver)
+  }, [])
 
   const addFeedbackCard = (card: Omit<FeedbackCard, "id">) => {
     const id = Date.now()
@@ -493,6 +499,10 @@ export default function EditarDocumentoPage({
     fieldErrors[field] ? (
       <p className="mt-1 text-xs font-medium text-[#C8102E]">{fieldErrors[field]}</p>
     ) : null
+  const returnLabel = returnPath.startsWith("/proyectos/") ? "Proyecto" : "Documentos"
+  const detailPath = returnPath !== "/documentos"
+    ? `/documentos/${id}?returnTo=${encodeURIComponent(returnPath)}`
+    : `/documentos/${id}`
 
   // Estados disponibles según el permiso del usuario (RF-056)
   const estadosDisponibles: Array<{ value: EstadoDocumento; label: string }> =
@@ -523,12 +533,12 @@ export default function EditarDocumentoPage({
       <div className="mx-auto max-w-4xl space-y-6">
         {/* Breadcrumb */}
         <nav className="flex items-center gap-2 text-sm text-[#5C5C5C]">
-          <Link href="/documentos" className="hover:text-[#1A1A1A]">
-            Documentos
+          <Link href={returnPath} className="hover:text-[#1A1A1A]">
+            {returnLabel}
           </Link>
           <ChevronRight className="h-4 w-4" />
           <Link
-            href={`/documentos/${id}`}
+            href={detailPath}
             className="max-w-xs truncate hover:text-[#1A1A1A]"
           >
             {tituloOriginal || "Documento"}
@@ -946,7 +956,7 @@ export default function EditarDocumentoPage({
 
               <div className="flex items-center justify-end gap-3 pt-4">
                 <Link
-                  href={`/documentos/${id}`}
+                  href={detailPath}
                   className="rounded-lg border border-[#E0E0E0] bg-white px-6 py-2.5 text-sm font-medium text-[#5C5C5C] hover:bg-[#F7F7F7]"
                 >
                   Cancelar
@@ -1005,7 +1015,7 @@ export default function EditarDocumentoPage({
           description={successMessage.description}
           onClose={() => {
             setSuccessOpen(false)
-            router.push(`/documentos/${id}`)
+            router.push(detailPath)
           }}
         />
       </div>

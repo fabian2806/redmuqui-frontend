@@ -13,11 +13,18 @@ export interface Indicadores {
   proyectosActivos: number
   proyectosEnRiesgo: number
   presupuestoTotal: number
+  presupuestosPorMoneda?: PresupuestoPorMoneda[]
   avancePromedio: number
   beneficiariosHombres: number
   beneficiariosMujeres: number
   documentosPublicados: number
   documentosPendientes: number
+}
+
+export interface PresupuestoPorMoneda {
+  moneda: string
+  monto: number
+  proyectos: number
 }
 
 /**

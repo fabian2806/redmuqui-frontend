@@ -47,16 +47,27 @@ import { SemaforoPortafolio } from "@/components/reportes/semaforo-portafolio"
 
 const ESTADO_COLORES = ["bg-blue-500", "bg-green-500", "bg-yellow-500"]
 const ANIO_ACTUAL = String(new Date().getFullYear())
+const MONEDA_ORDEN = ["PEN", "USD", "EUR"]
+
+const ordenarPresupuestos = <T extends { moneda: string }>(items: T[]) =>
+  [...items].sort((a, b) => {
+    const ia = MONEDA_ORDEN.indexOf(a.moneda)
+    const ib = MONEDA_ORDEN.indexOf(b.moneda)
+    if (ia !== -1 || ib !== -1) {
+      return (ia === -1 ? Number.MAX_SAFE_INTEGER : ia)
+        - (ib === -1 ? Number.MAX_SAFE_INTEGER : ib)
+    }
+    return a.moneda.localeCompare(b.moneda)
+  })
 
 function porcentaje(cantidad: number, total: number) {
   return total > 0 ? (cantidad / total) * 100 : 0
 }
 
-function monedaCompacta(valor: number | null, loading: boolean) {
+function monedaCompacta(valor: number | null, loading: boolean, moneda = "PEN") {
   if (loading || valor === null) return "..."
-  if (valor >= 1_000_000) return `S/ ${(valor / 1_000_000).toFixed(1)}M`
-  if (valor >= 1_000) return `S/ ${(valor / 1_000).toFixed(0)}K`
-  return `S/ ${valor.toLocaleString("es-PE")}`
+  const prefijo = moneda === "PEN" ? "S/" : moneda
+  return `${prefijo} ${valor.toLocaleString("es-PE", { maximumFractionDigits: 0 })}`
 }
 
 function numero(valor: number | null, loading: boolean) {
@@ -200,6 +211,13 @@ export default function ReportesPage() {
     ? indicadores.documentosPublicados + indicadores.documentosPendientes
     : null
   const kpiPresupuestoTotal = indicadores?.presupuestoTotal ?? null
+  const kpiPresupuestosPorMoneda = ordenarPresupuestos(
+    indicadores?.presupuestosPorMoneda?.length
+      ? indicadores.presupuestosPorMoneda
+      : indicadores
+        ? [{ moneda: "PEN", monto: indicadores.presupuestoTotal, proyectos: indicadores.proyectosActivos }]
+        : [],
+  )
   const totalProyectosReportados = proyectosPorEstado.reduce((acc, item) => acc + item.cantidad, 0)
   const totalDocumentosReportados = documentosPorTipo.reduce((acc, item) => acc + item.cantidad, 0)
   const totalActividadesReportadas = actividadesPorEstado.reduce((acc, item) => acc + item.cantidad, 0)
@@ -214,7 +232,10 @@ export default function ReportesPage() {
       csvLine(["Documentos registrados", kpiDocumentos ?? ""]),
       csvLine(["Documentos publicados", indicadores?.documentosPublicados ?? ""]),
       csvLine(["Instituciones", totalInstituciones ?? ""]),
-      csvLine(["Presupuesto proyectos activos", indicadores?.presupuestoTotal ?? ""]),
+      csvLine(["Presupuesto proyectos activos", ""]),
+      ...kpiPresupuestosPorMoneda.map((item) =>
+        csvLine([`Presupuesto ${item.moneda}`, item.monto, `${item.proyectos} proyectos`]),
+      ),
       csvLine(["Avance promedio", indicadores?.avancePromedio ?? ""]),
       "",
       csvLine(["Proyectos por estado", "Cantidad"]),
@@ -349,9 +370,28 @@ export default function ReportesPage() {
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-sm font-medium text-muted-foreground">Presupuesto Proyectos Activos</p>
-                    <p className="text-3xl font-bold text-foreground">
-                      {monedaCompacta(kpiPresupuestoTotal, loadingReportes)}
-                    </p>
+                    <div className="mt-1 text-2xl font-bold leading-tight text-foreground">
+                      {kpiPresupuestosPorMoneda.length > 1 ? (
+                        <span className="flex w-full flex-col gap-1">
+                          {kpiPresupuestosPorMoneda.map((item) => (
+                            <span
+                              key={item.moneda}
+                              title={monedaCompacta(item.monto, loadingReportes, item.moneda)}
+                              className="flex w-full items-center justify-between gap-3 rounded-md border border-border bg-muted/40 px-2.5 py-1"
+                            >
+                              <span className="inline-flex min-w-10 justify-center rounded bg-blue-500/10 px-1.5 py-0.5 text-[10px] font-bold text-blue-700">
+                                {item.moneda}
+                              </span>
+                              <span className="min-w-0 truncate text-right text-sm font-bold leading-none text-foreground tabular-nums">
+                                {monedaCompacta(item.monto, loadingReportes, item.moneda)}
+                              </span>
+                            </span>
+                          ))}
+                        </span>
+                      ) : (
+                        monedaCompacta(kpiPresupuestoTotal, loadingReportes, kpiPresupuestosPorMoneda[0]?.moneda ?? "PEN")
+                      )}
+                    </div>
                     <p className="mt-1 text-xs text-muted-foreground">
                       {indicadores ? `${Math.round(indicadores.avancePromedio)}% avance promedio` : "Desde backend"}
                     </p>

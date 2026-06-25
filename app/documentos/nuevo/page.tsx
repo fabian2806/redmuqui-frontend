@@ -900,6 +900,16 @@ export default function NuevoDocumentoPage() {
           open={successOpen}
           title={successMessage.title}
           description={successMessage.description}
+          buttonText={linkedSubactivityId !== null ? "Ver documento" : "Aceptar"}
+          secondaryButtonText={linkedSubactivityId !== null ? "Volver al proyecto" : undefined}
+          onSecondaryAction={
+            linkedSubactivityId !== null
+              ? () => {
+                  setSuccessOpen(false)
+                  router.push(returnPath)
+                }
+              : undefined
+          }
           onClose={() => {
             setSuccessOpen(false)
             router.push(

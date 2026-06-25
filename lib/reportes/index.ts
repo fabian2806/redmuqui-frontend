@@ -6,6 +6,7 @@ export type {
   DocumentoReciente,
   Indicadores,
   MacroregionResumen,
+  PresupuestoPorMoneda,
   ProyectoAvance,
   ProyectoRiesgo,
 } from "./types"
