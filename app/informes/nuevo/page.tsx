@@ -89,7 +89,7 @@ export default function NuevoInformePage() {
       <div className="max-w-4xl mx-auto space-y-6">
         {/* Breadcrumb */}
         <nav className="flex items-center gap-2 text-sm text-[#5C5C5C]">
-          <Link href="/informes" className="hover:text-[#1A1A1A]">Informes y Productos</Link>
+          <Link href="/informes" className="hover:text-[#1A1A1A]">Documentos</Link>
           <ChevronRight className="h-4 w-4" />
           <span className="text-[#1A1A1A] font-medium">Nuevo Documento</span>
         </nav>

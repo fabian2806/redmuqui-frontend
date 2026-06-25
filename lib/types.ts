@@ -266,7 +266,38 @@ export interface SubactividadCreate {
 
 export interface SubactividadCofinanciamientoResponse {
   actividadId: number
+  actividadNombre: string
+  proyectoId: number
+  proyectoNombre: string
   monto: number
+  justificacion: string
+}
+
+export interface SubactividadCofinanciamientoCreate {
+  actividadId: number
+  monto: number
+  justificacion: string
+}
+
+export interface CofinanciamientoActividadDisponible {
+  actividadId: number
+  actividadNombre: string
+  presupuesto: number
+  presupuestoComprometido: number
+  presupuestoDisponible: number
+}
+
+export interface CofinanciamientoProyectoDisponible {
+  proyectoId: number
+  proyectoNombre: string
+  moneda: string
+  actividades: CofinanciamientoActividadDisponible[]
+}
+
+export interface CofinanciamientoDisponibleResponse {
+  moneda: string
+  excludeProyectoId: number | null
+  proyectos: CofinanciamientoProyectoDisponible[]
 }
 
 export interface SubactividadResponse {
@@ -305,6 +336,8 @@ export interface ActividadResponse {
   estado: EstadoActividad
   porcentajeAvance: number | null
   avancePlanificado: number
+  presupuesto: number
+  presupuestoDisponible: number
   costoEstimado: number
   costoReal: number
   moneda: string
@@ -328,6 +361,7 @@ export interface ActividadCreate {
   fechaInicioPlanificada: string
   fechaFinPlanificada: string
   estado?: EstadoActividad
+  presupuesto?: number
   idProyecto: number
   idFase: number
   idHito?: number

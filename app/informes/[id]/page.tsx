@@ -55,7 +55,7 @@ export default function InformeDetailPage({ params }: { params: Promise<{ id: st
       <div className="space-y-6">
         {/* Breadcrumb */}
         <nav className="flex items-center gap-2 text-sm text-[#5C5C5C]">
-          <Link href="/informes" className="hover:text-[#1A1A1A]">Informes</Link>
+          <Link href="/informes" className="hover:text-[#1A1A1A]">Documentos</Link>
           <ChevronRight className="h-4 w-4" />
           <span className="text-[#1A1A1A] font-medium truncate max-w-md">{documento.titulo}</span>
         </nav>

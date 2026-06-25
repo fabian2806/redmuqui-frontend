@@ -58,13 +58,13 @@ export default function InformesPage() {
   const tabs: (TipoDocumento | "Todos")[] = ["Todos", ...tiposDocumento]
 
   return (
-    <AppLayout title="Informes y Productos">
+    <AppLayout title="Documentos">
       <PermissionGuard permiso="DOCUMENTOS_READ">
       <div className="space-y-6">
         {/* Header */}
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold text-[#1A1A1A]">Informes y Productos</h1>
+            <h1 className="text-2xl font-bold text-[#1A1A1A]">Documentos</h1>
             <p className="text-sm text-[#5C5C5C]">
               Repositorio central de documentos institucionales
             </p>

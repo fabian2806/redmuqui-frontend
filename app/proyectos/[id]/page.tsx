@@ -35,7 +35,10 @@ import type {
   ProyectoResponse,
   ActividadResponse,
   EstadoActividad,
+  CofinanciamientoDisponibleResponse,
+  CofinanciamientoActividadDisponible,
   SubactividadCreate,
+  SubactividadCofinanciamientoCreate,
   SubactividadResponse,
   UsuarioResponse,
   PageResponse,
@@ -115,6 +118,11 @@ type HitoForm = Pick<HitoDetalle, "nombre" | "fecha" | "estado" | "descripcion">
   idsActividades: number[]
   motivoReprogramacion: string
 }
+type CofinanciamientoActividadOpcion = CofinanciamientoActividadDisponible & {
+  proyectoId: number
+  proyectoNombre: string
+  moneda: string
+}
 type ProyectoDetalle = Omit<ProyectoMock, "macroregion" | "ejeTematico" | "estado"> & {
   macroregion: string
   macroregiones?: MacroregionRef[]
@@ -170,6 +178,13 @@ function formatDateTime(iso: string | null | undefined): string {
 
 function normalizeSearch(value: string): string {
   return value.trim().toLowerCase()
+}
+
+function normalizeRole(value: string | null | undefined): string {
+  return (value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toUpperCase()
 }
 
 function getAlertaVencimientoActividad(actividad: {
@@ -426,6 +441,66 @@ function formatProjectCurrency(value: number | null | undefined, currency = "PEN
   }).format(value ?? 0)
 }
 
+function calcularDisponibleSubactividad(
+  actividad: ActividadResponse | null | undefined,
+  subactividadActual?: SubactividadResponse | null,
+): number {
+  if (!actividad) return 0
+  const disponibleApi = Number(actividad.presupuestoDisponible)
+  const disponibleBase = Number.isFinite(disponibleApi)
+    ? disponibleApi
+    : Number(actividad.presupuesto ?? actividad.costoEstimado ?? 0)
+      - (actividad.subactividades ?? []).reduce(
+        (total, subactividad) => total + Number(subactividad.presupuesto ?? 0),
+        0,
+      )
+  return Math.max(0, disponibleBase + Number(subactividadActual?.presupuesto ?? 0))
+}
+
+function calcularComprometidoActividad(actividad: ActividadResponse | null | undefined): number {
+  if (!actividad) return 0
+  const presupuesto = Number(actividad.presupuesto ?? actividad.costoEstimado ?? 0)
+  const disponible = Number(actividad.presupuestoDisponible)
+  if (Number.isFinite(disponible)) {
+    return Math.max(0, presupuesto - disponible)
+  }
+  return (actividad.subactividades ?? []).reduce(
+    (total, subactividad) => total + Number(subactividad.presupuesto ?? 0),
+    0,
+  )
+}
+
+function calcularDisponibleActividadEditada(
+  actividad: ActividadResponse | null | undefined,
+  presupuestoPropuesto: string,
+): number {
+  const presupuesto = Number(presupuestoPropuesto || 0)
+  return presupuesto - calcularComprometidoActividad(actividad)
+}
+
+function calcularPresupuestoAsignadoActividades(
+  actividades: ActividadResponse[],
+  excludeActividadId?: number | null,
+): number {
+  return actividades.reduce((total, actividad) => {
+    if (excludeActividadId != null && actividad.id === excludeActividadId) return total
+    return total + Number(actividad.presupuesto ?? actividad.costoEstimado ?? 0)
+  }, 0)
+}
+
+function calcularDisponibleProyectoParaActividad(
+  proyecto: ProyectoResponse | null | undefined,
+  actividades: ActividadResponse[],
+  actividadActual?: ActividadResponse | null,
+): number {
+  const presupuestoProyecto = Number(proyecto?.presupuesto ?? 0)
+  const asignadoOtrasActividades = calcularPresupuestoAsignadoActividades(
+    actividades,
+    actividadActual?.id,
+  )
+  return Math.max(0, presupuestoProyecto - asignadoOtrasActividades)
+}
+
 function budgetAlertStyle(alert: ProyectoResponse["alertaPresupuesto"]) {
   if (alert === "EXCEDIDO") return "border-[#C8102E]/30 bg-[#C8102E]/5 text-[#C8102E]"
   if (alert === "CRITICO") return "border-[#F57C00]/30 bg-[#F57C00]/5 text-[#F57C00]"
@@ -457,11 +532,12 @@ function MockDataTag() {
 export default function ProyectoDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params)
   const { toast } = useToast()
-  const { loading: authLoading, hasPermission } = useAuth()
+  const { loading: authLoading, hasPermission, user } = useAuth()
   const puedeVerProyectos = hasPermission("PROYECTOS_READ")
   const puedeActualizarProyectos = hasPermission("PROYECTOS_UPDATE")
   const puedeVerUsuarios = hasPermission("USUARIOS_READ")
   const puedeVerBitacora = hasPermission("BITACORA_READ")
+  const puedeAdministrarCofinanciamiento = normalizeRole(user?.nombreRol) === "ADMINISTRADOR"
   const mockProyecto = getProyectoById(id)
   const [apiProyecto, setApiProyecto] = useState<ProyectoResponse | null>(null)
   const [apiActividades, setApiActividades] = useState<ActividadResponse[]>([])
@@ -601,6 +677,7 @@ const [organigrama, setOrganigrama] = useState<OrganigramaProyecto | null>(null)
     descripcion: "",
     fechaInicio: "",
     fechaFin: "",
+    presupuesto: "",
     idResponsables: [] as number[],
     idFase: "",
     idHito: "",
@@ -618,6 +695,7 @@ const [organigrama, setOrganigrama] = useState<OrganigramaProyecto | null>(null)
     fechaFin: "",
     fechaFinReal: "",
     motivoReprogramacion: "",
+    presupuesto: "",
     estado: "PENDIENTE" as EstadoActividad,
     idResponsables: [] as number[],
     idFase: "",
@@ -670,6 +748,17 @@ const [organigrama, setOrganigrama] = useState<OrganigramaProyecto | null>(null)
   const [editSubactFieldErrors, setEditSubactFieldErrors] = useState<Record<string, string>>({})
   const [editSubactSuccessModalOpen, setEditSubactSuccessModalOpen] = useState(false)
   const [editSubactResponsableSearch, setEditSubactResponsableSearch] = useState("")
+  const [cofinanciamientoOpen, setCofinanciamientoOpen] = useState(false)
+  const [cofinanciamientoTarget, setCofinanciamientoTarget] = useState<{ sub: SubactividadResponse; actId: number } | null>(null)
+  const [cofinanciamientoDisponibles, setCofinanciamientoDisponibles] = useState<CofinanciamientoDisponibleResponse | null>(null)
+  const [cofinanciamientoLoading, setCofinanciamientoLoading] = useState(false)
+  const [cofinanciamientoSubmitting, setCofinanciamientoSubmitting] = useState(false)
+  const [cofinanciamientoFieldErrors, setCofinanciamientoFieldErrors] = useState<Record<string, string>>({})
+  const [cofinanciamientoForm, setCofinanciamientoForm] = useState({
+    actividadId: "",
+    monto: "",
+    justificacion: "",
+  })
 
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false)
   const [confirmDeleteTarget, setConfirmDeleteTarget] = useState<"actividad" | "hito" | "subactividad" | null>(null)
@@ -775,8 +864,15 @@ const [organigrama, setOrganigrama] = useState<OrganigramaProyecto | null>(null)
     if (!Number.isFinite(pct) || pct < 0 || pct > 100) {
       errors["edit-porcentajeAvance"] = "El porcentaje de avance debe estar entre 0 y 100"
     }
-    if (editFormProyecto.presupuesto && Number(editFormProyecto.presupuesto) < 0) {
+    if (editFormProyecto.presupuesto && !Number.isFinite(Number(editFormProyecto.presupuesto))) {
+      errors["edit-presupuesto"] = "El presupuesto debe ser un numero valido"
+    } else if (editFormProyecto.presupuesto && Number(editFormProyecto.presupuesto) < 0) {
       errors["edit-presupuesto"] = "El presupuesto no puede ser negativo"
+    } else if (
+      editFormProyecto.presupuesto
+      && Number(editFormProyecto.presupuesto) < calcularPresupuestoAsignadoActividades(actividadesApi)
+    ) {
+      errors["edit-presupuesto"] = `El presupuesto no puede ser menor al asignado a actividades (${formatProjectCurrency(calcularPresupuestoAsignadoActividades(actividadesApi), apiProyecto?.moneda ?? "PEN")})`
     }
     return errors
   }
@@ -800,6 +896,15 @@ const [organigrama, setOrganigrama] = useState<OrganigramaProyecto | null>(null)
     }
     if (actForm.fechaInicio && actForm.fechaFin && actForm.fechaFin < actForm.fechaInicio) {
       errors["act-fechaFin"] = "La fecha de fin no puede ser anterior a la fecha de inicio"
+    }
+    if (!actForm.presupuesto) {
+      errors["act-presupuesto"] = "El presupuesto es obligatorio"
+    } else if (!Number.isFinite(Number(actForm.presupuesto))) {
+      errors["act-presupuesto"] = "El presupuesto debe ser un numero valido"
+    } else if (Number(actForm.presupuesto) < 0) {
+      errors["act-presupuesto"] = "El presupuesto no puede ser negativo"
+    } else if (Number(actForm.presupuesto) > calcularDisponibleProyectoParaActividad(apiProyecto, actividadesApi)) {
+      errors["act-presupuesto"] = `El presupuesto supera el disponible del proyecto (${formatProjectCurrency(calcularDisponibleProyectoParaActividad(apiProyecto, actividadesApi), apiProyecto?.moneda ?? "PEN")})`
     }
     const fase = fases.find(item => String(item.id) === actForm.idFase)
     if (fase && actForm.fechaInicio && actForm.fechaInicio < fase.fechaInicioPlanificada) {
@@ -854,6 +959,23 @@ const [organigrama, setOrganigrama] = useState<OrganigramaProyecto | null>(null)
     if (editForm.fechaInicio && editForm.fechaFin && editForm.fechaFin < editForm.fechaInicio) {
       errors["edit-fin"] = "La fecha de fin no puede ser anterior a la fecha de inicio"
     }
+    if (!editForm.presupuesto) {
+      errors["edit-presupuesto"] = "El presupuesto es obligatorio"
+    } else if (!Number.isFinite(Number(editForm.presupuesto))) {
+      errors["edit-presupuesto"] = "El presupuesto debe ser un numero valido"
+    } else if (Number(editForm.presupuesto) < 0) {
+      errors["edit-presupuesto"] = "El presupuesto no puede ser negativo"
+    } else if (
+      Number(editForm.presupuesto)
+      > calcularDisponibleProyectoParaActividad(apiProyecto, actividadesApi, editingActividad)
+    ) {
+      errors["edit-presupuesto"] = `El presupuesto supera el disponible del proyecto (${formatProjectCurrency(calcularDisponibleProyectoParaActividad(apiProyecto, actividadesApi, editingActividad), apiProyecto?.moneda ?? "PEN")})`
+    } else if (
+      editingActividad
+      && Number(editForm.presupuesto) < calcularComprometidoActividad(editingActividad)
+    ) {
+      errors["edit-presupuesto"] = `El presupuesto no puede ser menor al comprometido (${formatProjectCurrency(calcularComprometidoActividad(editingActividad), editingActividad.moneda)})`
+    }
     const fase = fases.find(item => String(item.id) === editForm.idFase)
     if (fase && editForm.fechaInicio && editForm.fechaInicio < fase.fechaInicioPlanificada) {
       errors["edit-inicio"] = "La actividad no puede iniciar antes que su fase"
@@ -898,8 +1020,12 @@ const [organigrama, setOrganigrama] = useState<OrganigramaProyecto | null>(null)
     }
     if (!subactForm.presupuesto) {
       errors["sub-presu"] = "El presupuesto es obligatorio"
+    } else if (!Number.isFinite(Number(subactForm.presupuesto))) {
+      errors["sub-presu"] = "El presupuesto debe ser un numero valido"
     } else if (Number(subactForm.presupuesto) <= 0) {
       errors["sub-presu"] = "El presupuesto debe ser mayor a cero"
+    } else if (Number(subactForm.presupuesto) > calcularDisponibleSubactividad(actividad)) {
+      errors["sub-presu"] = `El presupuesto supera el disponible de la actividad (${formatProjectCurrency(calcularDisponibleSubactividad(actividad), actividad?.moneda ?? apiProyecto?.moneda ?? "PEN")})`
     }
     if (subactForm.hombresInvolucrados && Number(subactForm.hombresInvolucrados) < 0) {
       errors["sub-hombres"] = "El número no puede ser negativo"
@@ -938,8 +1064,12 @@ const [organigrama, setOrganigrama] = useState<OrganigramaProyecto | null>(null)
     }
     if (!editSubactForm.presupuesto) {
       errors["edit-sub-presu"] = "El presupuesto es obligatorio"
+    } else if (!Number.isFinite(Number(editSubactForm.presupuesto))) {
+      errors["edit-sub-presu"] = "El presupuesto debe ser un numero valido"
     } else if (Number(editSubactForm.presupuesto) <= 0) {
       errors["edit-sub-presu"] = "El presupuesto debe ser mayor a cero"
+    } else if (Number(editSubactForm.presupuesto) > calcularDisponibleSubactividad(actividad, editingSubact?.sub)) {
+      errors["edit-sub-presu"] = `El presupuesto supera el disponible de la actividad (${formatProjectCurrency(calcularDisponibleSubactividad(actividad, editingSubact?.sub), actividad?.moneda ?? apiProyecto?.moneda ?? "PEN")})`
     }
     if (editSubactForm.estado === "FINALIZADA" && !editSubactForm.costoReal) {
       errors["edit-sub-costo-real"] = "Registra el costo real para finalizar"
@@ -985,6 +1115,39 @@ const [organigrama, setOrganigrama] = useState<OrganigramaProyecto | null>(null)
     if (editSubactForm.mujeresInvolucradas && Number(editSubactForm.mujeresInvolucradas) < 0) {
       errors["edit-sub-mujeres"] = "El número no puede ser negativo"
     }
+    return errors
+  }
+
+  const obtenerOpcionesCofinanciamiento = (): CofinanciamientoActividadOpcion[] =>
+    (cofinanciamientoDisponibles?.proyectos ?? []).flatMap(proyecto =>
+      proyecto.actividades.map(actividad => ({
+        ...actividad,
+        proyectoId: proyecto.proyectoId,
+        proyectoNombre: proyecto.proyectoNombre,
+        moneda: proyecto.moneda,
+      })),
+    )
+
+  const validarCofinanciamientoForm = (): Record<string, string> => {
+    const errors: Record<string, string> = {}
+    const opciones = obtenerOpcionesCofinanciamiento()
+    const actividadOrigen = opciones.find(opcion => String(opcion.actividadId) === cofinanciamientoForm.actividadId)
+    const monto = Number(cofinanciamientoForm.monto)
+
+    if (!cofinanciamientoForm.actividadId) {
+      errors["cofin-actividad"] = "Selecciona la actividad origen"
+    }
+    if (!cofinanciamientoForm.monto) {
+      errors["cofin-monto"] = "El monto es obligatorio"
+    } else if (!Number.isFinite(monto) || monto <= 0) {
+      errors["cofin-monto"] = "El monto debe ser mayor a cero"
+    } else if (actividadOrigen && monto > actividadOrigen.presupuestoDisponible) {
+      errors["cofin-monto"] = "El monto excede el disponible de la actividad origen"
+    }
+    if (!cofinanciamientoForm.justificacion.trim()) {
+      errors["cofin-justificacion"] = "La justificacion es obligatoria"
+    }
+
     return errors
   }
 
@@ -1198,6 +1361,47 @@ const [organigrama, setOrganigrama] = useState<OrganigramaProyecto | null>(null)
 
     return () => { cancelled = true }
   }, [id, authLoading, puedeVerProyectos, puedeVerUsuarios])
+
+  useEffect(() => {
+    if (!cofinanciamientoOpen || !apiProyecto || !puedeAdministrarCofinanciamiento) return
+
+    let cancelled = false
+    const monedaProyecto = apiProyecto.moneda || "PEN"
+
+    async function cargarDisponibles() {
+      setCofinanciamientoLoading(true)
+      setCofinanciamientoFieldErrors({})
+      try {
+        const moneda = encodeURIComponent(monedaProyecto)
+        const disponibles = await api.get<CofinanciamientoDisponibleResponse>(
+          `/cofinanciamiento/disponibles?moneda=${moneda}&excludeProyectoId=${id}`,
+        )
+        if (!cancelled) {
+          setCofinanciamientoDisponibles(disponibles)
+          const primeraActividad = disponibles.proyectos.flatMap(proyecto => proyecto.actividades)[0]
+          setCofinanciamientoForm(form => ({
+            ...form,
+            actividadId: form.actividadId || (primeraActividad ? String(primeraActividad.actividadId) : ""),
+          }))
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setCofinanciamientoDisponibles(null)
+          setCofinanciamientoFieldErrors({
+            disponibles: getApiErrorMessage(error),
+          })
+        }
+      } finally {
+        if (!cancelled) setCofinanciamientoLoading(false)
+      }
+    }
+
+    cargarDisponibles()
+
+    return () => {
+      cancelled = true
+    }
+  }, [apiProyecto, cofinanciamientoOpen, id, puedeAdministrarCofinanciamiento])
 
 const sincronizarAvancePlan = async () => {
   try {
@@ -1608,6 +1812,99 @@ const sincronizarAvancePlan = async () => {
     setConfirmDeleteInput("")
   }
 
+  const abrirCofinanciamiento = (sub: SubactividadResponse, actId: number) => {
+    setCofinanciamientoTarget({ sub, actId })
+    setCofinanciamientoForm({
+      actividadId: "",
+      monto: "",
+      justificacion: "",
+    })
+    setCofinanciamientoDisponibles(null)
+    setCofinanciamientoFieldErrors({})
+    setCofinanciamientoOpen(true)
+  }
+
+  const guardarCofinanciamiento = async () => {
+    if (!cofinanciamientoTarget) return
+
+    setCofinanciamientoFieldErrors({})
+    const errors = validarCofinanciamientoForm()
+    if (Object.keys(errors).length > 0) {
+      setCofinanciamientoFieldErrors(errors)
+      const firstField = Object.keys(errors)[0]
+      const el = document.querySelector(`[data-field="${firstField}"]`)
+      el?.scrollIntoView({ behavior: "smooth", block: "center" })
+      return
+    }
+
+    setCofinanciamientoSubmitting(true)
+    try {
+      const payload: SubactividadCofinanciamientoCreate = {
+        actividadId: Number(cofinanciamientoForm.actividadId),
+        monto: Number(cofinanciamientoForm.monto),
+        justificacion: cofinanciamientoForm.justificacion.trim(),
+      }
+      const actualizada = await api.post<SubactividadResponse>(
+        `/actividades/${cofinanciamientoTarget.actId}/subactividades/${cofinanciamientoTarget.sub.id}/cofinanciamientos`,
+        payload,
+      )
+      setActividadesApi(prev => prev.map(actividad => actividad.id === cofinanciamientoTarget.actId ? {
+        ...actividad,
+        subactividades: (actividad.subactividades ?? []).map(subactividad =>
+          subactividad.id === actualizada.id ? actualizada : subactividad,
+        ),
+      } : actividad))
+      setCofinanciamientoOpen(false)
+      setCofinanciamientoTarget(null)
+      toast({
+        title: "Cofinanciamiento registrado",
+        description: "La subactividad fue actualizada correctamente.",
+      })
+    } catch (error) {
+      toast({
+        variant: "destructive",
+        title: "No se pudo cofinanciar",
+        description: getApiErrorMessage(error),
+      })
+    } finally {
+      setCofinanciamientoSubmitting(false)
+    }
+  }
+
+  const eliminarCofinanciamiento = async (
+    actId: number,
+    sub: SubactividadResponse,
+    actividadOrigenId: number,
+  ) => {
+    try {
+      await api.delete<void>(
+        `/actividades/${actId}/subactividades/${sub.id}/cofinanciamientos/${actividadOrigenId}`,
+      )
+      setActividadesApi(prev => prev.map(actividad => actividad.id === actId ? {
+        ...actividad,
+        subactividades: (actividad.subactividades ?? []).map(subactividad =>
+          subactividad.id === sub.id
+            ? {
+                ...subactividad,
+                cofinanciadoPor: (subactividad.cofinanciadoPor ?? [])
+                  .filter(cofinanciamiento => cofinanciamiento.actividadId !== actividadOrigenId),
+              }
+            : subactividad,
+        ),
+      } : actividad))
+      toast({
+        title: "Cofinanciamiento eliminado",
+        description: "La relacion fue retirada correctamente.",
+      })
+    } catch (error) {
+      toast({
+        variant: "destructive",
+        title: "No se pudo eliminar",
+        description: getApiErrorMessage(error),
+      })
+    }
+  }
+
   const actividades = useMemo(() =>
     actividadesApi.map(act => ({
       ...act,
@@ -1616,6 +1913,13 @@ const sincronizarAvancePlan = async () => {
         .join(", "),
     })),
     [actividadesApi, usuariosMap]
+  )
+  const cofinanciamientoOpciones = useMemo<CofinanciamientoActividadOpcion[]>(
+    () => obtenerOpcionesCofinanciamiento(),
+    [cofinanciamientoDisponibles],
+  )
+  const actividadOrigenSeleccionada = cofinanciamientoOpciones.find(
+    opcion => String(opcion.actividadId) === cofinanciamientoForm.actividadId,
   )
 
   const actividadesDisponiblesHito = actividadesApi.filter(actividad =>
@@ -1630,8 +1934,23 @@ const sincronizarAvancePlan = async () => {
     .at(-1) ?? ""
   const faseActividadNueva = fases.find(fase => String(fase.id) === actForm.idFase)
   const faseActividadEdicion = fases.find(fase => String(fase.id) === editForm.idFase)
+  const asignadoActividadesProyecto = calcularPresupuestoAsignadoActividades(actividadesApi)
+  const disponibleProyectoNuevaActividad = calcularDisponibleProyectoParaActividad(apiProyecto, actividadesApi)
+  const disponibleProyectoActividadEdicion = calcularDisponibleProyectoParaActividad(
+    apiProyecto,
+    actividadesApi,
+    editingActividad,
+  )
+  const disponibleProyectoEditado = Number(editFormProyecto.presupuesto || 0) - asignadoActividadesProyecto
+  const comprometidoActividadEdicion = calcularComprometidoActividad(editingActividad)
+  const disponibleActividadEdicion = calcularDisponibleActividadEditada(editingActividad, editForm.presupuesto)
   const actividadSubactividadNueva = actividadesApi.find(actividad => actividad.id === targetActividadId)
   const actividadSubactividadEdicion = actividadesApi.find(actividad => actividad.id === editingSubact?.actId)
+  const disponibleSubactividadNueva = calcularDisponibleSubactividad(actividadSubactividadNueva)
+  const disponibleSubactividadEdicion = calcularDisponibleSubactividad(
+    actividadSubactividadEdicion,
+    editingSubact?.sub,
+  )
   const entregableSubactividadEdicion = editingSubact?.sub.documentosEntregables?.[0] ?? null
   const entregableSubactividadPublicado = (editingSubact?.sub.documentosEntregables ?? [])
     .some(documento => documento.estado === "PUBLICADO")
@@ -1838,7 +2157,7 @@ const sincronizarAvancePlan = async () => {
                       <div className="grid gap-2"><Label>Estado <span className="text-[#C8102E]">*</span></Label><Select value={editFormProyecto.estado} onValueChange={v => setEditFormProyecto(f => ({ ...f, estado: v as EstadoProyecto }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{ESTADOS_PROYECTO.map(estado => <SelectItem key={estado.value} value={estado.value}>{estado.label}</SelectItem>)}</SelectContent></Select><div className="min-h-5"></div></div>
                       <div className="grid gap-2"><Label>Prioridad</Label><Select value={editFormProyecto.nivelPrioridad || "sin-prioridad"} onValueChange={v => setEditFormProyecto(f => ({ ...f, nivelPrioridad: v === "sin-prioridad" ? "" : v }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{PRIORIDADES_PROYECTO.map(prioridad => <SelectItem key={prioridad.value || "sin-prioridad"} value={prioridad.value || "sin-prioridad"}>{prioridad.label}</SelectItem>)}</SelectContent></Select><div className="min-h-5"></div></div>
                       <div className="grid gap-2" data-field="edit-porcentajeAvance"><Label>Avance calculado (%)</Label><Input type="number" value={editFormProyecto.porcentajeAvance} disabled /><p className="text-xs text-[#777]">Se calcula según la duración y finalización de hitos y actividades.</p></div>
-                      <div className="grid gap-2" data-field="edit-presupuesto"><Label>Presupuesto <span className="text-[#C8102E]">*</span></Label><Input required type="number" min="0" step="0.01" value={editFormProyecto.presupuesto} onChange={e => { const v = e.target.value; setEditFormProyecto(f => ({ ...f, presupuesto: v })); setEditFieldErrors(p => { const { "edit-presupuesto": _, ...r } = p; if (v && Number(v) < 0) { r["edit-presupuesto"] = "El presupuesto no puede ser negativo" }; return r }) }} className={editFieldErrors["edit-presupuesto"] ? "border-[#C8102E]" : ""} />{editFieldErrors["edit-presupuesto"] && <p className="text-xs text-[#C8102E]">{editFieldErrors["edit-presupuesto"]}</p>}<div className="min-h-5"></div></div>
+                      <div className="grid gap-2" data-field="edit-presupuesto"><Label>Presupuesto <span className="text-[#C8102E]">*</span></Label><Input required type="number" min="0" step="0.01" value={editFormProyecto.presupuesto} onChange={e => { const v = e.target.value; setEditFormProyecto(f => ({ ...f, presupuesto: v })); setEditFieldErrors(p => { const { "edit-presupuesto": _, ...r } = p; if (v && Number(v) < 0) { r["edit-presupuesto"] = "El presupuesto no puede ser negativo" }; return r }) }} className={editFieldErrors["edit-presupuesto"] ? "border-[#C8102E]" : ""} /><div className="grid gap-1 text-xs text-[#5C5C5C]"><span>Asignado a actividades: {formatProjectCurrency(asignadoActividadesProyecto, apiProyecto?.moneda ?? "PEN")}</span><span className={disponibleProyectoEditado < 0 ? "font-semibold text-[#C8102E]" : ""}>Disponible al guardar: {formatProjectCurrency(disponibleProyectoEditado, apiProyecto?.moneda ?? "PEN")}</span></div>{editFieldErrors["edit-presupuesto"] && <p className="text-xs text-[#C8102E]">{editFieldErrors["edit-presupuesto"]}</p>}<div className="min-h-5"></div></div>
                       <div className="grid gap-2"><Label>Moneda <span className="text-[#C8102E]">*</span></Label><Select value={editFormProyecto.moneda} onValueChange={moneda => setEditFormProyecto(form => ({ ...form, moneda }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="PEN">Soles (PEN)</SelectItem><SelectItem value="USD">Dólares (USD)</SelectItem><SelectItem value="EUR">Euros (EUR)</SelectItem></SelectContent></Select><div className="min-h-5"></div></div>
                     </div>
                   </section>
@@ -2145,7 +2464,7 @@ const sincronizarAvancePlan = async () => {
                         <span className="text-xs text-[#5C5C5C]">Sincronizando...</span>
                       )}
                     </div>
-                    <Dialog open={createActividadOpen} onOpenChange={(open) => { setCreateActividadOpen(open); if (open) { setActForm({ nombre: "", descripcion: "", fechaInicio: "", fechaFin: "", idResponsables: [], idFase: fases.length === 1 ? String(fases[0].id) : "", idHito: "", estado: "PENDIENTE" }); setActFieldErrors({}); setActResponsableSearch("") } }}>
+                    <Dialog open={createActividadOpen} onOpenChange={(open) => { setCreateActividadOpen(open); if (open) { setActForm({ nombre: "", descripcion: "", fechaInicio: "", fechaFin: "", presupuesto: "", idResponsables: [], idFase: fases.length === 1 ? String(fases[0].id) : "", idHito: "", estado: "PENDIENTE" }); setActFieldErrors({}); setActResponsableSearch("") } }}>
                       <DialogTrigger asChild>
                         <button className="flex items-center gap-2 rounded-lg bg-[#FFD600] px-3 py-1.5 text-xs font-bold text-[#1A1A1A] hover:bg-[#C9A42B]">
                           <Plus className="h-3.5 w-3.5" />
@@ -2224,6 +2543,35 @@ const sincronizarAvancePlan = async () => {
                               </SelectContent>
                             </Select>
                           </div>
+                          <div className="grid gap-2" data-field="act-presupuesto">
+                            <Label htmlFor="act-presupuesto">Presupuesto ({apiProyecto?.moneda ?? "PEN"}) <span className="text-[#C8102E]">*</span></Label>
+                            <Input
+                              id="act-presupuesto"
+                              type="number"
+                              min="0"
+                              step="0.01"
+                              value={actForm.presupuesto}
+                              onChange={e => {
+                                const v = e.target.value
+                                setActForm(f => ({ ...f, presupuesto: v }))
+                                setActFieldErrors(p => {
+                                  const { "act-presupuesto": _, ...r } = p
+                                  if (v && Number(v) < 0) r["act-presupuesto"] = "El presupuesto no puede ser negativo"
+                                  return r
+                                })
+                              }}
+                              className={actFieldErrors["act-presupuesto"] ? "border-[#C8102E]" : ""}
+                            />
+                            <p className="text-xs text-[#5C5C5C]">
+                              Disponible del proyecto: {formatProjectCurrency(disponibleProyectoNuevaActividad, apiProyecto?.moneda ?? "PEN")}
+                            </p>
+                            {actForm.presupuesto && Number(actForm.presupuesto) > disponibleProyectoNuevaActividad && (
+                              <p className="text-xs text-[#8A6D00]">
+                                Ajusta el presupuesto para no superar el total del proyecto.
+                              </p>
+                            )}
+                            {actFieldErrors["act-presupuesto"] && <p className="text-xs text-[#C8102E]">{actFieldErrors["act-presupuesto"]}</p>}
+                          </div>
                           <div className="grid grid-cols-2 gap-4">
                             <div className="grid gap-2" data-field="act-fechaInicio">
                               <Label htmlFor="act-inicio">Fecha inicio planificada <span className="text-[#C8102E]">*</span></Label>
@@ -2261,13 +2609,14 @@ const sincronizarAvancePlan = async () => {
                                   fechaInicioPlanificada: actForm.fechaInicio,
                                   fechaFinPlanificada: actForm.fechaFin,
                                   estado: actForm.estado as EstadoActividad,
+                                  presupuesto: Number(actForm.presupuesto),
                                   idProyecto: Number(id),
                                   idFase: Number(actForm.idFase),
                                   idResponsables: actForm.idResponsables.length > 0 ? actForm.idResponsables : undefined,
                                 })
                                 setActividadesApi(prev => [...prev, creada])
                                 await sincronizarAvancePlan()
-                                setActForm({ nombre: "", descripcion: "", fechaInicio: "", fechaFin: "", idResponsables: [], idFase: "", idHito: "", estado: "PENDIENTE" })
+                                setActForm({ nombre: "", descripcion: "", fechaInicio: "", fechaFin: "", presupuesto: "", idResponsables: [], idFase: "", idHito: "", estado: "PENDIENTE" })
                                 setCreateActividadOpen(false)
                                 setActSuccessModalOpen(true)
                               } catch (err) {
@@ -2381,6 +2730,45 @@ const sincronizarAvancePlan = async () => {
                             </SelectContent>
                           </Select>
                         </div>
+                        <div className="grid gap-2" data-field="edit-presupuesto">
+                          <Label htmlFor="edit-presupuesto">Presupuesto ({apiProyecto?.moneda ?? "PEN"}) <span className="text-[#C8102E]">*</span></Label>
+                            <Input
+                              id="edit-presupuesto"
+                              type="number"
+                            min="0"
+                            step="0.01"
+                            value={editForm.presupuesto}
+                            onChange={e => {
+                              const v = e.target.value
+                              setEditForm(f => ({ ...f, presupuesto: v }))
+                              setEditActFieldErrors(p => {
+                                const { "edit-presupuesto": _, ...r } = p
+                                if (v && Number(v) < 0) r["edit-presupuesto"] = "El presupuesto no puede ser negativo"
+                                return r
+                              })
+                            }}
+                              className={editActFieldErrors["edit-presupuesto"] ? "border-[#C8102E]" : ""}
+                            />
+                            {editingActividad && (
+                              <div className="grid gap-1 text-xs text-[#5C5C5C]">
+                                <span>
+                                  Disponible del proyecto para esta actividad: {formatProjectCurrency(disponibleProyectoActividadEdicion, editingActividad.moneda)}
+                                </span>
+                                <span>
+                                  Comprometido: {formatProjectCurrency(comprometidoActividadEdicion, editingActividad.moneda)}
+                                </span>
+                                <span className={disponibleActividadEdicion < 0 ? "font-semibold text-[#C8102E]" : ""}>
+                                  Disponible al guardar: {formatProjectCurrency(disponibleActividadEdicion, editingActividad.moneda)}
+                                </span>
+                              </div>
+                            )}
+                            {editingActividad && editForm.presupuesto && Number(editForm.presupuesto) > disponibleProyectoActividadEdicion && (
+                              <p className="text-xs text-[#8A6D00]">
+                                Ajusta el presupuesto para no superar el total del proyecto.
+                              </p>
+                            )}
+                            {editActFieldErrors["edit-presupuesto"] && <p className="text-xs text-[#C8102E]">{editActFieldErrors["edit-presupuesto"]}</p>}
+                          </div>
                         <div className="grid grid-cols-2 gap-4">
                           <div className="grid gap-2" data-field="edit-inicio">
                             <Label htmlFor="edit-inicio">Fecha inicio planificada <span className="text-[#C8102E]">*</span></Label>
@@ -2435,6 +2823,7 @@ const sincronizarAvancePlan = async () => {
                                 fechaFinPlanificada: editForm.fechaFin,
                                 fechaFinReal: editForm.fechaFinReal || undefined,
                                 motivoReprogramacion: editForm.motivoReprogramacion.trim() || undefined,
+                                presupuesto: Number(editForm.presupuesto),
                                 estado: editForm.estado,
                                 idProyecto: editingActividad.idProyecto,
                                 idFase: Number(editForm.idFase),
@@ -2567,6 +2956,14 @@ const sincronizarAvancePlan = async () => {
                             <div className="grid gap-2" data-field="sub-presu">
                               <Label htmlFor="sub-presu">Presupuesto ({apiProyecto?.moneda ?? "PEN"}) <span className="text-[#C8102E]">*</span></Label>
                               <Input id="sub-presu" type="number" min="0" value={subactForm.presupuesto} onChange={e => { const v = e.target.value; setSubactForm(f => ({ ...f, presupuesto: v })); setSubactFieldErrors(p => { const { "sub-presu": _, ...r } = p; if (v && Number(v) < 0) { r["sub-presu"] = "El presupuesto no puede ser negativo" }; return r }) }} className={subactFieldErrors["sub-presu"] ? "border-[#C8102E]" : ""} />
+                              <p className="text-xs text-[#5C5C5C]">
+                                Disponible en actividad: {formatProjectCurrency(disponibleSubactividadNueva, actividadSubactividadNueva?.moneda ?? apiProyecto?.moneda ?? "PEN")}
+                              </p>
+                              {subactForm.presupuesto && Number(subactForm.presupuesto) > disponibleSubactividadNueva && (
+                                <p className="text-xs text-[#8A6D00]">
+                                  Ajusta el presupuesto o guarda dentro del limite y luego registra cofinanciamiento.
+                                </p>
+                              )}
                               {subactFieldErrors["sub-presu"] && <p className="text-xs text-[#C8102E]">{subactFieldErrors["sub-presu"]}</p>}
                             </div>
                             <div className="grid gap-2" data-field="sub-hombres">
@@ -2833,6 +3230,14 @@ const sincronizarAvancePlan = async () => {
                             <div className="grid gap-2" data-field="edit-sub-presu">
                               <Label htmlFor="edit-sub-presu">Presupuesto ({apiProyecto?.moneda ?? "PEN"}) <span className="text-[#C8102E]">*</span></Label>
                               <Input id="edit-sub-presu" type="number" min="0" value={editSubactForm.presupuesto} onChange={e => { const v = e.target.value; setEditSubactForm(f => ({ ...f, presupuesto: v })); setEditSubactFieldErrors(p => { const { "edit-sub-presu": _, ...r } = p; if (v && Number(v) < 0) { r["edit-sub-presu"] = "El presupuesto no puede ser negativo" }; return r }) }} className={editSubactFieldErrors["edit-sub-presu"] ? "border-[#C8102E]" : ""} />
+                              <p className="text-xs text-[#5C5C5C]">
+                                Disponible en actividad: {formatProjectCurrency(disponibleSubactividadEdicion, actividadSubactividadEdicion?.moneda ?? apiProyecto?.moneda ?? "PEN")}
+                              </p>
+                              {editSubactForm.presupuesto && Number(editSubactForm.presupuesto) > disponibleSubactividadEdicion && (
+                                <p className="text-xs text-[#8A6D00]">
+                                  Ajusta el presupuesto o guarda dentro del limite y luego registra cofinanciamiento.
+                                </p>
+                              )}
                               {editSubactFieldErrors["edit-sub-presu"] && <p className="text-xs text-[#C8102E]">{editSubactFieldErrors["edit-sub-presu"]}</p>}
                             </div>
                             <div className="grid gap-2" data-field="edit-sub-costo-real">
@@ -2938,6 +3343,138 @@ const sincronizarAvancePlan = async () => {
                           </Button>
                         </DialogFooter>
                       </form>
+                    </DialogContent>
+                  </Dialog>
+
+                  <Dialog open={cofinanciamientoOpen} onOpenChange={(open) => {
+                    setCofinanciamientoOpen(open)
+                    if (!open) {
+                      setCofinanciamientoTarget(null)
+                      setCofinanciamientoFieldErrors({})
+                    }
+                  }}>
+                    <DialogContent className="overflow-y-auto sm:max-w-xl">
+                      <DialogHeader>
+                        <DialogTitle>Cofinanciar subactividad</DialogTitle>
+                        <DialogDescription>
+                          {cofinanciamientoTarget
+                            ? `Origen desde otro proyecto para ${cofinanciamientoTarget.sub.nombre}.`
+                            : "Selecciona la actividad origen y registra el motivo."}
+                        </DialogDescription>
+                      </DialogHeader>
+                      <div className="grid gap-4 py-6">
+                        {cofinanciamientoFieldErrors.disponibles && (
+                          <div className="rounded-lg border border-[#C8102E]/25 bg-[#C8102E]/5 p-3 text-sm text-[#C8102E]">
+                            {cofinanciamientoFieldErrors.disponibles}
+                          </div>
+                        )}
+                        <div className="grid gap-2" data-field="cofin-actividad">
+                          <Label>Actividad origen <span className="text-[#C8102E]">*</span></Label>
+                          <Select
+                            value={cofinanciamientoForm.actividadId}
+                            disabled={cofinanciamientoLoading || cofinanciamientoOpciones.length === 0}
+                            onValueChange={value => {
+                              setCofinanciamientoForm(form => ({ ...form, actividadId: value }))
+                              setCofinanciamientoFieldErrors(errors => {
+                                const { "cofin-actividad": _, "cofin-monto": __, ...rest } = errors
+                                return rest
+                              })
+                            }}
+                          >
+                            <SelectTrigger className={cofinanciamientoFieldErrors["cofin-actividad"] ? "border-[#C8102E]" : ""}>
+                              <SelectValue placeholder={cofinanciamientoLoading ? "Cargando disponibles..." : "Selecciona una actividad"} />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {cofinanciamientoOpciones.map(opcion => (
+                                <SelectItem key={opcion.actividadId} value={String(opcion.actividadId)}>
+                                  {opcion.proyectoNombre} / {opcion.actividadNombre} - {formatProjectCurrency(opcion.presupuestoDisponible, opcion.moneda)}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          {cofinanciamientoFieldErrors["cofin-actividad"] && <p className="text-xs text-[#C8102E]">{cofinanciamientoFieldErrors["cofin-actividad"]}</p>}
+                          {!cofinanciamientoLoading && cofinanciamientoOpciones.length === 0 && (
+                            <p className="text-xs text-[#8A6D00]">No hay actividades con presupuesto disponible en otros proyectos con la misma moneda.</p>
+                          )}
+                        </div>
+                        {actividadOrigenSeleccionada && (
+                          <div className="grid gap-2 rounded-lg border border-[#E0E0E0] bg-[#FAFAFA] p-3 text-xs text-[#5C5C5C] sm:grid-cols-3">
+                            <div>
+                              <span className="block font-semibold text-[#1A1A1A]">Presupuesto</span>
+                              {formatProjectCurrency(actividadOrigenSeleccionada.presupuesto, actividadOrigenSeleccionada.moneda)}
+                            </div>
+                            <div>
+                              <span className="block font-semibold text-[#1A1A1A]">Comprometido</span>
+                              {formatProjectCurrency(actividadOrigenSeleccionada.presupuestoComprometido, actividadOrigenSeleccionada.moneda)}
+                            </div>
+                            <div>
+                              <span className="block font-semibold text-[#1A1A1A]">Disponible</span>
+                              {formatProjectCurrency(actividadOrigenSeleccionada.presupuestoDisponible, actividadOrigenSeleccionada.moneda)}
+                            </div>
+                          </div>
+                        )}
+                        <div className="grid gap-2" data-field="cofin-monto">
+                          <Label htmlFor="cofin-monto">Monto ({apiProyecto?.moneda ?? "PEN"}) <span className="text-[#C8102E]">*</span></Label>
+                          <Input
+                            id="cofin-monto"
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            max={actividadOrigenSeleccionada?.presupuestoDisponible}
+                            value={cofinanciamientoForm.monto}
+                            onChange={event => {
+                              const value = event.target.value
+                              setCofinanciamientoForm(form => ({ ...form, monto: value }))
+                              setCofinanciamientoFieldErrors(errors => {
+                                const { "cofin-monto": _, ...rest } = errors
+                                if (
+                                  value
+                                  && actividadOrigenSeleccionada
+                                  && Number(value) > actividadOrigenSeleccionada.presupuestoDisponible
+                                ) {
+                                  rest["cofin-monto"] = "El monto excede el disponible de la actividad origen"
+                                }
+                                return rest
+                              })
+                            }}
+                            className={cofinanciamientoFieldErrors["cofin-monto"] ? "border-[#C8102E]" : ""}
+                          />
+                          {cofinanciamientoFieldErrors["cofin-monto"] && <p className="text-xs text-[#C8102E]">{cofinanciamientoFieldErrors["cofin-monto"]}</p>}
+                        </div>
+                        <div className="grid gap-2" data-field="cofin-justificacion">
+                          <Label htmlFor="cofin-justificacion">Justificacion <span className="text-[#C8102E]">*</span></Label>
+                          <Textarea
+                            id="cofin-justificacion"
+                            rows={4}
+                            maxLength={1000}
+                            value={cofinanciamientoForm.justificacion}
+                            onChange={event => {
+                              setCofinanciamientoForm(form => ({ ...form, justificacion: event.target.value }))
+                              setCofinanciamientoFieldErrors(errors => {
+                                const { "cofin-justificacion": _, ...rest } = errors
+                                return rest
+                              })
+                            }}
+                            className={cofinanciamientoFieldErrors["cofin-justificacion"] ? "border-[#C8102E]" : ""}
+                          />
+                          <div className="flex items-center justify-between gap-3">
+                            {cofinanciamientoFieldErrors["cofin-justificacion"] ? (
+                              <p className="text-xs text-[#C8102E]">{cofinanciamientoFieldErrors["cofin-justificacion"]}</p>
+                            ) : <span />}
+                            <span className="text-xs text-[#9CA3AF]">{cofinanciamientoForm.justificacion.length}/1000</span>
+                          </div>
+                        </div>
+                      </div>
+                      <DialogFooter>
+                        <Button variant="outline" onClick={() => setCofinanciamientoOpen(false)}>Cancelar</Button>
+                        <Button
+                          className="bg-[#FFD600] text-[#1A1A1A] hover:bg-[#C9A42B]"
+                          disabled={cofinanciamientoSubmitting || cofinanciamientoLoading || cofinanciamientoOpciones.length === 0}
+                          onClick={guardarCofinanciamiento}
+                        >
+                          {cofinanciamientoSubmitting ? "Guardando..." : "Guardar cofinanciamiento"}
+                        </Button>
+                      </DialogFooter>
                     </DialogContent>
                   </Dialog>
 
@@ -3099,9 +3636,11 @@ const sincronizarAvancePlan = async () => {
                                 <td className="px-3 py-3 text-sm font-medium text-[#1A1A1A]">
                                   <div className="flex flex-col gap-1">
                                     <span>{act.nombre}</span>
-                                    <span className="text-[11px] font-normal text-[#5C5C5C]">
-                                      Costo estimado: {formatProjectCurrency(act.costoEstimado, act.moneda)} · real: {formatProjectCurrency(act.costoReal, act.moneda)}
-                                    </span>
+                                    <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] font-normal text-[#5C5C5C]">
+                                      <span>Asignado: {formatProjectCurrency(act.presupuesto ?? act.costoEstimado, act.moneda)}</span>
+                                      <span>Disponible: {formatProjectCurrency(act.presupuestoDisponible, act.moneda)}</span>
+                                      <span>Real: {formatProjectCurrency(act.costoReal, act.moneda)}</span>
+                                    </div>
                                     <span className={`text-[11px] font-semibold ${cronogramaTextClass(act.estadoCronograma)}`}>
                                       {cronogramaLabel(act.estadoCronograma, act.desfaseDias)}
                                       {act.fechaFinReal ? ` · fin real ${formatLocalDate(act.fechaFinReal)}` : ""}
@@ -3209,6 +3748,7 @@ const sincronizarAvancePlan = async () => {
                                           fechaFin: act.fechaFinPlanificada ?? "",
                                           fechaFinReal: act.fechaFinReal ?? "",
                                           motivoReprogramacion: "",
+                                          presupuesto: act.presupuesto != null ? String(act.presupuesto) : String(act.costoEstimado ?? 0),
                                           estado: act.estado,
                                           idResponsables: [...act.idResponsables],
                                           idFase: String(act.idFase),
@@ -3280,6 +3820,36 @@ const sincronizarAvancePlan = async () => {
                                           </span>
                                         </div>
                                       ))}
+                                      {(sub.cofinanciadoPor ?? []).length > 0 && (
+                                        <div className="mt-1.5 space-y-1">
+                                          {(sub.cofinanciadoPor ?? []).map(cofinanciamiento => (
+                                            <div key={`${sub.id}-${cofinanciamiento.actividadId}`} className="flex w-fit max-w-full flex-wrap items-center gap-1.5 rounded-md border border-[#DDE7D9] bg-[#F4FAF2] px-2 py-1 text-[10px] text-[#2E7D32]">
+                                              <DollarSign className="h-3 w-3" />
+                                              <span className="font-semibold">
+                                                {formatProjectCurrency(cofinanciamiento.monto, sub.moneda)}
+                                              </span>
+                                              <span>
+                                                {cofinanciamiento.proyectoNombre} / {cofinanciamiento.actividadNombre}
+                                              </span>
+                                              {cofinanciamiento.justificacion && (
+                                                <span className="text-[#5C5C5C]">
+                                                  Motivo: {cofinanciamiento.justificacion}
+                                                </span>
+                                              )}
+                                              {puedeAdministrarCofinanciamiento && (
+                                                <button
+                                                  type="button"
+                                                  className="ml-1 inline-flex h-5 w-5 items-center justify-center rounded-full text-[#C8102E] hover:bg-[#C8102E]/10"
+                                                  title="Eliminar cofinanciamiento"
+                                                  onClick={() => eliminarCofinanciamiento(act.id, sub, cofinanciamiento.actividadId)}
+                                                >
+                                                  <Trash2 className="h-3 w-3" />
+                                                </button>
+                                              )}
+                                            </div>
+                                          ))}
+                                        </div>
+                                      )}
                                     </div>
                                   </td>
                                   <td className="px-3 py-2 text-xs text-[#9CA3AF]">—</td>
@@ -3315,6 +3885,15 @@ const sincronizarAvancePlan = async () => {
                                         >
                                           <FileText className="h-3.5 w-3.5" />
                                         </Link>
+                                      )}
+                                      {puedeAdministrarCofinanciamiento && (
+                                        <button
+                                          className="opacity-0 group-hover:opacity-100 transition-opacity flex h-7 w-7 items-center justify-center rounded-full text-[#2E7D32] hover:bg-[#2E7D32]/10"
+                                          title="Cofinanciar subactividad"
+                                          onClick={() => abrirCofinanciamiento(sub, act.id)}
+                                        >
+                                          <DollarSign className="h-3.5 w-3.5" />
+                                        </button>
                                       )}
                                       <button
                                         className="opacity-0 group-hover:opacity-100 transition-opacity flex h-7 w-7 items-center justify-center rounded-full text-[#5C5C5C] hover:bg-[#F7F7F7]"
