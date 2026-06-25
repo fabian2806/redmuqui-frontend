@@ -90,23 +90,6 @@ function normalizeSearch(value: string): string {
   return value.trim().toLowerCase()
 }
 
-function generarSiguienteCodigo(ultimoCodigo: string | null): string {
-  const currentYear = new Date().getFullYear()
-  if (!ultimoCodigo) {
-    return `PRY-${currentYear}-0001`
-  }
-  const match = ultimoCodigo.match(/^PRY-(\d{4})-(\d+)$/i)
-  if (!match) {
-    return `PRY-${currentYear}-0001`
-  }
-  const lastYear = Number.parseInt(match[1], 10)
-  const lastSeq = Number.parseInt(match[2], 10)
-  if (lastYear < currentYear) {
-    return `PRY-${currentYear}-0001`
-  }
-  return `PRY-${currentYear}-${String(lastSeq + 1).padStart(4, "0")}`
-}
-
 function getProyectoFormErrorMessage(error: unknown): string {
   if (error instanceof ApiError) {
     if (error.status === 403) {
@@ -133,7 +116,6 @@ export default function NuevoProyectoPage() {
   const [usuarios, setUsuarios] = useState<UsuarioResponse[]>([])
   const [loadingCatalogos, setLoadingCatalogos] = useState(true)
   const [loadingUsuarios, setLoadingUsuarios] = useState(true)
-  const [loadingCodigo, setLoadingCodigo] = useState(true)
   const [territorioSearch, setTerritorioSearch] = useState("")
   const [institucionSearch, setInstitucionSearch] = useState("")
   const [responsableSearch, setResponsableSearch] = useState("")
@@ -192,28 +174,8 @@ export default function NuevoProyectoPage() {
       }
     }
 
-    async function loadUltimoCodigo() {
-      try {
-        const data = await api.get<{ ultimoCodigo: string }>("/proyectos/ultimo-codigo")
-        if (!cancelled) {
-          const codigo = generarSiguienteCodigo(data.ultimoCodigo || null)
-          setFormData((current) => ({ ...current, codigoInterno: codigo }))
-        }
-      } catch {
-        if (!cancelled) {
-          setFormData((current) => ({
-            ...current,
-            codigoInterno: generarSiguienteCodigo(null),
-          }))
-        }
-      } finally {
-        if (!cancelled) setLoadingCodigo(false)
-      }
-    }
-
     loadCatalogos()
     loadUsuarios()
-    loadUltimoCodigo()
 
     return () => {
       cancelled = true
@@ -301,6 +263,9 @@ export default function NuevoProyectoPage() {
     const errors: Record<string, string> = {}
     if (!formData.nombre.trim()) {
       errors.nombre = "El nombre del proyecto es obligatorio"
+    }
+    if (!formData.codigoInterno.trim()) {
+      errors.codigoInterno = "El código interno es obligatorio"
     }
     if (!formData.idEjeTematico) {
       errors.idEjeTematico = "Selecciona un eje temático"
@@ -481,12 +446,17 @@ export default function NuevoProyectoPage() {
                     type="text"
                     required
                     value={formData.codigoInterno}
-                    className="w-full cursor-not-allowed rounded-lg border border-[#E0E0E0] px-4 py-2.5 text-sm text-[#5C5C5C]"
-                    placeholder="Generando código..."
+                    onChange={(event) => updateField("codigoInterno", event.target.value)}
+                    className={`w-full rounded-lg border px-4 py-2.5 text-sm text-[#1A1A1A] focus:outline-none focus:ring-1 ${
+                      fieldErrors.codigoInterno
+                        ? "border-[#C8102E] focus:border-[#C8102E] focus:ring-[#C8102E]"
+                        : "border-[#E0E0E0] focus:border-[#FFD600] focus:ring-[#FFD600]"
+                    }`}
+                    placeholder="Ej: PRY-2026-0001"
                   />
-                  <p className="mt-1 text-xs text-[#9CA3AF]">
-                    Código autogenerado
-                  </p>
+                  {fieldErrors.codigoInterno && (
+                    <p className="mt-1 text-xs text-[#C8102E]">{fieldErrors.codigoInterno}</p>
+                  )}
                 </div>
                 <div data-field="idEjeTematico">
                   <label className="mb-1.5 block text-xs font-medium text-[#5C5C5C]">
@@ -950,7 +920,7 @@ export default function NuevoProyectoPage() {
             </Link>
             <button
               type="submit"
-              disabled={submitting || loadingCatalogos || loadingCodigo}
+              disabled={submitting || loadingCatalogos}
               className="flex items-center gap-2 rounded-lg bg-[#FFD600] px-6 py-2.5 text-sm font-bold text-[#1A1A1A] hover:bg-[#C9A42B] disabled:cursor-not-allowed disabled:opacity-60"
             >
               {submitting ? <Spinner /> : <Save className="h-4 w-4" />}
