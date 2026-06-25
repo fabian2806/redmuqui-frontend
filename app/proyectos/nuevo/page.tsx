@@ -480,9 +480,8 @@ export default function NuevoProyectoPage() {
                   <input
                     type="text"
                     required
-                    disabled
                     value={formData.codigoInterno}
-                    className="w-full cursor-not-allowed rounded-lg border border-[#E0E0E0] bg-gray-50 px-4 py-2.5 text-sm text-[#5C5C5C] opacity-70"
+                    className="w-full cursor-not-allowed rounded-lg border border-[#E0E0E0] px-4 py-2.5 text-sm text-[#5C5C5C]"
                     placeholder="Generando código..."
                   />
                   <p className="mt-1 text-xs text-[#9CA3AF]">
