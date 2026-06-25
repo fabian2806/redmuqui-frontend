@@ -1,4 +1,3 @@
-"use client"
 
 import { ArrowLeft, CheckCircle2 } from "lucide-react"
 import {
