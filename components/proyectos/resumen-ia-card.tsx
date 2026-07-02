@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import {
   Sparkles,
   Loader2,
@@ -8,9 +8,13 @@ import {
   Check,
   AlertTriangle,
   RefreshCw,
+  Download,
 } from "lucide-react"
 import { generarResumenProyecto, type ResumenIa } from "@/lib/ia"
 import { ApiError } from "@/lib/api"
+import { ResumenGraficos } from "./resumen-graficos"
+import { ReporteExportable } from "./reporte-exportable"
+import { descargarReportePdf, descargarMarkdown, descargarCsv } from "@/lib/ia/exportar"
 
 /**
  * Tarjeta de Resumen Ejecutivo con IA (Sprint 4 ⑤).
@@ -25,6 +29,8 @@ export function ResumenIaCard({ proyectoId }: { proyectoId: string }) {
   const [error, setError] = useState<string | null>(null)
   const [resumen, setResumen] = useState<ResumenIa | null>(null)
   const [copied, setCopied] = useState(false)
+  const [exportando, setExportando] = useState(false)
+  const reporteRef = useRef<HTMLDivElement>(null)
 
   // Persiste el resumen en sessionStorage por proyecto: sobrevive al cambio de
   // pestaña y a recargas dentro de la sesión (se limpia al cerrar la pestaña).
@@ -67,6 +73,19 @@ export function ResumenIaCard({ proyectoId }: { proyectoId: string }) {
       setTimeout(() => setCopied(false), 2000)
     } catch {
       // El portapapeles puede no estar disponible (contexto no seguro); lo ignoramos.
+    }
+  }
+
+  async function exportarPdf() {
+    if (!reporteRef.current || !resumen) return
+    setExportando(true)
+    setError(null)
+    try {
+      await descargarReportePdf(reporteRef.current, resumen)
+    } catch {
+      setError("No se pudo generar el PDF. Inténtalo de nuevo.")
+    } finally {
+      setExportando(false)
     }
   }
 
@@ -129,22 +148,65 @@ export function ResumenIaCard({ proyectoId }: { proyectoId: string }) {
             <p className="rounded-lg bg-[#FFF8E1] px-3 py-2 text-xs text-[#8A6D00]">{resumen.aviso}</p>
           )}
 
+          {resumen.metricas && <ResumenGraficos metricas={resumen.metricas} />}
+
           <p className="whitespace-pre-line text-sm leading-relaxed text-[#1A1A1A]">
             {resumen.resumen}
           </p>
 
-          <button
-            type="button"
-            onClick={copiar}
-            className="inline-flex items-center gap-1.5 text-xs font-medium text-[#5C5C5C] hover:text-[#1A1A1A]"
-          >
-            {copied ? (
-              <Check className="h-3.5 w-3.5 text-green-600" />
-            ) : (
-              <Copy className="h-3.5 w-3.5" />
-            )}
-            {copied ? "Copiado" : "Copiar"}
-          </button>
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2 pt-1">
+            <button
+              type="button"
+              onClick={copiar}
+              className="inline-flex items-center gap-1.5 text-xs font-medium text-[#5C5C5C] hover:text-[#1A1A1A]"
+            >
+              {copied ? (
+                <Check className="h-3.5 w-3.5 text-green-600" />
+              ) : (
+                <Copy className="h-3.5 w-3.5" />
+              )}
+              {copied ? "Copiado" : "Copiar"}
+            </button>
+
+            <div className="flex items-center gap-2 text-xs">
+              <span className="inline-flex items-center gap-1.5 font-medium text-[#5C5C5C]">
+                <Download className="h-3.5 w-3.5" />
+                Descargar:
+              </span>
+              <button
+                type="button"
+                onClick={exportarPdf}
+                disabled={exportando}
+                className="font-medium text-[#5C5C5C] hover:text-[#1A1A1A] disabled:opacity-50"
+              >
+                {exportando ? "Generando PDF…" : "PDF"}
+              </button>
+              <span className="text-[#E0E0E0]">·</span>
+              <button
+                type="button"
+                onClick={() => descargarMarkdown(resumen)}
+                className="font-medium text-[#5C5C5C] hover:text-[#1A1A1A]"
+              >
+                Markdown
+              </button>
+              <span className="text-[#E0E0E0]">·</span>
+              <button
+                type="button"
+                onClick={() => descargarCsv(resumen)}
+                className="font-medium text-[#5C5C5C] hover:text-[#1A1A1A]"
+              >
+                CSV
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {resumen && (
+        <div className="pointer-events-none fixed -left-[10000px] top-0" aria-hidden="true">
+          <div ref={reporteRef}>
+            <ReporteExportable resumen={resumen} />
+          </div>
         </div>
       )}
     </div>
