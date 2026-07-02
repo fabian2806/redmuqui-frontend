@@ -1,5 +1,3 @@
-import { toPng } from "html-to-image"
-import { jsPDF } from "jspdf"
 import type { ResumenIa } from "./types"
 
 /**
@@ -35,6 +33,11 @@ function fecha(iso: string): string {
 
 /** Captura el nodo del reporte como imagen y la vuelca en un PDF A4 (multipágina si hace falta). */
 export async function descargarReportePdf(nodo: HTMLElement, r: ResumenIa): Promise<void> {
+  // Import dinámico: jspdf/html-to-image son solo de navegador. Cargarlos aquí
+  // evita que el SSR resuelva el build de Node de jspdf (fflate/node.cjs → Worker dinámico).
+  const { toPng } = await import("html-to-image")
+  const { jsPDF } = await import("jspdf")
+
   const dataUrl = await toPng(nodo, { pixelRatio: 2, backgroundColor: "#ffffff", cacheBust: true })
 
   const img = new Image()
