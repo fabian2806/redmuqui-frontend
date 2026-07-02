@@ -1,2 +1,2 @@
-export type { ResumenIa } from "./types"
+export type { ResumenIa, MetricasResumen } from "./types"
 export { generarResumenProyecto } from "./resumen.service"
