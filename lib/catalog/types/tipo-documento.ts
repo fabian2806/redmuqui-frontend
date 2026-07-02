@@ -1,22 +1,21 @@
-/**
- * DTOs de `com.redmuqui.platform.ejetematico.dto.*`
- */
-
-export interface EjeTematicoResponseDTO {
+export interface TipoDocumentoResponseDTO {
   id: number
   nombre: string
+  codigo: string
   descripcion: string | null
   activo: boolean
 }
 
-export interface EjeTematicoCreateDTO {
+export interface TipoDocumentoCreateDTO {
   nombre: string
+  codigo: string
   descripcion?: string | null
   activo?: boolean
 }
 
-export interface EjeTematicoUpdateDTO {
+export interface TipoDocumentoUpdateDTO {
   nombre: string
+  codigo: string
   descripcion?: string | null
   activo: boolean
 }

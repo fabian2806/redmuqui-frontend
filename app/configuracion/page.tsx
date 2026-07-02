@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { AppLayout } from "@/components/layout/app-layout"
 import { PermissionGuard } from "@/components/auth/permission-guard"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -9,11 +9,19 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { SuccessDialog } from "@/components/ui/success-dialog"
 import {
   Database,
   FileText,
   Globe,
+  List,
   Save,
   Settings,
   Shield,
@@ -24,6 +32,21 @@ import {
   actualizarConfiguracion,
   type ConfiguracionResponse,
 } from "@/app/configuracion/configuracion"
+import { CatalogoCrud, type CatalogService } from "@/app/configuracion/components/catalogo-crud"
+import {
+  macroregionCatalogService,
+  ejeTematicoCatalogService,
+  institucionCatalogService,
+  estadoService,
+  tipoDocumentoService,
+  monedaService,
+} from "@/lib/catalog"
+import type { EstadoResponseDTO, EstadoCreateDTO, EstadoUpdateDTO, ModuloEstado } from "@/lib/catalog/types/estado"
+import type { TipoDocumentoResponseDTO, TipoDocumentoCreateDTO, TipoDocumentoUpdateDTO } from "@/lib/catalog/types/tipo-documento"
+import type { MonedaResponseDTO, MonedaCreateDTO, MonedaUpdateDTO } from "@/lib/catalog/types/moneda"
+import type { MacroregionResponseDTO, MacroregionCreateDTO, MacroregionUpdateDTO } from "@/lib/catalog/types/macroregion"
+import type { EjeTematicoResponseDTO, EjeTematicoCreateDTO, EjeTematicoUpdateDTO } from "@/lib/catalog/types/eje-tematico"
+import type { InstitucionResponseDTO, InstitucionCreateDTO, InstitucionUpdateDTO } from "@/lib/catalog/types/institucion"
 
 export default function ConfiguracionPage() {
   const [general, setGeneral] = useState({
@@ -161,7 +184,7 @@ export default function ConfiguracionPage() {
           </div>
 
           <Tabs defaultValue="general" className="space-y-6">
-            <TabsList className="grid w-full grid-cols-4 lg:w-[620px]">
+            <TabsList className="grid w-full grid-cols-5 lg:w-[780px]">
               <TabsTrigger value="general" className="flex items-center gap-2">
                 <Settings className="h-4 w-4" />
                 <span className="hidden sm:inline">General</span>
@@ -180,6 +203,11 @@ export default function ConfiguracionPage() {
               <TabsTrigger value="sistema" className="flex items-center gap-2">
                 <Database className="h-4 w-4" />
                 <span className="hidden sm:inline">Sistema</span>
+              </TabsTrigger>
+
+              <TabsTrigger value="catalogos" className="flex items-center gap-2">
+                <List className="h-4 w-4" />
+                <span className="hidden sm:inline">Catálogos</span>
               </TabsTrigger>
             </TabsList>
 
@@ -534,6 +562,123 @@ export default function ConfiguracionPage() {
                 </CardContent>
               </Card>
             </TabsContent>
+
+            <TabsContent value="catalogos" className="space-y-6">
+              <Tabs defaultValue="macroregion" className="space-y-6">
+                <TabsList className="grid w-full grid-cols-3 sm:grid-cols-6">
+                  <TabsTrigger value="macroregion">Macroregión</TabsTrigger>
+                  <TabsTrigger value="eje-tematico">Eje temático</TabsTrigger>
+                  <TabsTrigger value="estado">Estado</TabsTrigger>
+                  <TabsTrigger value="instituciones">Instituciones</TabsTrigger>
+                  <TabsTrigger value="tipo-documento">Tipo documento</TabsTrigger>
+                  <TabsTrigger value="moneda">Moneda</TabsTrigger>
+                </TabsList>
+
+                <TabsContent value="macroregion">
+                  <CatalogoCrud<MacroregionResponseDTO, MacroregionCreateDTO, MacroregionUpdateDTO>
+                    title="Macroregión"
+                    description="Administra las macroregiones geográficas de la plataforma."
+                    service={macroregionCatalogService}
+                    columns={[
+                      { key: "nombre", header: "Nombre" },
+                      { key: "descripcion", header: "Descripción" },
+                      { key: "activo", header: "Activo" },
+                    ]}
+                    fields={[
+                      { name: "nombre", label: "Nombre", type: "text", required: true },
+                      { name: "descripcion", label: "Descripción", type: "textarea" },
+                      { name: "activo", label: "Activo", type: "switch" },
+                    ]}
+                    emptyItem={{ nombre: "", descripcion: "", activo: true }}
+                  />
+                </TabsContent>
+
+                <TabsContent value="eje-tematico">
+                  <CatalogoCrud<EjeTematicoResponseDTO, EjeTematicoCreateDTO, EjeTematicoUpdateDTO>
+                    title="Eje temático"
+                    description="Administra los ejes temáticos de la plataforma."
+                    service={ejeTematicoCatalogService}
+                    columns={[
+                      { key: "nombre", header: "Nombre" },
+                      { key: "descripcion", header: "Descripción" },
+                      { key: "activo", header: "Activo" },
+                    ]}
+                    fields={[
+                      { name: "nombre", label: "Nombre", type: "text", required: true },
+                      { name: "descripcion", label: "Descripción", type: "textarea" },
+                      { name: "activo", label: "Activo", type: "switch" },
+                    ]}
+                    emptyItem={{ nombre: "", descripcion: "", activo: true }}
+                  />
+                </TabsContent>
+
+                <TabsContent value="estado">
+                  <EstadoCrud />
+                </TabsContent>
+
+                <TabsContent value="instituciones">
+                  <CatalogoCrud<InstitucionResponseDTO, InstitucionCreateDTO, InstitucionUpdateDTO>
+                    title="Institución miembro"
+                    description="Administra las instituciones miembro de la plataforma."
+                    service={institucionCatalogService}
+                    columns={[
+                      { key: "nombre", header: "Nombre" },
+                      { key: "descripcion", header: "Descripción" },
+                      { key: "tipo", header: "Tipo" },
+                      { key: "activo", header: "Activo" },
+                    ]}
+                    fields={[
+                      { name: "nombre", label: "Nombre", type: "text", required: true },
+                      { name: "descripcion", label: "Descripción", type: "textarea" },
+                      { name: "tipo", label: "Tipo", type: "text" },
+                      { name: "activo", label: "Activo", type: "switch" },
+                    ]}
+                    emptyItem={{ nombre: "", descripcion: "", tipo: "", activo: true }}
+                  />
+                </TabsContent>
+
+                <TabsContent value="tipo-documento">
+                  <CatalogoCrud<TipoDocumentoResponseDTO, TipoDocumentoCreateDTO, TipoDocumentoUpdateDTO>
+                    title="Tipo de documento"
+                    description="Administra los tipos de documento de la plataforma."
+                    service={tipoDocumentoService}
+                    columns={[
+                      { key: "nombre", header: "Nombre" },
+                      { key: "codigo", header: "Código" },
+                      { key: "activo", header: "Activo" },
+                    ]}
+                    fields={[
+                      { name: "nombre", label: "Nombre", type: "text", required: true },
+                      { name: "codigo", label: "Código", type: "text", required: true },
+                      { name: "descripcion", label: "Descripción", type: "textarea" },
+                      { name: "activo", label: "Activo", type: "switch" },
+                    ]}
+                    emptyItem={{ nombre: "", codigo: "", descripcion: "", activo: true }}
+                  />
+                </TabsContent>
+
+                <TabsContent value="moneda">
+                  <CatalogoCrud<MonedaResponseDTO, MonedaCreateDTO, MonedaUpdateDTO>
+                    title="Moneda"
+                    description="Administra las monedas de la plataforma."
+                    service={monedaService}
+                    columns={[
+                      { key: "nombre", header: "Nombre" },
+                      { key: "codigo", header: "Código" },
+                      { key: "simbolo", header: "Símbolo" },
+                      { key: "activo", header: "Activo" },
+                    ]}
+                    fields={[
+                      { name: "nombre", label: "Nombre", type: "text", required: true },
+                      { name: "codigo", label: "Código", type: "text", required: true },
+                      { name: "simbolo", label: "Símbolo", type: "text", required: true },
+                      { name: "activo", label: "Activo", type: "switch" },
+                    ]}
+                    emptyItem={{ nombre: "", codigo: "", simbolo: "", activo: true }}
+                  />
+                </TabsContent>
+              </Tabs>
+            </TabsContent>
           </Tabs>
         </div>
 
@@ -545,6 +690,79 @@ export default function ConfiguracionPage() {
         />
       </PermissionGuard>
     </AppLayout>
+  )
+}
+
+const MODULOS_ESTADO: { value: ModuloEstado; label: string }[] = [
+  { value: "PROYECTO", label: "Proyecto" },
+  { value: "DOCUMENTO", label: "Documento" },
+  { value: "ACTIVIDAD", label: "Actividad" },
+  { value: "SUBACTIVIDAD", label: "Subactividad" },
+  { value: "OBSERVACION", label: "Observación" },
+  { value: "INCIDENCIA", label: "Incidencia" },
+]
+
+function EstadoCrud() {
+  const [modulo, setModulo] = useState<ModuloEstado>("PROYECTO")
+
+  const service = useMemo<CatalogService<EstadoResponseDTO, EstadoCreateDTO & EstadoUpdateDTO>>(() => ({
+    listarPaginado: (page, size) => estadoService.listarPaginado(modulo, page, size),
+    crear: (body) => estadoService.crear(body),
+    actualizar: (id, body) => estadoService.actualizar(id, body as EstadoUpdateDTO),
+    eliminar: (id) => estadoService.eliminar(id),
+  }), [modulo])
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardContent className="pt-6">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
+            <Label htmlFor="estado-modulo" className="whitespace-nowrap">
+              Módulo
+            </Label>
+            <Select value={modulo} onValueChange={(value) => setModulo(value as ModuloEstado)}>
+              <SelectTrigger id="estado-modulo" className="sm:w-[280px]">
+                <SelectValue placeholder="Selecciona un módulo" />
+              </SelectTrigger>
+              <SelectContent>
+                {MODULOS_ESTADO.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </CardContent>
+      </Card>
+
+      <CatalogoCrud<EstadoResponseDTO, EstadoCreateDTO & EstadoUpdateDTO, EstadoCreateDTO & EstadoUpdateDTO>
+        key={modulo}
+        title="Estado"
+        description={`Administra los estados del módulo ${modulo.toLowerCase()}.`}
+        service={service}
+        columns={[
+          { key: "nombre", header: "Nombre" },
+          { key: "codigo", header: "Código" },
+          { key: "modulo", header: "Módulo" },
+          { key: "activo", header: "Activo" },
+        ]}
+        fields={[
+          { name: "nombre", label: "Nombre", type: "text", required: true },
+          { name: "codigo", label: "Código", type: "text", required: true },
+          { name: "descripcion", label: "Descripción", type: "textarea" },
+          {
+            name: "modulo",
+            label: "Módulo",
+            type: "select",
+            required: true,
+            options: MODULOS_ESTADO,
+          },
+          { name: "activo", label: "Activo", type: "switch" },
+        ]}
+        emptyItem={{ nombre: "", codigo: "", descripcion: "", modulo, activo: true }}
+      />
+    </div>
   )
 }
 

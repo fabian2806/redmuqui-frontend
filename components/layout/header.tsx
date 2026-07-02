@@ -1,6 +1,6 @@
 "use client"
 
-import { Bell, Search, User, ChevronDown, LogOut, UserCircle, Settings } from "lucide-react"
+import { User, ChevronDown, LogOut, UserCircle, Settings } from "lucide-react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useEffect, useRef, useState } from "react"
@@ -12,7 +12,6 @@ interface HeaderProps {
 }
 
 export function Header({ title }: HeaderProps) {
-  const [searchQuery, setSearchQuery] = useState("")
   const [menuOpen, setMenuOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
   const router = useRouter()
@@ -51,26 +50,6 @@ export function Header({ title }: HeaderProps) {
 
       {/* Right section */}
       <div className="flex items-center gap-4">
-        {/* Search */}
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#5C5C5C]" />
-          <input
-            type="text"
-            placeholder="Buscar proyectos, informes..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="h-9 w-64 rounded-lg border border-[#E0E0E0] bg-[#F7F7F7] pl-9 pr-4 text-sm text-[#1A1A1A] placeholder:text-[#5C5C5C] focus:border-[#FFD600] focus:outline-none focus:ring-1 focus:ring-[#FFD600]"
-          />
-        </div>
-
-        {/* Notifications */}
-        <button className="relative flex h-9 w-9 items-center justify-center rounded-lg border border-[#E0E0E0] bg-white text-[#5C5C5C] hover:bg-[#F7F7F7]">
-          <Bell className="h-4 w-4" />
-          <span className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-[#C8102E] text-[10px] font-bold text-white">
-            3
-          </span>
-        </button>
-
         {/* User menu */}
         <div className="relative" ref={menuRef}>
           <button
