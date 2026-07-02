@@ -7,16 +7,19 @@ export interface InstitucionResponseDTO {
   nombre: string
   descripcion: string | null
   tipo: string | null
+  activo: boolean
 }
 
 export interface InstitucionCreateDTO {
   nombre: string
   descripcion?: string | null
   tipo?: string | null
+  activo?: boolean
 }
 
 export interface InstitucionUpdateDTO {
   nombre: string
   descripcion?: string | null
   tipo?: string | null
+  activo: boolean
 }

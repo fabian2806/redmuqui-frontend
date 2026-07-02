@@ -1,4 +1,5 @@
 import { ApiError, authenticatedJsonRequest } from "../api"
+import type { PageResponse } from "../types"
 
 function rethrowWithCatalogContext(operation: string, error: unknown): never {
   if (error instanceof ApiError) {
@@ -31,6 +32,19 @@ export class BaseCatalogService<TResponse, TCreate, TUpdate> {
       })
     } catch (err) {
       return rethrowWithCatalogContext("listar", err)
+    }
+  }
+
+  async listarPaginado(page = 0, size = 10): Promise<PageResponse<TResponse>> {
+    try {
+      return await authenticatedJsonRequest<PageResponse<TResponse>>(
+        `${this.resourcePath}/page?page=${page}&size=${size}`,
+        {
+          method: "GET",
+        },
+      )
+    } catch (err) {
+      return rethrowWithCatalogContext("listarPaginado", err)
     }
   }
 

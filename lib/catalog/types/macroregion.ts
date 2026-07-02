@@ -7,14 +7,17 @@ export interface MacroregionResponseDTO {
   id: number
   nombre: string
   descripcion: string | null
+  activo: boolean
 }
 
 export interface MacroregionCreateDTO {
   nombre: string
   descripcion?: string | null
+  activo?: boolean
 }
 
 export interface MacroregionUpdateDTO {
   nombre: string
   descripcion?: string | null
+  activo: boolean
 }

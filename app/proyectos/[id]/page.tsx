@@ -8,6 +8,7 @@ import { StatusBadge, MacroregionBadge, TypeBadge } from "@/components/ui/status
 import { ProgressBar } from "@/components/ui/progress-bar"
 import { ProjectGantt } from "@/components/projects/project-gantt"
 import { ResumenIaCard } from "@/components/proyectos/resumen-ia-card"
+import { descargarFichaProyectoPdf } from "@/lib/proyectos/exportar"
 import { ProjectResponsibilityTree } from "@/components/projects/project-responsibility-tree"
 import {
   getProyectoById,
@@ -59,7 +60,6 @@ import {
   ChevronDown,
   Pencil,
   Download,
-  Archive,
   Calendar,
   Save,
   User,
@@ -548,6 +548,7 @@ export default function ProyectoDetailPage({ params }: { params: Promise<{ id: s
   const [institucionesCatalogo, setInstitucionesCatalogo] = useState<Institucion[]>([])
   const [apiLoading, setApiLoading] = useState(true)
   const [apiError, setApiError] = useState<string | null>(null)
+  const [exportandoPdf, setExportandoPdf] = useState(false)
   const proyecto = useMemo(
     () => combinarProyecto(mockProyecto, apiProyecto),
     [mockProyecto, apiProyecto],
@@ -1153,6 +1154,38 @@ const [organigrama, setOrganigrama] = useState<OrganigramaProyecto | null>(null)
     }
 
     return errors
+  }
+
+  const handleExportarPdf = async () => {
+    if (!apiProyecto) return
+    setExportandoPdf(true)
+    try {
+      await descargarFichaProyectoPdf({
+        proyecto: apiProyecto,
+        actividades: actividadesApi,
+        hitos: hitosState.map(h => ({
+          id: h.id,
+          nombre: h.nombre,
+          estado: h.estado,
+          fecha: h.fecha,
+          nombreFase: h.nombreFase,
+          porcentajeAvance: h.porcentajeAvance,
+        })),
+        fases,
+        documentos: documentosProyecto,
+        equipo,
+        nombreArchivo: `${apiProyecto.codigoInterno || apiProyecto.id}-ficha`,
+      })
+    } catch (error) {
+      console.error("Error exportando PDF:", error)
+      toast({
+        title: "Error al exportar",
+        description: "No se pudo generar el PDF. Inténtalo de nuevo.",
+        variant: "destructive",
+      })
+    } finally {
+      setExportandoPdf(false)
+    }
   }
 
   const guardarEdicionProyecto = async () => {
@@ -2273,13 +2306,13 @@ const sincronizarAvancePlan = async () => {
             </>
             )}
 
-            <button className="flex items-center gap-2 rounded-lg border border-[#E0E0E0] bg-white px-4 py-2 text-sm font-medium text-[#5C5C5C] hover:bg-[#F7F7F7]">
+            <button
+              onClick={handleExportarPdf}
+              disabled={exportandoPdf || !apiProyecto}
+              className="flex items-center gap-2 rounded-lg border border-[#E0E0E0] bg-white px-4 py-2 text-sm font-medium text-[#5C5C5C] hover:bg-[#F7F7F7] disabled:opacity-60 disabled:cursor-not-allowed"
+            >
               <Download className="h-4 w-4" />
-              Exportar
-            </button>
-            <button className="flex items-center gap-2 rounded-lg border border-[#E0E0E0] bg-white px-4 py-2 text-sm font-medium text-[#5C5C5C] hover:bg-[#F7F7F7]">
-              <Archive className="h-4 w-4" />
-              Archivar
+              {exportandoPdf ? "Generando..." : "Exportar"}
             </button>
           </div>
         </div>
@@ -5129,6 +5162,7 @@ const sincronizarAvancePlan = async () => {
         </div>
       </div>
     </div>
+
       </PermissionGuard>
     </AppLayout >
   )

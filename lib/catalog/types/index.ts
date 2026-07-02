@@ -19,3 +19,19 @@ export type {
   TerritorioResponseDTO,
   TerritorioUpdateDTO,
 } from "./territorio"
+export type {
+  EstadoCreateDTO,
+  EstadoResponseDTO,
+  EstadoUpdateDTO,
+  ModuloEstado,
+} from "./estado"
+export type {
+  TipoDocumentoCreateDTO,
+  TipoDocumentoResponseDTO,
+  TipoDocumentoUpdateDTO,
+} from "./tipo-documento"
+export type {
+  MonedaCreateDTO,
+  MonedaResponseDTO,
+  MonedaUpdateDTO,
+} from "./moneda"
